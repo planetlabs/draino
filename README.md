@@ -16,7 +16,7 @@ Flags:
       --dry-run                Emit an event without cordoning or draining matching nodes.
       --max-grace-period=8m0s  The maximum time evicted pods will be given to terminate gracefully.
       --eviction-headroom=30s  The additional time to wait after a pod's termination grace period for it to have been deleted.
-      --node-label=KEY=VALUE ...  
+      --node-label=KEY=VALUE ...
                                Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
 
 Args:
