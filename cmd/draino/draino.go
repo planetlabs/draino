@@ -89,8 +89,8 @@ func main() {
 	}
 	r := kubernetes.NewEventRecorder(cs)
 	h := kubernetes.NewDrainingResourceEventHandler(d, r, kubernetes.WithLogger(log))
-	lf := cache.FilteringResourceEventHandler{kubernetes.NewNodeLabelFilter(*nodeLabels), h}
-	cf := cache.FilteringResourceEventHandler{kubernetes.NewNodeConditionFilter(*conditions), lf}
+	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: h}
+	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: lf}
 	nodes := kubernetes.NewNodeWatch(cs, cf)
 
 	kingpin.FatalIfError(await(nodes, web), "error serving")
