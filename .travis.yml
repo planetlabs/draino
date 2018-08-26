@@ -1,0 +1,33 @@
+language: go
+
+services:
+  - docker
+
+go:
+  - 1.10.x
+
+jobs:
+  include:
+    - stage: test
+      before_install:
+        - go get -u github.com/Masterminds/glide
+        - go get -u github.com/alecthomas/gometalinter
+      install:
+        - glide install
+        - gometalinter --install
+      script:
+        - ./scripts/test.sh
+        - gometalinter --fast --vendor --deadline 5m --disable gotype --disable gosec --exclude "\.pb.*\.go" --exclude "_strings\.go" --exclude "_test\.go" --exclude "not checked.+Close" ./...
+      after_success:
+        - bash <(curl -s https://codecov.io/bash)
+    - stage: push
+      install: skip
+      script:
+        - ./scripts/build.sh
+        - docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"
+        - ./scripts/push.sh
+
+stages:
+  - name: test
+  - name: push
+    if: branch = master and not type = pull_request

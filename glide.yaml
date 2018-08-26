@@ -1,0 +1,45 @@
+package: github.com/negz/draino
+import:
+- package: github.com/julienschmidt/httprouter
+  version: v1.1
+- package: github.com/oklog/run
+  version: v1.0.0
+- package: github.com/pkg/errors
+  version: v0.8.0
+- package: go.opencensus.io
+  version: v0.15.0
+  subpackages:
+  - exporter/prometheus
+  - stats
+  - stats/view
+  - tag
+- package: go.uber.org/zap
+  version: v1.9.1
+- package: gopkg.in/alecthomas/kingpin.v2
+  version: v2.2.6
+- package: k8s.io/api
+  subpackages:
+  - core/v1
+  - policy/v1beta1
+- package: k8s.io/apimachinery
+  subpackages:
+  - pkg/api/errors
+  - pkg/apis/meta/v1
+  - pkg/fields
+  - pkg/runtime
+  - pkg/util/wait
+  - pkg/watch
+- package: k8s.io/client-go
+  version: v8.0.0
+  subpackages:
+  - kubernetes
+  - kubernetes/scheme
+  - kubernetes/typed/core/v1
+  - rest
+  - tools/cache
+  - tools/clientcmd
+  - tools/clientcmd/api
+  - tools/record
+testImport:
+- package: github.com/go-test/deep
+  version: v1.0.1
