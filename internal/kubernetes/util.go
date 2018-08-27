@@ -47,3 +47,11 @@ func NewAPINodeEventRecorder(c kubernetes.Interface, component string) *APINodeE
 func (r *APINodeEventRecorder) For(nodeName string) record.EventRecorder {
 	return r.b.NewRecorder(scheme.Scheme, core.EventSource{Component: r.component, Host: nodeName})
 }
+
+// NoopNodeEventRecorder does nothing.
+type NoopNodeEventRecorder struct{}
+
+// For returns a record.EventRecorder that does nothing.
+func (r *NoopNodeEventRecorder) For(_ string) record.EventRecorder {
+	return &record.FakeRecorder{}
+}
