@@ -126,7 +126,7 @@ func (h *DrainingResourceEventHandler) cordonAndDrain(n *core.Node) {
 	h.lastDrainScheduledFor = t.Add(d)
 
 	log.Info("Scheduled drain", zap.Time("after", h.lastDrainScheduledFor))
-	h.e.Eventf(nr, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", h.lastDrainScheduledFor)
+	h.e.Eventf(nr, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", h.lastDrainScheduledFor.Format(time.RFC3339Nano))
 	time.AfterFunc(d, func() {
 		h.lastDrainScheduledFor = time.Now()
 		log.Debug("Draining")
