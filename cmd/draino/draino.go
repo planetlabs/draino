@@ -21,7 +21,7 @@ import (
 	"github.com/negz/draino/internal/kubernetes"
 )
 
-const prometheusNamespace = "draino"
+const component = "draino"
 
 func main() {
 	var (
@@ -59,7 +59,7 @@ func main() {
 		}
 	)
 	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained), "cannot create metrics")
-	p, err := prometheus.NewExporter(prometheus.Options{Namespace: prometheusNamespace})
+	p, err := prometheus.NewExporter(prometheus.Options{Namespace: component})
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
 
@@ -86,7 +86,7 @@ func main() {
 			kubernetes.MaxGracePeriod(*maxGracePeriod),
 			kubernetes.EvictionHeadroom(*evictionHeadroom),
 			kubernetes.WithPodFilter(kubernetes.NewPodFilters(kubernetes.MirrorPodFilter, kubernetes.NewDaemonSetPodFilter(cs)))),
-		kubernetes.NewEventRecorder(cs),
+		kubernetes.NewAPINodeEventRecorder(cs, component),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer))
 
@@ -95,7 +95,7 @@ func main() {
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
 				&kubernetes.NoopCordonDrainer{},
-				kubernetes.NewEventRecorder(cs),
+				kubernetes.NewAPINodeEventRecorder(cs, component),
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer)),
 		}
