@@ -42,3 +42,13 @@ func NewNodeConditionFilter(ct []string) func(o interface{}) bool {
 		return false
 	}
 }
+
+// NodeSchedulableFilter returns true if the supplied object is a schedulable
+// node.
+func NodeSchedulableFilter(o interface{}) bool {
+	n, ok := o.(*core.Node)
+	if !ok {
+		return false
+	}
+	return !n.Spec.Unschedulable
+}
