@@ -422,7 +422,7 @@ func TestDrain(t *testing.T) {
 			}
 
 			o := tc.options
-			o = append(tc.options, WithPodFilters(MirrorPodFilter, NewDaemonSetFilter(c)))
+			o = append(o, WithPodFilter(NewPodFilters(MirrorPodFilter, NewDaemonSetPodFilter(c))))
 			d := NewAPICordonDrainer(c, o...)
 			if err := d.Drain(tc.node); err != nil {
 				for _, r := range tc.reactions {

@@ -38,32 +38,49 @@ func IsTimeout(err error) bool {
 	return ok
 }
 
-// A FilterFunc returns true if the supplied pod should be filtered.
-// TODO(negz): Return true if the supplied pod should 'pass' the
-// filter in order to match cache.FilterFunc semantics.
+// A FilterFunc returns true if the supplied pod passes the filter.
 type FilterFunc func(p core.Pod) (bool, error)
 
-// MirrorPodFilter returns true if the supplied pod is a mirror pod, i.e. a pod
-// created by a manifest on the node rather than the API server.
+// MirrorPodFilter returns true if the supplied pod is not a mirror pod, i.e. a
+// pod created by a manifest on the node rather than the API server.
 func MirrorPodFilter(p core.Pod) (bool, error) {
-	_, found := p.GetAnnotations()[core.MirrorPodAnnotationKey]
-	return found, nil
+	_, mirrorPod := p.GetAnnotations()[core.MirrorPodAnnotationKey]
+	return !mirrorPod, nil
 }
 
-// NewDaemonSetFilter returns a FilterFunc that returns true if the supplied pod
-// is managed by an extant DaemonSet.
-func NewDaemonSetFilter(client kubernetes.Interface) FilterFunc {
+// NewDaemonSetPodFilter returns a FilterFunc that returns true if the supplied
+// pod is not managed by an extant DaemonSet.
+func NewDaemonSetPodFilter(client kubernetes.Interface) FilterFunc {
 	return func(p core.Pod) (bool, error) {
 		c := meta.GetControllerOf(&p)
 		if c == nil || c.Kind != kindDaemonSet {
-			return false, nil
+			return true, nil
 		}
 
+		// Pods pass the filter if they were created by a DaemonSet that no
+		// longer exists.
 		if _, err := client.ExtensionsV1beta1().DaemonSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
 			if apierrors.IsNotFound(err) {
-				return false, nil
+				return true, nil
 			}
 			return false, errors.Wrapf(err, "cannot get DaemonSet %s/%s", p.GetNamespace(), c.Name)
+		}
+		return false, nil
+	}
+}
+
+// NewPodFilters returns a FilterFunc that returns true if all of the supplied
+// FilterFuncs return true.
+func NewPodFilters(filters ...FilterFunc) FilterFunc {
+	return func(p core.Pod) (bool, error) {
+		for _, fn := range filters {
+			passes, err := fn(p)
+			if err != nil {
+				return false, errors.Wrap(err, "cannot apply filters")
+			}
+			if !passes {
+				return false, nil
+			}
 		}
 		return true, nil
 	}
@@ -100,7 +117,7 @@ func (d *NoopCordonDrainer) Drain(n *core.Node) error { return nil }
 type APICordonDrainer struct {
 	c kubernetes.Interface
 
-	filters []FilterFunc
+	filter FilterFunc
 
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
@@ -128,9 +145,9 @@ func EvictionHeadroom(h time.Duration) APICordonDrainerOption {
 
 // WithPodFilters configures filters that may be used to exclude certain pods
 // from eviction when draining.
-func WithPodFilters(f ...FilterFunc) APICordonDrainerOption {
+func WithPodFilter(f FilterFunc) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
-		d.filters = f
+		d.filter = f
 	}
 }
 
@@ -205,30 +222,15 @@ func (d *APICordonDrainer) getPods(node string) ([]core.Pod, error) {
 
 	include := make([]core.Pod, 0, len(l.Items))
 	for _, p := range l.Items {
-		filter, err := filter(p, d.filters...)
+		passes, err := d.filter(p)
 		if err != nil {
 			return nil, errors.Wrap(err, "cannot filter pods")
 		}
-		if !filter {
+		if passes {
 			include = append(include, p)
 		}
 	}
 	return include, nil
-}
-
-// filter returns true if any of the supplied filters return true for the
-// supplied pod.
-func filter(p core.Pod, filters ...FilterFunc) (bool, error) {
-	for _, fn := range filters {
-		filter, err := fn(p)
-		if err != nil {
-			return false, errors.Wrap(err, "cannot apply filters")
-		}
-		if filter {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- error) {

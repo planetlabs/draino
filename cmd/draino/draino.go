@@ -64,7 +64,7 @@ func main() {
 
 	web := &httpRunner{l: *listen, h: map[string]http.Handler{
 		"/metrics": p,
-		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:gas
+		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:gosec
 	}}
 
 	log, err := zap.NewProduction()
@@ -83,7 +83,7 @@ func main() {
 	var d kubernetes.CordonDrainer = kubernetes.NewAPICordonDrainer(cs,
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
-		kubernetes.WithPodFilters(kubernetes.MirrorPodFilter, kubernetes.NewDaemonSetFilter(cs)))
+		kubernetes.WithPodFilter(kubernetes.NewPodFilters(kubernetes.MirrorPodFilter, kubernetes.NewDaemonSetPodFilter(cs))))
 	if *dryRun {
 		d = &kubernetes.NoopCordonDrainer{}
 	}
