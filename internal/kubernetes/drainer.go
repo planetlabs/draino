@@ -143,7 +143,7 @@ func EvictionHeadroom(h time.Duration) APICordonDrainerOption {
 	}
 }
 
-// WithPodFilters configures filters that may be used to exclude certain pods
+// WithPodFilter configures a filter that may be used to exclude certain pods
 // from eviction when draining.
 func WithPodFilter(f FilterFunc) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
