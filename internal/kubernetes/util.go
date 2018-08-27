@@ -11,7 +11,8 @@ import (
 	"k8s.io/client-go/tools/record"
 )
 
-const eventComponent = "draino"
+// Component is the name of this application.
+const Component = "draino"
 
 // BuildConfigFromFlags is clientcmd.BuildConfigFromFlags with no annoying
 // dependencies on glog.
@@ -29,5 +30,5 @@ func BuildConfigFromFlags(apiserver, kubecfg string) (*rest.Config, error) {
 func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 	b := record.NewBroadcaster()
 	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(c.CoreV1().RESTClient()).Events("")})
-	return b.NewRecorder(scheme.Scheme, core.EventSource{Component: eventComponent})
+	return b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
 }

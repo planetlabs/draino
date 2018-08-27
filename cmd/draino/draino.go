@@ -21,8 +21,6 @@ import (
 	"github.com/negz/draino/internal/kubernetes"
 )
 
-const prometheusNamespace = "draino"
-
 // TODO(negz): Use leader election? We don't really want more than one draino
 // running at a time.
 // https://godoc.org/k8s.io/client-go/tools/leaderelection
@@ -62,7 +60,7 @@ func main() {
 		}
 	)
 	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained), "cannot create metrics")
-	p, err := prometheus.NewExporter(prometheus.Options{Namespace: prometheusNamespace})
+	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
 
