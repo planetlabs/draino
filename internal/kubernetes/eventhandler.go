@@ -105,6 +105,10 @@ func (h *DrainingResourceEventHandler) OnDelete(_ interface{}) {
 func (h *DrainingResourceEventHandler) cordonAndDrain(n *core.Node) {
 	log := h.l.With(zap.String("node", n.GetName()))
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
+	// Events must be associated with this object reference, rather than the
+	// node itself, in order to appear under `kubectl describe node` due to the
+	// way that command is implemented.
+	// https://github.com/kubernetes/kubernetes/blob/17740a2/pkg/printers/internalversion/describe.go#L2711
 	nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 
 	log.Debug("Cordoning")
