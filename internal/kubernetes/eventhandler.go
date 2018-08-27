@@ -8,6 +8,7 @@ import (
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
 )
 
 const (
@@ -40,7 +41,7 @@ var (
 type DrainingResourceEventHandler struct {
 	l *zap.Logger
 	d CordonDrainer
-	r NodeEventRecorder
+	e record.EventRecorder
 
 	lastDrainScheduledFor time.Time
 	buffer                time.Duration
@@ -65,11 +66,11 @@ func WithDrainBuffer(d time.Duration) DrainingResourceEventHandlerOption {
 }
 
 // NewDrainingResourceEventHandler returns a new DrainingResourceEventHandler.
-func NewDrainingResourceEventHandler(d CordonDrainer, r NodeEventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
+func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
 	h := &DrainingResourceEventHandler{
 		l: zap.NewNop(),
 		d: d,
-		r: r,
+		e: e,
 		lastDrainScheduledFor: time.Now(),
 		buffer:                DefaultDrainBuffer,
 	}
@@ -103,42 +104,41 @@ func (h *DrainingResourceEventHandler) OnDelete(_ interface{}) {
 func (h *DrainingResourceEventHandler) cordonAndDrain(n *core.Node) {
 	log := h.l.With(zap.String("node", n.GetName()))
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
-	r := h.r.For(n.GetName())
 
 	log.Debug("Cordoning")
-	r.Event(n, core.EventTypeWarning, eventReasonCordonStarting, "Cordoning node")
+	h.e.Event(n, core.EventTypeWarning, eventReasonCordonStarting, "Cordoning node")
 	if err := h.d.Cordon(n); err != nil {
 		log.Info("Failed to cordon", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 		stats.Record(tags, MeasureNodesCordoned.M(1))
-		r.Eventf(n, core.EventTypeWarning, eventReasonCordonFailed, "Cordoning failed: %v", err)
+		h.e.Eventf(n, core.EventTypeWarning, eventReasonCordonFailed, "Cordoning failed: %v", err)
 		return
 	}
 	log.Info("Cordoned")
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 	stats.Record(tags, MeasureNodesCordoned.M(1))
-	r.Event(n, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
+	h.e.Event(n, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
 
 	t := time.Now()
 	d := h.lastDrainScheduledFor.Sub(t) + h.buffer
 	h.lastDrainScheduledFor = t.Add(d)
 
 	log.Info("Scheduled drain", zap.Time("after", h.lastDrainScheduledFor))
-	r.Eventf(n, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", h.lastDrainScheduledFor.Format(time.RFC3339))
+	h.e.Eventf(n, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", h.lastDrainScheduledFor)
 	time.AfterFunc(d, func() {
 		h.lastDrainScheduledFor = time.Now()
 		log.Debug("Draining")
-		r.Event(n, core.EventTypeWarning, eventReasonDrainStarting, "Draining node")
+		h.e.Event(n, core.EventTypeWarning, eventReasonDrainStarting, "Draining node")
 		if err := h.d.Drain(n); err != nil {
 			log.Info("Failed to drain", zap.Error(err))
 			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 			stats.Record(tags, MeasureNodesDrained.M(1))
-			r.Eventf(n, core.EventTypeWarning, eventReasonDrainFailed, "Cordoning failed: %v", err)
+			h.e.Eventf(n, core.EventTypeWarning, eventReasonDrainFailed, "Cordoning failed: %v", err)
 			return
 		}
 		log.Info("Drained")
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 		stats.Record(tags, MeasureNodesDrained.M(1))
-		r.Event(n, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
+		h.e.Event(n, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
 	})
 }

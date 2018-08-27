@@ -21,7 +21,7 @@ import (
 	"github.com/negz/draino/internal/kubernetes"
 )
 
-const component = "draino"
+const prometheusNamespace = "draino"
 
 // TODO(negz): Use leader election? We don't really want more than one draino
 // running at a time.
@@ -62,7 +62,7 @@ func main() {
 		}
 	)
 	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained), "cannot create metrics")
-	p, err := prometheus.NewExporter(prometheus.Options{Namespace: component})
+	p, err := prometheus.NewExporter(prometheus.Options{Namespace: prometheusNamespace})
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
 
@@ -89,7 +89,7 @@ func main() {
 			kubernetes.MaxGracePeriod(*maxGracePeriod),
 			kubernetes.EvictionHeadroom(*evictionHeadroom),
 			kubernetes.WithPodFilter(kubernetes.NewPodFilters(kubernetes.MirrorPodFilter, kubernetes.NewDaemonSetPodFilter(cs)))),
-		kubernetes.NewAPINodeEventRecorder(cs, component),
+		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer))
 
@@ -98,7 +98,7 @@ func main() {
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
 				&kubernetes.NoopCordonDrainer{},
-				kubernetes.NewAPINodeEventRecorder(cs, component),
+				kubernetes.NewEventRecorder(cs),
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer)),
 		}
