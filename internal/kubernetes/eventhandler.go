@@ -133,7 +133,7 @@ func (h *DrainingResourceEventHandler) cordonAndDrain(n *core.Node) {
 			log.Info("Failed to drain", zap.Error(err))
 			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 			stats.Record(tags, MeasureNodesDrained.M(1))
-			h.e.Eventf(n, core.EventTypeWarning, eventReasonDrainFailed, "Cordoning failed: %v", err)
+			h.e.Eventf(n, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", err)
 			return
 		}
 		log.Info("Drained")
