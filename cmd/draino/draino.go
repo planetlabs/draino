@@ -23,6 +23,9 @@ import (
 
 const component = "draino"
 
+// TODO(negz): Use leader election? We don't really want more than one draino
+// running at a time.
+// https://godoc.org/k8s.io/client-go/tools/leaderelection
 func main() {
 	var (
 		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()
