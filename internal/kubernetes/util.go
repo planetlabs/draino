@@ -31,11 +31,3 @@ func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(c.CoreV1().RESTClient()).Events("")})
 	return b.NewRecorder(scheme.Scheme, core.EventSource{Component: eventComponent})
 }
-
-// NoopNodeEventRecorder does nothing.
-type NoopNodeEventRecorder struct{}
-
-// For returns a record.EventRecorder that does nothing.
-func (r *NoopNodeEventRecorder) For(_ string) record.EventRecorder {
-	return &record.FakeRecorder{}
-}
