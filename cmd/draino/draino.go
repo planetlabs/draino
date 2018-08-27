@@ -32,8 +32,9 @@ func main() {
 		kubecfg          = app.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
 		apiserver        = app.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
 		dryRun           = app.Flag("dry-run", "Emit an event without cordoning or draining matching nodes.").Bool()
-		maxGracePeriod   = app.Flag("max-grace-period", "The maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
-		evictionHeadroom = app.Flag("eviction-headroom", "The additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
+		maxGracePeriod   = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
+		evictionHeadroom = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
+		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
 		nodeLabels       = app.Flag("node-label", "Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.").PlaceHolder("KEY=VALUE").StringMap()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Strings()
@@ -43,14 +44,14 @@ func main() {
 
 	var (
 		nodesCordoned = &view.View{
-			Name:        "draino/nodes_cordoned",
+			Name:        "nodes_cordoned",
 			Measure:     kubernetes.MeasureNodesCordoned,
 			Description: "Number of nodes cordoned.",
 			Aggregation: view.Count(),
 			TagKeys:     []tag.Key{kubernetes.TagNodeName, kubernetes.TagResult},
 		}
 		nodesDrained = &view.View{
-			Name:        "draino/nodes_drained",
+			Name:        "nodes_drained",
 			Measure:     kubernetes.MeasureNodesDrained,
 			Description: "Number of nodes drained.",
 			Aggregation: view.Count(),
@@ -88,7 +89,7 @@ func main() {
 		d = &kubernetes.NoopCordonDrainer{}
 	}
 	r := kubernetes.NewEventRecorder(cs)
-	h := kubernetes.NewDrainingResourceEventHandler(d, r, kubernetes.WithLogger(log))
+	h := kubernetes.NewDrainingResourceEventHandler(d, r, kubernetes.WithLogger(log), kubernetes.WithDrainBuffer(*drainBuffer))
 	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: h}
 	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: lf}
 	nodes := kubernetes.NewNodeWatch(cs, cf)

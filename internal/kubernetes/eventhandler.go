@@ -12,6 +12,9 @@ import (
 )
 
 const (
+	// DefaultDrainBuffer is the default minimum time between node drains.
+	DefaultDrainBuffer = 10 * time.Minute
+
 	eventReasonCordonStarting  = "CordonStarting"
 	eventReasonCordonSucceeded = "CordonSucceeded"
 	eventReasonCordonFailed    = "CordonFailed"
@@ -40,8 +43,8 @@ type DrainingResourceEventHandler struct {
 	d CordonDrainer
 	e record.EventRecorder
 
-	lastDrainStarted time.Time
-	bufferTime       time.Duration
+	lastDrainScheduledFor time.Time
+	buffer                time.Duration
 }
 
 // DrainingResourceEventHandlerOption configures an DrainingResourceEventHandler.
@@ -50,14 +53,27 @@ type DrainingResourceEventHandlerOption func(d *DrainingResourceEventHandler)
 // WithLogger configures a DrainingResourceEventHandler to use the supplied
 // logger.
 func WithLogger(l *zap.Logger) DrainingResourceEventHandlerOption {
-	return func(d *DrainingResourceEventHandler) {
-		d.l = l
+	return func(h *DrainingResourceEventHandler) {
+		h.l = l
+	}
+}
+
+// WithDrainBuffer configures the minimum time between scheduled drains.
+func WithDrainBuffer(d time.Duration) DrainingResourceEventHandlerOption {
+	return func(h *DrainingResourceEventHandler) {
+		h.buffer = d
 	}
 }
 
 // NewDrainingResourceEventHandler returns a new DrainingResourceEventHandler.
 func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
-	h := &DrainingResourceEventHandler{l: zap.NewNop(), d: d, e: e}
+	h := &DrainingResourceEventHandler{
+		l: zap.NewNop(),
+		d: d,
+		e: e,
+		lastDrainScheduledFor: time.Now(),
+		buffer:                DefaultDrainBuffer,
+	}
 	for _, o := range ho {
 		o(h)
 	}
@@ -104,13 +120,13 @@ func (h *DrainingResourceEventHandler) cordonAndDrain(n *core.Node) {
 	h.e.Event(n, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
 
 	t := time.Now()
-	d := h.lastDrainStarted.Sub(t) + h.bufferTime
-	a := t.Add(d)
+	d := h.lastDrainScheduledFor.Sub(t) + h.buffer
+	h.lastDrainScheduledFor = t.Add(d)
 
-	log.Info("Scheduled drain", zap.Time("after", a))
-	h.e.Eventf(n, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", a)
+	log.Info("Scheduled drain", zap.Time("after", h.lastDrainScheduledFor))
+	h.e.Eventf(n, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", h.lastDrainScheduledFor)
 	time.AfterFunc(d, func() {
-		h.lastDrainStarted = time.Now()
+		h.lastDrainScheduledFor = time.Now()
 		log.Debug("Draining")
 		h.e.Event(n, core.EventTypeWarning, eventReasonDrainStarting, "Draining node")
 		if err := h.d.Drain(n); err != nil {
