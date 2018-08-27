@@ -39,6 +39,8 @@ func IsTimeout(err error) bool {
 }
 
 // A FilterFunc returns true if the supplied pod should be filtered.
+// TODO(negz): Return true if the supplied pod should 'pass' the
+// filter in order to match cache.FilterFunc semantics.
 type FilterFunc func(p core.Pod) (bool, error)
 
 // MirrorPodFilter returns true if the supplied pod is a mirror pod, i.e. a pod

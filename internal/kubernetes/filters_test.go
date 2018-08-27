@@ -1,0 +1,211 @@
+package kubernetes
+
+import (
+	"testing"
+
+	core "k8s.io/api/core/v1"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+func TestNodeLabelFilter(t *testing.T) {
+	cases := []struct {
+		name         string
+		obj          interface{}
+		labels       map[string]string
+		passesFilter bool
+	}{
+		{
+			name: "SingleMatchingLabel",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			labels:       map[string]string{"cool": "very"},
+			passesFilter: true,
+		},
+		{
+			name: "ManyMatchingLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very", "lame": "nope"},
+				},
+			},
+			labels:       map[string]string{"cool": "very", "lame": "nope"},
+			passesFilter: true,
+		},
+		{
+			name: "SingleUnmatchingLabel",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "notsocool"},
+				},
+			},
+			labels:       map[string]string{"cool": "very"},
+			passesFilter: false,
+		},
+		{
+			name: "PartiallyMatchingLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very", "lame": "somehowyes"},
+				},
+			},
+			labels:       map[string]string{"cool": "very", "lame": "nope"},
+			passesFilter: false,
+		}, {
+			name: "PartiallyAbsentLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			labels:       map[string]string{"cool": "very", "lame": "nope"},
+			passesFilter: false,
+		},
+		{
+			name: "NoNodeLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+			},
+			labels:       map[string]string{"cool": "very"},
+			passesFilter: false,
+		},
+		{
+			name: "NoFilterLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			passesFilter: true,
+		},
+		{
+			name: "NotANode",
+			obj: &core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   podName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			labels:       map[string]string{"cool": "very"},
+			passesFilter: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filter := NewNodeLabelFilter(tc.labels)
+			passesFilter := filter(tc.obj)
+			if passesFilter != tc.passesFilter {
+				t.Errorf("filter(tc.obj): want %v, got %v", tc.passesFilter, passesFilter)
+			}
+		})
+	}
+}
+func TestNodeConditionFilter(t *testing.T) {
+	cases := []struct {
+		name         string
+		obj          interface{}
+		conditions   []string
+		passesFilter bool
+	}{
+		{
+			name: "SingleMatchingCondition",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionTrue},
+				}},
+			},
+			conditions:   []string{"Cool"},
+			passesFilter: true,
+		},
+		{
+			name: "ManyMatchingConditions",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionTrue},
+					core.NodeCondition{Type: "Rad", Status: core.ConditionTrue},
+				}},
+			},
+			conditions:   []string{"Cool", "Rad"},
+			passesFilter: true,
+		},
+		{
+			name: "PartiallyMatchingConditions",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionTrue},
+					core.NodeCondition{Type: "Rad", Status: core.ConditionFalse},
+				}},
+			},
+			conditions:   []string{"Cool", "Rad"},
+			passesFilter: true,
+		},
+		{
+			name: "PartiallyAbsentConditions",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Rad", Status: core.ConditionTrue},
+				}},
+			},
+			conditions:   []string{"Cool", "Rad"},
+			passesFilter: true,
+		},
+		{
+			name: "SingleFalseCondition",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionFalse},
+				}},
+			},
+			conditions:   []string{"Cool"},
+			passesFilter: false,
+		},
+		{
+			name:         "NoNodeConditions",
+			obj:          &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			conditions:   []string{"Cool"},
+			passesFilter: false,
+		},
+		{
+			name: "NoFilterConditions",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionFalse},
+				}},
+			},
+			passesFilter: true,
+		},
+		{
+			name: "NotANode",
+			obj: &core.Pod{
+				ObjectMeta: meta.ObjectMeta{Name: podName},
+			},
+			conditions:   []string{"Cool"},
+			passesFilter: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filter := NewNodeConditionFilter(tc.conditions)
+			passesFilter := filter(tc.obj)
+			if passesFilter != tc.passesFilter {
+				t.Errorf("filter(tc.obj): want %v, got %v", tc.passesFilter, passesFilter)
+			}
+		})
+	}
+}
