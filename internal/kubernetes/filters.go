@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // NewNodeLabelFilter returns a filter that returns true if the supplied object
@@ -51,4 +52,27 @@ func NodeSchedulableFilter(o interface{}) bool {
 		return false
 	}
 	return !n.Spec.Unschedulable
+}
+
+// NodeProcessed tracks whether nodes have been processed before using a map.
+type NodeProcessed map[types.UID]bool
+
+// NewNodeProcessed returns a new node processed filter.
+func NewNodeProcessed() NodeProcessed {
+	return make(NodeProcessed)
+}
+
+// Filter returns true if the supplied object is a node that this filter has
+// not seen before. It is not threadsafe and should always be the last filter
+// applied.
+func (processed NodeProcessed) Filter(o interface{}) bool {
+	n, ok := o.(*core.Node)
+	if !ok {
+		return false
+	}
+	if processed[n.GetUID()] {
+		return false
+	}
+	processed[n.GetUID()] = true
+	return true
 }

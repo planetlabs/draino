@@ -250,3 +250,40 @@ func TestNodeSchedulableFilter(t *testing.T) {
 		})
 	}
 }
+func TestNodeProcessedFilter(t *testing.T) {
+	cases := []struct {
+		name         string
+		existing     interface{}
+		obj          interface{}
+		passesFilter bool
+	}{
+		{
+			name:         "NoNodesProcessed",
+			obj:          &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName, UID: "a"}},
+			passesFilter: true,
+		},
+		{
+			name:         "DifferentNodeProcessed",
+			existing:     &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName + "-b", UID: "b"}},
+			obj:          &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName, UID: "a"}},
+			passesFilter: true,
+		},
+		{
+			name:         "NodeAlreadyProcessed",
+			existing:     &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName, UID: "a"}},
+			obj:          &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName, UID: "a"}},
+			passesFilter: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			np := NewNodeProcessed()
+			np.Filter(tc.existing)
+			passesFilter := np.Filter(tc.obj)
+			if passesFilter != tc.passesFilter {
+				t.Errorf("np.Filter(tc.obj): want %v, got %v", tc.passesFilter, passesFilter)
+			}
+		})
+	}
+}

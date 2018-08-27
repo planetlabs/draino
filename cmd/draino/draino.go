@@ -81,15 +81,26 @@ func main() {
 	cs, err := client.NewForConfig(c)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
 
-	var d kubernetes.CordonDrainer = kubernetes.NewAPICordonDrainer(cs,
-		kubernetes.MaxGracePeriod(*maxGracePeriod),
-		kubernetes.EvictionHeadroom(*evictionHeadroom),
-		kubernetes.WithPodFilter(kubernetes.NewPodFilters(kubernetes.MirrorPodFilter, kubernetes.NewDaemonSetPodFilter(cs))))
+	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
+		kubernetes.NewAPICordonDrainer(cs,
+			kubernetes.MaxGracePeriod(*maxGracePeriod),
+			kubernetes.EvictionHeadroom(*evictionHeadroom),
+			kubernetes.WithPodFilter(kubernetes.NewPodFilters(kubernetes.MirrorPodFilter, kubernetes.NewDaemonSetPodFilter(cs)))),
+		kubernetes.NewEventRecorder(cs),
+		kubernetes.WithLogger(log),
+		kubernetes.WithDrainBuffer(*drainBuffer))
+
 	if *dryRun {
-		d = &kubernetes.NoopCordonDrainer{}
+		h = cache.FilteringResourceEventHandler{
+			FilterFunc: kubernetes.NewNodeProcessed().Filter,
+			Handler: kubernetes.NewDrainingResourceEventHandler(
+				&kubernetes.NoopCordonDrainer{},
+				kubernetes.NewEventRecorder(cs),
+				kubernetes.WithLogger(log),
+				kubernetes.WithDrainBuffer(*drainBuffer)),
+		}
 	}
-	r := kubernetes.NewEventRecorder(cs)
-	h := kubernetes.NewDrainingResourceEventHandler(d, r, kubernetes.WithLogger(log), kubernetes.WithDrainBuffer(*drainBuffer))
+
 	sf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NodeSchedulableFilter, Handler: h}
 	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: sf}
 	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: cf}
