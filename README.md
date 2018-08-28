@@ -1,6 +1,25 @@
 # draino [![Docker Pulls](https://img.shields.io/docker/pulls/negz/draino.svg)](https://hub.docker.com/r/negz/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/negz/draino) [![Travis](https://img.shields.io/travis/negz/draino.svg?maxAge=300)](https://travis-ci.org/negz/draino/) [![Codecov](https://img.shields.io/codecov/c/github/negz/draino.svg?maxAge=3600)](https://codecov.io/gh/negz/draino/)
-Automatically cordon and drain Kubernetes nodes based on node conditions.
+Draino automatically drains Kubernetes nodes based on labels and node
+conditions. Nodes that match _all_ of the supplied labels and _any_ of the
+supplied node conditions will be cordoned immediately and drained after a
+configurable `drain-buffer` time.
 
+Draino is intended for use alongside the Kubernetes [Node Problem Detector](https://github.com/kubernetes/node-problem-detector)
+and [Cluster Autoscaler](https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler).
+The Node Problem Detector can set a node condition when it detects something
+wrong with a node - for instance by watching node logs or running a script. The
+Cluster Autoscaler can be configured to delete nodes that are underutilised.
+Adding Draino to the mix enables autoremediation:
+
+1. The Node Problem Detector detects a permanent node problem and sets the
+   corresponding node condition.
+2. Draino notices the node condition. It immediately cordons the node to prevent
+   new pods being scheduled there, and schedules a drain of the node.
+3. Once the node has been drained the Cluster Autoscaler will consider it
+   underutilised. It will be eligible for scale down (i.e. termination) by the
+   Autoscaler after a configurable period of time.
+
+## Usage
 ```
 $ docker run negz/draino /draino --help
 usage: draino [<flags>] [<node-conditions>...]
@@ -24,7 +43,7 @@ Flags:
                                grace period for it to have been deleted.
       --drain-buffer=10m0s     Minimum time between starting each drain. Nodes
                                are always cordoned immediately.
-      --node-label=KEY=VALUE ...  
+      --node-label=KEY=VALUE ...
                                Only nodes with this label will be eligible for
                                cordoning and draining. May be specified multiple
                                times.
@@ -32,4 +51,27 @@ Flags:
 Args:
   [<node-conditions>]  Nodes for which any of these conditions are true will be
                        cordoned and drained.
+```
+
+## Deployment
+Draino is automatically built from master and pushed to the [Docker Hub](https://hub.docker.com/r/negz/draino/).
+Builds are tagged `negz/draino:latest` and `negz/drain:$(git rev-parse --short HEAD)`.
+An [example Kubernetes deployment manifest](manifest.yml) is provided.
+
+## Monitoring
+Draino provides a simple healthcheck endpoint at `/healthz` and Prometheus
+metrics at `/metrics`. The following metrics exist:
+
+```bash
+$ kubectl -n kube-system exec -it ${DRAINO_POD} -- apk add curl
+$ kubectl -n kube-system exec -it ${DRAINO_POD} -- curl http://localhost:10002/metrics
+# HELP draino_nodes_cordoned Number of nodes cordoned.
+# TYPE draino_nodes_cordoned counter
+draino_nodes_cordoned{node_name="coolnode",result="succeeded"} 1
+draino_nodes_cordoned{node_name="ambivalentnode",result="succeeded"} 1
+draino_nodes_cordoned{node_name="lamenode",result="failed"} 1
+# HELP draino_nodes_drained Number of nodes drained.
+# TYPE draino_nodes_drained counter
+draino_nodes_drained{node_name="coolnode",result="succeeded"} 1
+draino_nodes_drained{node_name="ambivalentnode",result="failed"} 1
 ```
