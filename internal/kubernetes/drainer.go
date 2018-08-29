@@ -69,7 +69,7 @@ func (d *NoopCordonDrainer) Drain(n *core.Node) error { return nil }
 type APICordonDrainer struct {
 	c kubernetes.Interface
 
-	filter FilterFunc
+	filter PodFilterFunc
 
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
@@ -97,7 +97,7 @@ func EvictionHeadroom(h time.Duration) APICordonDrainerOption {
 
 // WithPodFilter configures a filter that may be used to exclude certain pods
 // from eviction when draining.
-func WithPodFilter(f FilterFunc) APICordonDrainerOption {
+func WithPodFilter(f PodFilterFunc) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.filter = f
 	}

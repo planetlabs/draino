@@ -8,8 +8,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// A FilterFunc returns true if the supplied pod passes the filter.
-type FilterFunc func(p core.Pod) (bool, error)
+// A PodFilterFunc returns true if the supplied pod passes the filter.
+type PodFilterFunc func(p core.Pod) (bool, error)
 
 // MirrorPodFilter returns true if the supplied pod is not a mirror pod, i.e. a
 // pod created by a manifest on the node rather than the API server.
@@ -20,7 +20,7 @@ func MirrorPodFilter(p core.Pod) (bool, error) {
 
 // NewDaemonSetPodFilter returns a FilterFunc that returns true if the supplied
 // pod is not managed by an extant DaemonSet.
-func NewDaemonSetPodFilter(client kubernetes.Interface) FilterFunc {
+func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 	return func(p core.Pod) (bool, error) {
 		c := meta.GetControllerOf(&p)
 		if c == nil || c.Kind != kindDaemonSet {
@@ -41,7 +41,7 @@ func NewDaemonSetPodFilter(client kubernetes.Interface) FilterFunc {
 
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied
 // FilterFuncs return true.
-func NewPodFilters(filters ...FilterFunc) FilterFunc {
+func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
 	return func(p core.Pod) (bool, error) {
 		for _, fn := range filters {
 			passes, err := fn(p)
