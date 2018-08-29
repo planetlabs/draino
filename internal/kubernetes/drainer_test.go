@@ -26,6 +26,11 @@ const (
 	kindDeployment = "Deployment"
 )
 
+var (
+	_ CordonDrainer = (*APICordonDrainer)(nil)
+	_ CordonDrainer = (*NoopCordonDrainer)(nil)
+)
+
 var podGracePeriodSeconds int64 = 10
 var isController = true
 var errExploded = errors.New("kaboom")
