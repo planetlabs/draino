@@ -10,19 +10,30 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
 
 const (
-	ns            = "coolNamespace"
-	nodeName      = "coolNode"
-	podName       = "coolPod"
-	daemonsetName = "coolDaemonSet"
+	ns = "coolNamespace"
+
+	nodeName = "coolNode"
+	podName  = "coolPod"
+
+	daemonsetName  = "coolDaemonSet"
+	deploymentName = "coolDeployment"
+	kindDeployment = "Deployment"
+)
+
+var (
+	_ CordonDrainer = (*APICordonDrainer)(nil)
+	_ CordonDrainer = (*NoopCordonDrainer)(nil)
 )
 
 var podGracePeriodSeconds int64 = 10
 var isController = true
+var errExploded = errors.New("kaboom")
 
 type reactor struct {
 	verb        string
@@ -39,6 +50,14 @@ func (r reactor) Fn() clienttesting.ReactionFunc {
 		}
 		return true, r.ret, r.err
 	}
+}
+
+func newFakeClientSet(rs ...reactor) kubernetes.Interface {
+	cs := &fake.Clientset{}
+	for _, r := range rs {
+		cs.AddReactor(r.verb, r.resource, r.Fn())
+	}
+	return cs
 }
 
 func TestCordon(t *testing.T) {
@@ -274,50 +293,21 @@ func TestDrain(t *testing.T) {
 			},
 		},
 		{
-			name: "FilterMirrorPod",
+			name: "PodDoesNotPassFilter",
 			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, error) {
+				if p.GetName() == "lamePod" {
+					// This pod does not pass the filter.
+					return false, nil
+				}
+				return true, nil
+			})},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
 					resource: "pods",
 					ret: &core.PodList{Items: []core.Pod{
-						core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-						core.Pod{ObjectMeta: meta.ObjectMeta{
-							Name:        "mirrorPod",
-							Annotations: map[string]string{core.MirrorPodAnnotationKey: "true"},
-						}},
-					}},
-				},
-				reactor{
-					verb:        "create",
-					resource:    "pods",
-					subresource: "eviction",
-				},
-				reactor{
-					verb:     "get",
-					resource: "pods",
-					err:      apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, podName),
-				},
-			},
-		},
-		{
-			name: "FilterDaemonSetPod",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			reactions: []reactor{
-				reactor{
-					verb:     "list",
-					resource: "pods",
-					ret: &core.PodList{Items: []core.Pod{
-						core.Pod{
-							ObjectMeta: meta.ObjectMeta{
-								Name: "daemonsetPod",
-								OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
-									Controller: &isController,
-									Kind:       kindDaemonSet,
-								}},
-							},
-							Spec: core.PodSpec{TerminationGracePeriodSeconds: &podGracePeriodSeconds},
-						},
+						core.Pod{ObjectMeta: meta.ObjectMeta{Name: "lamePod"}},
 						core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
 					}},
 				},
@@ -334,31 +324,22 @@ func TestDrain(t *testing.T) {
 			},
 		},
 		{
-			name: "EvictOrphanedDaemonSetPod",
+			name: "PodFilterErrors",
 			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, error) {
+				if p.GetName() == "explodeyPod" {
+					return false, errExploded
+				}
+				return true, nil
+			})},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
 					resource: "pods",
 					ret: &core.PodList{Items: []core.Pod{
-						core.Pod{
-							ObjectMeta: meta.ObjectMeta{
-								Name:      "orphanedDaemonsetPod",
-								Namespace: ns,
-								OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
-									Controller: &isController,
-									Kind:       kindDaemonSet,
-									Name:       daemonsetName,
-								}},
-							},
-							Spec: core.PodSpec{TerminationGracePeriodSeconds: &podGracePeriodSeconds},
-						},
+						core.Pod{ObjectMeta: meta.ObjectMeta{Name: "explodeyPod"}},
+						core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
 					}},
-				},
-				reactor{
-					verb:     "get",
-					resource: "daemonsets",
-					err:      apierrors.NewNotFound(schema.GroupResource{Resource: "daemonsets"}, daemonsetName),
 				},
 				reactor{
 					verb:        "create",
@@ -371,35 +352,7 @@ func TestDrain(t *testing.T) {
 					err:      apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, podName),
 				},
 			},
-		},
-		{
-			name: "ErrorGettingDaemonset",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			reactions: []reactor{
-				reactor{
-					verb:     "list",
-					resource: "pods",
-					ret: &core.PodList{Items: []core.Pod{
-						core.Pod{
-							ObjectMeta: meta.ObjectMeta{
-								Name:      "orphanedDaemonsetPod",
-								Namespace: ns,
-								OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
-									Controller: &isController,
-									Kind:       kindDaemonSet,
-									Name:       daemonsetName,
-								}},
-							},
-							Spec: core.PodSpec{TerminationGracePeriodSeconds: &podGracePeriodSeconds},
-						},
-					}},
-				},
-				reactor{
-					verb:     "get",
-					resource: "daemonsets",
-					err:      errors.New("nope"),
-				},
-			},
+			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
 		},
 		{
 			name: "ErrorListingPods",
@@ -416,14 +369,8 @@ func TestDrain(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &fake.Clientset{}
-			for _, r := range tc.reactions {
-				c.AddReactor(r.verb, r.resource, r.Fn())
-			}
-
-			o := tc.options
-			o = append(o, WithPodFilter(NewPodFilters(MirrorPodFilter, NewDaemonSetPodFilter(c))))
-			d := NewAPICordonDrainer(c, o...)
+			c := newFakeClientSet(tc.reactions...)
+			d := NewAPICordonDrainer(c, tc.options...)
 			if err := d.Drain(tc.node); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Cause(err) == r.err {

@@ -38,54 +38,6 @@ func IsTimeout(err error) bool {
 	return ok
 }
 
-// A FilterFunc returns true if the supplied pod passes the filter.
-type FilterFunc func(p core.Pod) (bool, error)
-
-// MirrorPodFilter returns true if the supplied pod is not a mirror pod, i.e. a
-// pod created by a manifest on the node rather than the API server.
-func MirrorPodFilter(p core.Pod) (bool, error) {
-	_, mirrorPod := p.GetAnnotations()[core.MirrorPodAnnotationKey]
-	return !mirrorPod, nil
-}
-
-// NewDaemonSetPodFilter returns a FilterFunc that returns true if the supplied
-// pod is not managed by an extant DaemonSet.
-func NewDaemonSetPodFilter(client kubernetes.Interface) FilterFunc {
-	return func(p core.Pod) (bool, error) {
-		c := meta.GetControllerOf(&p)
-		if c == nil || c.Kind != kindDaemonSet {
-			return true, nil
-		}
-
-		// Pods pass the filter if they were created by a DaemonSet that no
-		// longer exists.
-		if _, err := client.ExtensionsV1beta1().DaemonSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
-			if apierrors.IsNotFound(err) {
-				return true, nil
-			}
-			return false, errors.Wrapf(err, "cannot get DaemonSet %s/%s", p.GetNamespace(), c.Name)
-		}
-		return false, nil
-	}
-}
-
-// NewPodFilters returns a FilterFunc that returns true if all of the supplied
-// FilterFuncs return true.
-func NewPodFilters(filters ...FilterFunc) FilterFunc {
-	return func(p core.Pod) (bool, error) {
-		for _, fn := range filters {
-			passes, err := fn(p)
-			if err != nil {
-				return false, errors.Wrap(err, "cannot apply filters")
-			}
-			if !passes {
-				return false, nil
-			}
-		}
-		return true, nil
-	}
-}
-
 // A Cordoner cordons nodes.
 type Cordoner interface {
 	// Cordon the supplied node. Marks it unschedulable for new pods.
@@ -117,7 +69,7 @@ func (d *NoopCordonDrainer) Drain(n *core.Node) error { return nil }
 type APICordonDrainer struct {
 	c kubernetes.Interface
 
-	filter FilterFunc
+	filter PodFilterFunc
 
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
@@ -145,7 +97,7 @@ func EvictionHeadroom(h time.Duration) APICordonDrainerOption {
 
 // WithPodFilter configures a filter that may be used to exclude certain pods
 // from eviction when draining.
-func WithPodFilter(f FilterFunc) APICordonDrainerOption {
+func WithPodFilter(f PodFilterFunc) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.filter = f
 	}
@@ -154,7 +106,12 @@ func WithPodFilter(f FilterFunc) APICordonDrainerOption {
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
 func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *APICordonDrainer {
-	d := &APICordonDrainer{c: c, maxGracePeriod: DefaultMaxGracePeriod, evictionHeadroom: DefaultEvictionOverhead}
+	d := &APICordonDrainer{
+		c:                c,
+		filter:           NewPodFilters(),
+		maxGracePeriod:   DefaultMaxGracePeriod,
+		evictionHeadroom: DefaultEvictionOverhead,
+	}
 	for _, o := range ao {
 		o(d)
 	}
