@@ -53,9 +53,26 @@ Args:
                        cordoned and drained.
 ```
 
+## Considerations
+Keep the following in mind before deploying Draino:
+
+* Always run Draino in `--dry-run` mode first to ensure it would drain the nodes
+  you expect it to. In dry run mode Draino will emit logs, metrics, and events
+  but will not actually cordon or drain nodes.
+* Draino will not evict [DaemonSet](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
+  or [mirror](https://kubernetes.io/docs/tasks/administer-cluster/static-pod/)
+  pods. It _will_ evict pods with local storage, and unreplicated pods.
+* Draino immediately cordons nodes that match its configured labels and node
+  conditions, but will wait a configurable amount of time (10 minutes by default)
+  between draining nodes. i.e. If two nodes begin exhibiting a node condition
+  simultaneously one node will be drained immediately and the other in 10 minutes.
+* Draino considers a drain to have failed if at least one pod eviction triggered
+  by that drain fails. If Draino fails to evict two of five pods it will consider
+  the Drain to have failed, but the remaining three pods will always be evicted.
+
 ## Deployment
 Draino is automatically built from master and pushed to the [Docker Hub](https://hub.docker.com/r/negz/draino/).
-Builds are tagged `negz/draino:latest` and `negz/drain:$(git rev-parse --short HEAD)`.
+Builds are tagged `negz/draino:latest` and `negz/draino:$(git rev-parse --short HEAD)`.
 An [example Kubernetes deployment manifest](manifest.yml) is provided.
 
 ## Monitoring
