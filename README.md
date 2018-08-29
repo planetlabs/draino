@@ -27,30 +27,24 @@ usage: draino [<flags>] [<node-conditions>...]
 Automatically cordons and drains nodes that match the supplied conditions.
 
 Flags:
-      --help                   Show context-sensitive help (also try --help-long
-                               and --help-man).
-  -d, --debug                  Run with debug logging.
-      --listen=":10002"        Address at which to expose /metrics and /healthz.
-      --kubeconfig=KUBECONFIG  Path to kubeconfig file. Leave unset to use
-                               in-cluster config.
-      --master=MASTER          Address of Kubernetes API server. Leave unset to
-                               use in-cluster config.
-      --dry-run                Emit an event without cordoning or draining
-                               matching nodes.
-      --max-grace-period=8m0s  Maximum time evicted pods will be given to
-                               terminate gracefully.
-      --eviction-headroom=30s  Additional time to wait after a pod's termination
-                               grace period for it to have been deleted.
-      --drain-buffer=10m0s     Minimum time between starting each drain. Nodes
-                               are always cordoned immediately.
+      --help                     Show context-sensitive help (also try --help-long and --help-man).
+  -d, --debug                    Run with debug logging.
+      --listen=":10002"          Address at which to expose /metrics and /healthz.
+      --kubeconfig=KUBECONFIG    Path to kubeconfig file. Leave unset to use in-cluster config.
+      --master=MASTER            Address of Kubernetes API server. Leave unset to use in-cluster config.
+      --dry-run                  Emit an event without cordoning or draining matching nodes.
+      --max-grace-period=8m0s    Maximum time evicted pods will be given to terminate gracefully.
+      --eviction-headroom=30s    Additional time to wait after a pod's termination grace period for it to have been deleted.
+      --drain-buffer=10m0s       Minimum time between starting each drain. Nodes are always cordoned immediately.
       --node-label=KEY=VALUE ...
-                               Only nodes with this label will be eligible for
-                               cordoning and draining. May be specified multiple
-                               times.
+                                 Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
+      --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
+      --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
+      --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
 
 Args:
-  [<node-conditions>]  Nodes for which any of these conditions are true will be
-                       cordoned and drained.
+  [<node-conditions>]  Nodes for which any of these conditions are true will be cordoned and drained.
+
 ```
 
 ## Considerations
@@ -59,9 +53,6 @@ Keep the following in mind before deploying Draino:
 * Always run Draino in `--dry-run` mode first to ensure it would drain the nodes
   you expect it to. In dry run mode Draino will emit logs, metrics, and events
   but will not actually cordon or drain nodes.
-* Draino will not evict [DaemonSet](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
-  or [mirror](https://kubernetes.io/docs/tasks/administer-cluster/static-pod/)
-  pods. It _will_ evict pods with local storage, and unreplicated pods.
 * Draino immediately cordons nodes that match its configured labels and node
   conditions, but will wait a configurable amount of time (10 minutes by default)
   between draining nodes. i.e. If two nodes begin exhibiting a node condition

@@ -38,6 +38,10 @@ func main() {
 		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
 		nodeLabels       = app.Flag("node-label", "Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.").PlaceHolder("KEY=VALUE").StringMap()
 
+		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
+		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
+		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
+
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Strings()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
@@ -82,11 +86,20 @@ func main() {
 	cs, err := client.NewForConfig(c)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
 
+	pf := []kubernetes.PodFilterFunc{kubernetes.MirrorPodFilter}
+	switch {
+	case !*evictLocalStoragePods:
+		pf = append(pf, kubernetes.LocalStoragePodFilter)
+	case !*evictUnreplicatedPods:
+		pf = append(pf, kubernetes.UnreplicatedPodFilter)
+	case !*evictDaemonSetPods:
+		pf = append(pf, kubernetes.NewDaemonSetPodFilter(cs))
+	}
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		kubernetes.NewAPICordonDrainer(cs,
 			kubernetes.MaxGracePeriod(*maxGracePeriod),
 			kubernetes.EvictionHeadroom(*evictionHeadroom),
-			kubernetes.WithPodFilter(kubernetes.NewPodFilters(kubernetes.MirrorPodFilter, kubernetes.NewDaemonSetPodFilter(cs)))),
+			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...))),
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer))
