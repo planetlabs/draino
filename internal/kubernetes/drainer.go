@@ -106,7 +106,12 @@ func WithPodFilter(f PodFilterFunc) APICordonDrainerOption {
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
 func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *APICordonDrainer {
-	d := &APICordonDrainer{c: c, maxGracePeriod: DefaultMaxGracePeriod, evictionHeadroom: DefaultEvictionOverhead}
+	d := &APICordonDrainer{
+		c:                c,
+		filter:           NewPodFilters(),
+		maxGracePeriod:   DefaultMaxGracePeriod,
+		evictionHeadroom: DefaultEvictionOverhead,
+	}
 	for _, o := range ao {
 		o(d)
 	}

@@ -18,6 +18,30 @@ func MirrorPodFilter(p core.Pod) (bool, error) {
 	return !mirrorPod, nil
 }
 
+// LocalStoragePodFilter returns true if the supplied pod does not have local
+// storage, i.e. does not use any 'empty dir' volumes.
+func LocalStoragePodFilter(p core.Pod) (bool, error) {
+	for _, v := range p.Spec.Volumes {
+		if v.EmptyDir != nil {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// UnreplicatedPodFilter returns true if the pod is replicated, i.e. is managed
+// by a controller (deployment, daemonset, statefulset, etc) of some sort.
+func UnreplicatedPodFilter(p core.Pod) (bool, error) {
+	// We're fine with 'evicting' unreplicated pods that aren't actually running.
+	if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
+		return true, nil
+	}
+	if meta.GetControllerOf(&p) == nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 // NewDaemonSetPodFilter returns a FilterFunc that returns true if the supplied
 // pod is not managed by an extant DaemonSet.
 func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
