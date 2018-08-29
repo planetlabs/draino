@@ -1,4 +1,4 @@
-# draino [![Docker Pulls](https://img.shields.io/docker/pulls/negz/draino.svg)](https://hub.docker.com/r/negz/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/negz/draino) [![Travis](https://img.shields.io/travis/negz/draino.svg?maxAge=300)](https://travis-ci.org/negz/draino/) [![Codecov](https://img.shields.io/codecov/c/github/negz/draino.svg?maxAge=3600)](https://codecov.io/gh/negz/draino/)
+# draino [![Docker Pulls](https://img.shields.io/docker/pulls/negz/draino.svg)](https://hub.docker.com/r/negz/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/negz/draino) [![Travis](https://img.shields.io/travis/com/negz/draino.svg?maxAge=300)](https://travis-ci.com/negz/draino/) [![Codecov](https://img.shields.io/codecov/c/github/negz/draino.svg?maxAge=3600)](https://codecov.io/gh/negz/draino/)
 Draino automatically drains Kubernetes nodes based on labels and node
 conditions. Nodes that match _all_ of the supplied labels and _any_ of the
 supplied node conditions will be cordoned immediately and drained after a
