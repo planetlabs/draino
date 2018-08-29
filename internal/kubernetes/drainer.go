@@ -193,20 +193,20 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	for _, pod := range pods {
 		go d.evict(pod, abort, errs)
 	}
+	// This will _eventually_ abort evictions. Evictions may spend up to
+	// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
+	// noticing they've been aborted.
+	defer close(abort)
 
 	deadline := time.After(d.deleteTimeout())
 	for range pods {
 		select {
 		case err := <-errs:
 			if err != nil {
-				return errors.Wrap(err, "cannot evict pods")
+				return errors.Wrap(err, "cannot evict all pods")
 			}
 		case <-deadline:
-			// This will _eventually_ abort evictions. Evictions may spend up to
-			// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff
-			// before noticing they've been aborted.
-			close(abort)
-			return errors.Wrap(errTimeout{}, "timed out waiting for eviction to complete")
+			return errors.Wrap(errTimeout{}, "timed out waiting for evictions to complete")
 		}
 	}
 	return nil
