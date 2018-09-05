@@ -87,12 +87,13 @@ func main() {
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
 
 	pf := []kubernetes.PodFilterFunc{kubernetes.MirrorPodFilter}
-	switch {
-	case !*evictLocalStoragePods:
+	if !*evictLocalStoragePods {
 		pf = append(pf, kubernetes.LocalStoragePodFilter)
-	case !*evictUnreplicatedPods:
+	}
+	if !*evictUnreplicatedPods {
 		pf = append(pf, kubernetes.UnreplicatedPodFilter)
-	case !*evictDaemonSetPods:
+	}
+	if !*evictDaemonSetPods {
 		pf = append(pf, kubernetes.NewDaemonSetPodFilter(cs))
 	}
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
