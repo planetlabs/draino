@@ -49,18 +49,18 @@ func main() {
 
 	var (
 		nodesCordoned = &view.View{
-			Name:        "nodes_cordoned",
+			Name:        "cordoned_nodes_total",
 			Measure:     kubernetes.MeasureNodesCordoned,
 			Description: "Number of nodes cordoned.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagNodeName, kubernetes.TagResult},
+			TagKeys:     []tag.Key{kubernetes.TagResult},
 		}
 		nodesDrained = &view.View{
-			Name:        "nodes_drained",
+			Name:        "drained_nodes_total",
 			Measure:     kubernetes.MeasureNodesDrained,
 			Description: "Number of nodes drained.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagNodeName, kubernetes.TagResult},
+			TagKeys:     []tag.Key{kubernetes.TagResult},
 		}
 	)
 	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained), "cannot create metrics")

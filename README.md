@@ -73,13 +73,12 @@ metrics at `/metrics`. The following metrics exist:
 ```bash
 $ kubectl -n kube-system exec -it ${DRAINO_POD} -- apk add curl
 $ kubectl -n kube-system exec -it ${DRAINO_POD} -- curl http://localhost:10002/metrics
-# HELP draino_nodes_cordoned Number of nodes cordoned.
-# TYPE draino_nodes_cordoned counter
-draino_nodes_cordoned{node_name="coolnode",result="succeeded"} 1
-draino_nodes_cordoned{node_name="ambivalentnode",result="succeeded"} 1
-draino_nodes_cordoned{node_name="lamenode",result="failed"} 1
-# HELP draino_nodes_drained Number of nodes drained.
-# TYPE draino_nodes_drained counter
-draino_nodes_drained{node_name="coolnode",result="succeeded"} 1
-draino_nodes_drained{node_name="ambivalentnode",result="failed"} 1
+# HELP draino_cordoned_nodes_total Number of nodes cordoned.
+# TYPE draino_cordoned_nodes_total counter
+draino_cordoned_nodes_total{result="succeeded"} 2
+draino_cordoned_nodes_total{result="failed"} 1
+# HELP draino_drained_nodes_total Number of nodes drained.
+# TYPE draino_drained_nodes_total counter
+draino_drained_nodes_total{result="succeeded"} 1
+draino_drained_nodes_total{result="failed"} 1
 ```
