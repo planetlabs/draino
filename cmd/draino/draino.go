@@ -34,7 +34,7 @@ import (
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/negz/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
 // TODO(negz): Use leader election? We don't really want more than one draino
