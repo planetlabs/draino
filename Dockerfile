@@ -2,7 +2,7 @@ FROM golang:1.10-alpine3.8 AS build
 
 RUN apk update && apk add git
 
-WORKDIR /go/src/github.com/negz/draino
+WORKDIR /go/src/github.com/planetlabs/draino
 COPY . .
 
 RUN go get -u github.com/Masterminds/glide

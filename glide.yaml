@@ -1,4 +1,4 @@
-package: github.com/negz/draino
+package: github.com/planetlabs/draino
 import:
 - package: github.com/julienschmidt/httprouter
   version: v1.1
