@@ -3,5 +3,5 @@
 set -e
 
 VERSION=$(git rev-parse --short HEAD)
-docker push "negz/draino:latest"
-docker push "negz/draino:${VERSION}"
+docker push "planetlabs/draino:latest"
+docker push "planetlabs/draino:${VERSION}"

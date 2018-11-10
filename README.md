@@ -1,4 +1,4 @@
-# draino [![Docker Pulls](https://img.shields.io/docker/pulls/negz/draino.svg)](https://hub.docker.com/r/negz/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/planetlabs/draino) [![Travis](https://img.shields.io/travis/com/negz/draino.svg?maxAge=300)](https://travis-ci.com/negz/draino/) [![Codecov](https://img.shields.io/codecov/c/github/negz/draino.svg?maxAge=3600)](https://codecov.io/gh/negz/draino/)
+# draino [![Docker Pulls](https://img.shields.io/docker/pulls/planetlabs/draino.svg)](https://hub.docker.com/r/planetlabs/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/planetlabs/draino) [![Travis](https://img.shields.io/travis/com/planetlabs/draino.svg?maxAge=300)](https://travis-ci.com/planetlabs/draino/) [![Codecov](https://img.shields.io/codecov/c/github/planetlabs/draino.svg?maxAge=3600)](https://codecov.io/gh/planetlabs/draino/)
 Draino automatically drains Kubernetes nodes based on labels and node
 conditions. Nodes that match _all_ of the supplied labels and _any_ of the
 supplied node conditions will be cordoned immediately and drained after a
@@ -21,7 +21,7 @@ Adding Draino to the mix enables autoremediation:
 
 ## Usage
 ```
-$ docker run negz/draino /draino --help
+$ docker run planetlabs/draino /draino --help
 usage: draino [<flags>] [<node-conditions>...]
 
 Automatically cordons and drains nodes that match the supplied conditions.
@@ -62,8 +62,8 @@ Keep the following in mind before deploying Draino:
   the Drain to have failed, but the remaining three pods will always be evicted.
 
 ## Deployment
-Draino is automatically built from master and pushed to the [Docker Hub](https://hub.docker.com/r/negz/draino/).
-Builds are tagged `negz/draino:latest` and `negz/draino:$(git rev-parse --short HEAD)`.
+Draino is automatically built from master and pushed to the [Docker Hub](https://hub.docker.com/r/planetlabs/draino/).
+Builds are tagged `planetlabs/draino:latest` and `planetlabs/draino:$(git rev-parse --short HEAD)`.
 An [example Kubernetes deployment manifest](manifest.yml) is provided.
 
 ## Monitoring
