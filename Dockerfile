@@ -1,12 +1,12 @@
 FROM golang:1.10-alpine3.8 AS build
 
-RUN apk update && apk add git
+RUN apk update && apk add git && apk add curl
 
 WORKDIR /go/src/github.com/planetlabs/draino
 COPY . .
 
-RUN go get -u github.com/Masterminds/glide
-RUN glide install
+RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+RUN dep ensure
 RUN go build -o /draino ./cmd/draino
 
 FROM alpine:3.8
