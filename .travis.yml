@@ -10,10 +10,10 @@ jobs:
   include:
     - stage: test
       before_install:
-        - go get -u github.com/Masterminds/glide
+        - curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
         - go get -u github.com/alecthomas/gometalinter
       install:
-        - glide install
+        - dep ensure
         - gometalinter --install
       script:
         - ./scripts/test.sh
