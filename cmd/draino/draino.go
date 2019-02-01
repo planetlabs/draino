@@ -58,7 +58,7 @@ func main() {
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
 
-		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Strings()
+		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 	glogWorkaround()
