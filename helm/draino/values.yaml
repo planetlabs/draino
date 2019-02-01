@@ -1,0 +1,30 @@
+dryRun: false
+
+extraArgs: {}
+
+conditions: {}
+
+replicaCount: 1
+
+image:
+  repository: planetlabs/draino
+  tag: 5e07e93
+  pullPolicy: IfNotPresent
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+rbac:
+  create: true
+  serviceAccountName:
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
