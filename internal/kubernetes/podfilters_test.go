@@ -184,6 +184,27 @@ func TestPodFilters(t *testing.T) {
 			passesFilter: true,
 		},
 		{
+			name: "NotProtectedFromEviction",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+				},
+			},
+			filter:       UnprotectedPodFilter("ProtectedPod"),
+			passesFilter: true,
+		},
+		{
+			name: "ProtectedFromEviction",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"ProtectedPod": ""},
+				},
+			},
+			filter:       UnprotectedPodFilter("ProtectedPod"),
+			passesFilter: false,
+		},
+		{
 			name:         "NoFiltersProvided",
 			pod:          core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
 			filter:       NewPodFilters(),

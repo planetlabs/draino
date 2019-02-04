@@ -79,6 +79,16 @@ func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 	}
 }
 
+// UnprotectedPodFilter returns a FilterFunc that returns true if the
+// supplied pod does not have the user-specified annotation for protection from
+// eviction
+func UnprotectedPodFilter(annotationKey string) PodFilterFunc {
+	return func(p core.Pod) (bool, error) {
+		_, protected := p.GetAnnotations()[annotationKey]
+		return !protected, nil
+	}
+}
+
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied
 // FilterFuncs return true.
 func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
