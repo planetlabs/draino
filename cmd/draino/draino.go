@@ -58,7 +58,7 @@ func main() {
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
 
-		protectedPodAnnotation = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction.").String()
+		protectedPodAnnotations = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
@@ -114,8 +114,8 @@ func main() {
 	if !*evictDaemonSetPods {
 		pf = append(pf, kubernetes.NewDaemonSetPodFilter(cs))
 	}
-	if *protectedPodAnnotation != "" {
-		pf = append(pf, kubernetes.UnprotectedPodFilter(*protectedPodAnnotation))
+	if len(*protectedPodAnnotations) > 0 {
+		pf = append(pf, kubernetes.UnprotectedPodFilter(*protectedPodAnnotations...))
 	}
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		kubernetes.NewAPICordonDrainer(cs,

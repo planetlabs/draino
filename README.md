@@ -41,8 +41,8 @@ Flags:
       --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
-      --protected-pod-annotation=PROTECTED-POD-ANNOTATION
-                                 Protect pods with this annotation from eviction.
+      --protected-pod-annotation=KEY[=VALUE] ...
+                                 Protect pods with this annotation from eviction. May be specified multiple times.
 
 Args:
   <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.

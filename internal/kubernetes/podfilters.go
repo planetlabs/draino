@@ -17,6 +17,8 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"strings"
+
 	"github.com/pkg/errors"
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -80,12 +82,30 @@ func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 }
 
 // UnprotectedPodFilter returns a FilterFunc that returns true if the
-// supplied pod does not have the user-specified annotation for protection from
-// eviction
-func UnprotectedPodFilter(annotationKey string) PodFilterFunc {
+// supplied pod does not have any of the user-specified annotations for
+// protection from eviction
+func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, error) {
-		_, protected := p.GetAnnotations()[annotationKey]
-		return !protected, nil
+		var filter bool
+		for _, annot := range annotations {
+			// Try to split the annotation into key-value pairs
+			kv := strings.SplitN(annot, "=", 2)
+			if len(kv) < 2 {
+				// If the annotation is a single string, then simply check for
+				// the existence of the annotation key
+				_, filter = p.GetAnnotations()[kv[0]]
+			} else {
+				// If the annotation is a key-value pair, then check if the
+				// value for the pod annotation matches that of the
+				// user-specified value
+				v, ok := p.GetAnnotations()[kv[0]]
+				filter = ok && v == kv[1]
+			}
+			if filter {
+				return false, nil
+			}
+		}
+		return true, nil
 	}
 }
 
