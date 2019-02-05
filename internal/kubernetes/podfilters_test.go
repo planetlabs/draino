@@ -184,6 +184,125 @@ func TestPodFilters(t *testing.T) {
 			passesFilter: true,
 		},
 		{
+			name: "NoProtectionFromPodEviction",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"Random": "true"},
+				},
+			},
+			filter:       UnprotectedPodFilter(),
+			passesFilter: true,
+		},
+		{
+			name: "NoPodAnnotations",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+				},
+			},
+			filter:       UnprotectedPodFilter("Protect"),
+			passesFilter: true,
+		},
+		{
+			name: "NoPodAnnotationsWithEmptyUserValue",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+				},
+			},
+			filter:       UnprotectedPodFilter("Protect="),
+			passesFilter: true,
+		},
+		{
+			name: "NoMatchingProtectionAnnotations",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"Useless": "true"},
+				},
+			},
+			filter:       UnprotectedPodFilter("Protect", "ProtectTwo=true"),
+			passesFilter: true,
+		},
+		{
+			name: "AltNoMatchingProtectionAnnotations",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"NeedsAValue": ""},
+				},
+			},
+			filter:       UnprotectedPodFilter("Protect", "ProtectTwo=true", "NeedsAValue=true"),
+			passesFilter: true,
+		},
+		{
+			name: "KeyOnlyProtectionAnnotation",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"Protect": ""},
+				},
+			},
+			filter:       UnprotectedPodFilter("Protect"),
+			passesFilter: false,
+		},
+		{
+			name: "MultipleKeyOnlyProtectionAnnotations",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"ProtectTwo": ""},
+				},
+			},
+			filter:       UnprotectedPodFilter("ProtectOne", "ProtectTwo"),
+			passesFilter: false,
+		},
+		{
+			name: "SingleProtectionAnnotation",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"Protect": "true"},
+				},
+			},
+			filter:       UnprotectedPodFilter("Protect=true"),
+			passesFilter: false,
+		},
+		{
+			name: "MultipleProtectionAnnotations",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"ProtectTwo": "true"},
+				},
+			},
+			filter:       UnprotectedPodFilter("ProtectOne=true", "ProtectTwo=true"),
+			passesFilter: false,
+		},
+		{
+			name: "MultipleMixedProtectionAnnotations",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"ProtectTwo": ""},
+				},
+			},
+			filter:       UnprotectedPodFilter("ProtectOne=true", "ProtectTwo"),
+			passesFilter: false,
+		},
+		{
+			name: "AltMultipleMixedProtectionAnnotations",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        podName,
+					Annotations: map[string]string{"ProtectOne": "true"},
+				},
+			},
+			filter:       UnprotectedPodFilter("ProtectOne", "ProtectTwo=true"),
+			passesFilter: false,
+		},
+		{
 			name:         "NoFiltersProvided",
 			pod:          core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
 			filter:       NewPodFilters(),

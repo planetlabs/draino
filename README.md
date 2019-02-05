@@ -22,7 +22,7 @@ Adding Draino to the mix enables autoremediation:
 ## Usage
 ```
 $ docker run planetlabs/draino /draino --help
-usage: draino [<flags>] [<node-conditions>...]
+usage: draino [<flags>] <node-conditions>...
 
 Automatically cordons and drains nodes that match the supplied conditions.
 
@@ -41,9 +41,11 @@ Flags:
       --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
+      --protected-pod-annotation=KEY[=VALUE] ...
+                                 Protect pods with this annotation from eviction. May be specified multiple times.
 
 Args:
-  [<node-conditions>]  Nodes for which any of these conditions are true will be cordoned and drained.
+  <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.
 
 ```
 
