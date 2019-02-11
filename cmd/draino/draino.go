@@ -60,7 +60,7 @@ func main() {
 
 		protectedPodAnnotations = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
-		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
+		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained. <TYPE[=STATE]>").Strings()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 	glogWorkaround()

@@ -19,6 +19,7 @@ package kubernetes
 import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"strings"
 )
 
 // NewNodeLabelFilter returns a filter that returns true if the supplied object
@@ -41,6 +42,22 @@ func NewNodeLabelFilter(labels map[string]string) func(o interface{}) bool {
 // NewNodeConditionFilter returns a filter that returns true if the supplied
 // object is a node with any of the supplied node conditions.
 func NewNodeConditionFilter(ct []string) func(o interface{}) bool {
+	var specifiedConditions [][]string
+	//make parsing once
+	for _, t := range ct {
+		kv := strings.SplitN(t, "=", 2)
+		// default values as if we specify only condition type e.g. OutOfMemory
+		tp := t
+		st := "True"
+
+		// if we provided type and state as if OutOfMemory=Unknown
+		if len(kv) == 2 {
+			tp = kv[0]
+			st = kv[1]
+		}
+		specifiedConditions = append(specifiedConditions, []string{tp, st})
+	}
+
 	return func(o interface{}) bool {
 		n, ok := o.(*core.Node)
 		if !ok {
@@ -49,9 +66,10 @@ func NewNodeConditionFilter(ct []string) func(o interface{}) bool {
 		if len(ct) == 0 {
 			return true
 		}
-		for _, t := range ct {
+
+		for _, condition := range specifiedConditions {
 			for _, c := range n.Status.Conditions {
-				if c.Type == core.NodeConditionType(t) && c.Status == core.ConditionTrue {
+				if c.Type == core.NodeConditionType(condition[0]) && c.Status == core.ConditionStatus(condition[1]) {
 					return true
 				}
 			}
