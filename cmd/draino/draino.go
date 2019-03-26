@@ -142,6 +142,7 @@ func main() {
 	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: cf}
 	nodes := kubernetes.NewNodeWatch(cs, lf)
 
+	log.Info("draino is running", zap.String("listen", *listen))
 	kingpin.FatalIfError(await(nodes, web), "error serving")
 }
 
