@@ -17,7 +17,9 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"reflect"
 	"testing"
+	"time"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -214,6 +216,39 @@ func TestNodeConditionFilter(t *testing.T) {
 			conditions:   []string{"Cool"},
 			passesFilter: false,
 		},
+		{
+			name: "NewConditionFormat",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionUnknown},
+				}},
+			},
+			conditions:   []string{"Cool=Unknown,10m"},
+			passesFilter: true,
+		},
+		{
+			name: "NewConditionFormatDurationNotEnough",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionUnknown, LastTransitionTime: meta.NewTime(time.Now().Add(time.Duration(-9) * time.Minute))},
+				}},
+			},
+			conditions:   []string{"Cool=Unknown,10m"},
+			passesFilter: false,
+		},
+		{
+			name: "NewConditionFormatDurationIsEnough",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{Conditions: []core.NodeCondition{
+					core.NodeCondition{Type: "Cool", Status: core.ConditionUnknown, LastTransitionTime: meta.NewTime(time.Now().Add(time.Duration(-15) * time.Minute))},
+				}},
+			},
+			conditions:   []string{"Cool=Unknown,14m"},
+			passesFilter: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -299,6 +334,42 @@ func TestNodeProcessedFilter(t *testing.T) {
 			passesFilter := np.Filter(tc.obj)
 			if passesFilter != tc.passesFilter {
 				t.Errorf("np.Filter(tc.obj): want %v, got %v", tc.passesFilter, passesFilter)
+			}
+		})
+	}
+}
+
+func TestParseConditions(t *testing.T) {
+	cases := []struct {
+		name       string
+		conditions []string
+		expect     []SuppliedCondition
+	}{
+		{
+			name:       "OldFormat",
+			conditions: []string{"Ready"},
+			expect:     []SuppliedCondition{SuppliedCondition{core.NodeConditionType("Ready"), core.ConditionStatus("True"), time.Duration(0) * time.Second}},
+		},
+		{
+			name:       "Mixed",
+			conditions: []string{"Ready", "OutOfDisk=True,10m"},
+			expect: []SuppliedCondition{
+				SuppliedCondition{core.NodeConditionType("Ready"), core.ConditionStatus("True"), time.Duration(0) * time.Second},
+				SuppliedCondition{core.NodeConditionType("OutOfDisk"), core.ConditionStatus("True"), time.Duration(10) * time.Minute},
+			},
+		},
+		{
+			name:       "NewFormat",
+			conditions: []string{"Ready=Unknown,30m"},
+			expect:     []SuppliedCondition{SuppliedCondition{core.NodeConditionType("Ready"), core.ConditionStatus("Unknown"), time.Duration(30) * time.Minute}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := ParseConditions(tc.conditions)
+			if !reflect.DeepEqual(tc.expect, parsed) {
+				t.Errorf("expect %v, got: %v", tc.expect, parsed)
 			}
 		})
 	}
