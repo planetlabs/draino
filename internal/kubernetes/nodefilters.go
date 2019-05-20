@@ -17,6 +17,9 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"strings"
+	"time"
+
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -49,15 +52,35 @@ func NewNodeConditionFilter(ct []string) func(o interface{}) bool {
 		if len(ct) == 0 {
 			return true
 		}
-		for _, t := range ct {
+		pc := ParseConditions(ct)
+		for _, t := range pc {
 			for _, c := range n.Status.Conditions {
-				if c.Type == core.NodeConditionType(t) && c.Status == core.ConditionTrue {
+				if c.Type == t.Type && c.Status == t.Status && c.LastTransitionTime.Add(t.MinimumDuration).Before(time.Now()) {
 					return true
 				}
 			}
 		}
 		return false
 	}
+}
+
+// ParseConditions can parse the string array of conditions to a list of
+// SuppliedContion to support particular status value and duration.
+func ParseConditions(conditions []string) []SuppliedCondition {
+	parsed := make([]SuppliedCondition, len(conditions))
+	for i, c := range conditions {
+		ts := strings.SplitN(c, "=", 2)
+		if len(ts) != 2 {
+			// Keep backward compatibility
+			ts = []string{c, "True,0s"}
+		}
+		sm := strings.SplitN(ts[1], ",", 2)
+		duration, err := time.ParseDuration(sm[1])
+		if err == nil {
+			parsed[i] = SuppliedCondition{core.NodeConditionType(ts[0]), core.ConditionStatus(sm[0]), duration}
+		}
+	}
+	return parsed
 }
 
 // NodeSchedulableFilter returns true if the supplied object is a schedulable
