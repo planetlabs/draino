@@ -198,7 +198,7 @@ func TestPodFilters(t *testing.T) {
 			name: "NoPodAnnotations",
 			pod: core.Pod{
 				ObjectMeta: meta.ObjectMeta{
-					Name:        podName,
+					Name: podName,
 				},
 			},
 			filter:       UnprotectedPodFilter("Protect"),
@@ -208,7 +208,7 @@ func TestPodFilters(t *testing.T) {
 			name: "NoPodAnnotationsWithEmptyUserValue",
 			pod: core.Pod{
 				ObjectMeta: meta.ObjectMeta{
-					Name:        podName,
+					Name: podName,
 				},
 			},
 			filter:       UnprotectedPodFilter("Protect="),
