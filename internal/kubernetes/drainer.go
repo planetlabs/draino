@@ -35,6 +35,8 @@ const (
 	DefaultEvictionOverhead time.Duration = 30 * time.Second
 
 	kindDaemonSet = "DaemonSet"
+
+	DefaultWithDrain = true
 )
 
 type errTimeout struct{}
@@ -89,6 +91,7 @@ type APICordonDrainer struct {
 
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
+	withDrain        bool
 }
 
 // SuppliedCondition defines the condition will be watched.
@@ -126,6 +129,13 @@ func WithPodFilter(f PodFilterFunc) APICordonDrainerOption {
 	}
 }
 
+// WithDrain determines if we're actually going to drain nodes
+func WithDrain(b bool) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.withDrain = b
+	}
+}
+
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
 func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *APICordonDrainer {
@@ -134,6 +144,7 @@ func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *
 		filter:           NewPodFilters(),
 		maxGracePeriod:   DefaultMaxGracePeriod,
 		evictionHeadroom: DefaultEvictionOverhead,
+		withDrain:        DefaultWithDrain,
 	}
 	for _, o := range ao {
 		o(d)
@@ -163,32 +174,36 @@ func (d *APICordonDrainer) Cordon(n *core.Node) error {
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 func (d *APICordonDrainer) Drain(n *core.Node) error {
-	pods, err := d.getPods(n.GetName())
-	if err != nil {
-		return errors.Wrapf(err, "cannot get pods for node %s", n.GetName())
-	}
-
-	abort := make(chan struct{})
-	errs := make(chan error, 1)
-	for _, pod := range pods {
-		go d.evict(pod, abort, errs)
-	}
-	// This will _eventually_ abort evictions. Evictions may spend up to
-	// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
-	// noticing they've been aborted.
-	defer close(abort)
-
-	deadline := time.After(d.deleteTimeout())
-	for range pods {
-		select {
-		case err := <-errs:
-			if err != nil {
-				return errors.Wrap(err, "cannot evict all pods")
-			}
-		case <-deadline:
-			return errors.Wrap(errTimeout{}, "timed out waiting for evictions to complete")
+	if d.withDrain {
+		pods, err := d.getPods(n.GetName())
+		if err != nil {
+			return errors.Wrapf(err, "cannot get pods for node %s", n.GetName())
 		}
+
+		abort := make(chan struct{})
+		errs := make(chan error, 1)
+		for _, pod := range pods {
+			go d.evict(pod, abort, errs)
+		}
+		// This will _eventually_ abort evictions. Evictions may spend up to
+		// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
+		// noticing they've been aborted.
+		defer close(abort)
+
+		deadline := time.After(d.deleteTimeout())
+		for range pods {
+			select {
+			case err := <-errs:
+				if err != nil {
+					return errors.Wrap(err, "cannot evict all pods")
+				}
+			case <-deadline:
+				return errors.Wrap(errTimeout{}, "timed out waiting for evictions to complete")
+			}
+		}
+		return nil
 	}
+	// do nothing
 	return nil
 }
 

@@ -54,6 +54,8 @@ func main() {
 		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
 		nodeLabels       = app.Flag("node-label", "Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.").PlaceHolder("KEY=VALUE").StringMap()
 
+		noDrain = app.Flag("no-drain", "Do not drain nodes, only cordon them").Bool()
+
 		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
@@ -131,6 +133,22 @@ func main() {
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
 				&kubernetes.NoopCordonDrainer{},
+				kubernetes.NewEventRecorder(cs),
+				kubernetes.WithLogger(log),
+				kubernetes.WithDrainBuffer(*drainBuffer)),
+		}
+	}
+
+	if *noDrain {
+		h = cache.FilteringResourceEventHandler{
+			FilterFunc: kubernetes.NewNodeProcessed().Filter,
+			Handler: kubernetes.NewDrainingResourceEventHandler(
+				kubernetes.NewAPICordonDrainer(cs,
+					kubernetes.MaxGracePeriod(*maxGracePeriod),
+					kubernetes.EvictionHeadroom(*evictionHeadroom),
+					kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
+					kubernetes.WithDrain(false),
+				),
 				kubernetes.NewEventRecorder(cs),
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer)),
