@@ -84,3 +84,11 @@ draino_cordoned_nodes_total{result="failed"} 1
 draino_drained_nodes_total{result="succeeded"} 1
 draino_drained_nodes_total{result="failed"} 1
 ```
+
+## Modes
+
+### Dry Run
+Draino can be run in dry run mode using the `--dry-run` flag.
+
+### Cordon Only
+Draino can also optionally be run in a mode where the nodes are only cordoned, and not drained. This can be achieved by using the `--no-drain` flag
