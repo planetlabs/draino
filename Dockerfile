@@ -11,5 +11,7 @@ RUN go build -o /draino ./cmd/draino
 
 FROM alpine:3.8
 
-RUN apk update && apk add ca-certificates
+RUN apk update && apk add ca-certificates \
+    && RUN addgroup -S user && adduser -S user -G user
+USER user
 COPY --from=build /draino /draino
