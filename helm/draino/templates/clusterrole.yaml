@@ -27,5 +27,8 @@ rules:
 - apiGroups: [extensions]
   resources: [daemonsets]
   verbs: [get, watch, list]
+- apiGroups: ['']
+  resources: [endpoints]
+  verbs: [get, create, update]
 
 {{- end -}}

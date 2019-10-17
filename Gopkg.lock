@@ -471,7 +471,7 @@
   version = "kubernetes-1.11.0"
 
 [[projects]]
-  digest = "1:79cf4c5cf3e201879a15cfb4146adeb33301c0c241bbd3cf70de08bb25cd57f8"
+  digest = "1:bc85bb7df6e71402fa431b26ac70461c15a52a70d1cbff776cb7d0a8fc486301"
   name = "k8s.io/client-go"
   packages = [
     "discovery",
@@ -551,6 +551,8 @@
     "tools/clientcmd/api",
     "tools/clientcmd/api/latest",
     "tools/clientcmd/api/v1",
+    "tools/leaderelection",
+    "tools/leaderelection/resourcelock",
     "tools/metrics",
     "tools/pager",
     "tools/record",
@@ -608,6 +610,8 @@
     "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/clientcmd",
     "k8s.io/client-go/tools/clientcmd/api",
+    "k8s.io/client-go/tools/leaderelection",
+    "k8s.io/client-go/tools/leaderelection/resourcelock",
     "k8s.io/client-go/tools/record",
   ]
   solver-name = "gps-cdcl"
