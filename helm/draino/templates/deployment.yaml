@@ -35,10 +35,10 @@ spec:
             - {{ . }}
           {{- end }}
           livenessProbe:
+            initialDelaySeconds: 30
             httpGet:
               path: /healthz
               port: 10002
-              initialDelaySeconds: 30
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       serviceAccountName: {{ if .Values.rbac.create }}{{ template "draino.fullname" . }}{{ else }}"{{ .Values.rbac.serviceAccountName }}"{{ end }}
