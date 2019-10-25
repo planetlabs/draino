@@ -33,13 +33,12 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
-// TODO(negz): Use leader election? We don't really want more than one draino
-// running at a time.
-// https://godoc.org/k8s.io/client-go/tools/leaderelection
 func main() {
 	var (
 		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()
@@ -53,6 +52,7 @@ func main() {
 		evictionHeadroom = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
 		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
 		nodeLabels       = app.Flag("node-label", "Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.").PlaceHolder("KEY=VALUE").StringMap()
+		namespace        = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
 
 		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
@@ -98,6 +98,11 @@ func main() {
 	kingpin.FatalIfError(err, "cannot create log")
 	defer log.Sync()
 
+	go func() {
+		log.Info("web server is running", zap.String("listen", *listen))
+		kingpin.FatalIfError(await(web), "error serving")
+	}()
+
 	c, err := kubernetes.BuildConfigFromFlags(*apiserver, *kubecfg)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client configuration")
 
@@ -142,8 +147,36 @@ func main() {
 	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: cf}
 	nodes := kubernetes.NewNodeWatch(cs, lf)
 
-	log.Info("draino is running", zap.String("listen", *listen))
-	kingpin.FatalIfError(await(nodes, web), "error serving")
+	id, err := os.Hostname()
+	kingpin.FatalIfError(err, "cannot get hostname")
+
+	lock, err := resourcelock.New(
+		resourcelock.EndpointsResourceLock,
+		*namespace,
+		kubernetes.Component,
+		cs.CoreV1(),
+		resourcelock.ResourceLockConfig{
+			Identity:      id,
+			EventRecorder: kubernetes.NewEventRecorder(cs),
+		},
+	)
+	kingpin.FatalIfError(err, "cannot create lock")
+
+	leaderelection.RunOrDie(leaderelection.LeaderElectionConfig{
+		Lock:          lock,
+		LeaseDuration: 15 * time.Second,
+		RenewDeadline: 10 * time.Second,
+		RetryPeriod:   2 * time.Second,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(_ <-chan struct{}) {
+				log.Info("node watcher is running")
+				kingpin.FatalIfError(await(nodes), "error watching")
+			},
+			OnStoppedLeading: func() {
+				kingpin.Fatalf("lost leader election")
+			},
+		},
+	})
 }
 
 type runner interface {
