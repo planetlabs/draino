@@ -116,6 +116,17 @@ func TestNodeLabelFilter(t *testing.T) {
 			passesFilter: false,
 		},
 		{
+			name: "FilterWithEmptyValueAndNodeWithEmptyValue",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very", "keyWithNoValue": ""},
+				},
+			},
+			labels:       map[string]string{"keyWithNoValue": ""},
+			passesFilter: true,
+		},
+		{
 			name: "NotANode",
 			obj: &core.Pod{
 				ObjectMeta: meta.ObjectMeta{
