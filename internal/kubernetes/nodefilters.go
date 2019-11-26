@@ -33,7 +33,7 @@ func NewNodeLabelFilter(labels map[string]string) func(o interface{}) bool {
 			return false
 		}
 		for k, v := range labels {
-			if n.GetLabels()[k] != v {
+			if value, ok := n.GetLabels()[k]; value != v || !ok {
 				return false
 			}
 		}
