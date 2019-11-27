@@ -19,6 +19,16 @@ resources:
     cpu: 100m
     memory: 128Mi
 
+# Add these annotations to all pods
+podAnnotations: {}
+  # name: value
+  # prometheus.io/scrape: 'true'
+  # prometheus.io/port: '9102'
+
+# Add these labels to all pods
+podLabels: {}
+  # name: value
+
 rbac:
   create: true
   serviceAccountName:
