@@ -5,9 +5,9 @@ RUN apk update && apk add git && apk add curl
 WORKDIR /go/src/github.com/planetlabs/draino
 COPY . .
 
-RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
-RUN dep ensure
-RUN go build -o /draino ./cmd/draino
+RUN go mod tidy && \
+    go mod download && \
+    go build -o /draino ./cmd/draino
 
 FROM alpine:3.10
 
