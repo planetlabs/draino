@@ -399,3 +399,65 @@ func TestDrain(t *testing.T) {
 		})
 	}
 }
+
+func TestMarkDrain(t *testing.T) {
+	now := meta.Time{Time: time.Now()}
+	cases := []struct {
+		name     string
+		node     *core.Node
+		isMarked bool
+	}{
+		{
+			name:     "markDrain",
+			node:     &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			isMarked: false,
+		},
+		{
+			name: "markDrain again",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled",
+						},
+					},
+				},
+			},
+			isMarked: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fake.NewSimpleClientset(tc.node)
+			d := NewAPICordonDrainer(c)
+			{
+				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				if err != nil {
+					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
+				}
+				if IsMarkedForDrain(n) != tc.isMarked {
+					t.Errorf("node %v initial mark is not correct", tc.node.Name)
+				}
+			}
+			if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false); err != nil {
+				t.Errorf("d.MarkDrain(%v): %v", tc.node.Name, err)
+			}
+			{
+				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				if err != nil {
+					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
+				}
+				if !IsMarkedForDrain(n) {
+					t.Errorf("node %v is not marked for drain", tc.node.Name)
+				}
+			}
+		})
+	}
+}

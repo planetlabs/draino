@@ -284,45 +284,6 @@ func TestNodeConditionFilter(t *testing.T) {
 	}
 }
 
-func TestNodeSchedulableFilter(t *testing.T) {
-	cases := []struct {
-		name         string
-		obj          interface{}
-		passesFilter bool
-	}{
-		{
-			name: "NodeSchedulable",
-			obj: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-			},
-			passesFilter: true,
-		},
-		{
-			name: "NodeUnschedulable",
-			obj: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-			passesFilter: false,
-		}, {
-			name: "NotANode",
-			obj: &core.Pod{
-				ObjectMeta: meta.ObjectMeta{Name: podName},
-			},
-			passesFilter: false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			filter := NodeSchedulableFilter
-			passesFilter := filter(tc.obj)
-			if passesFilter != tc.passesFilter {
-				t.Errorf("filter(tc.obj): want %v, got %v", tc.passesFilter, passesFilter)
-			}
-		})
-	}
-}
 func TestNodeProcessedFilter(t *testing.T) {
 	cases := []struct {
 		name         string

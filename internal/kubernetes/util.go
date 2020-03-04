@@ -17,7 +17,11 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
+	"time"
+
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -47,4 +51,24 @@ func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 	b := record.NewBroadcaster()
 	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(c.CoreV1().RESTClient()).Events("")})
 	return b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
+}
+
+func Until(f func() error, retryPeriod, timeout time.Duration) error {
+	stopChan := make(chan struct{})
+	go wait.Until(func() {
+		if err := f(); err != nil {
+			return
+		}
+		close(stopChan)
+	}, 50*time.Millisecond, stopChan)
+
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+	select {
+	case <-timeoutTimer.C:
+		close(stopChan)
+		return fmt.Errorf("timeout")
+	case <-stopChan:
+		return nil
+	}
 }

@@ -18,15 +18,14 @@ package main
 
 import (
 	"context"
-	"flag"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/julienschmidt/httprouter"
 	"github.com/oklog/run"
-	"go.opencensus.io/exporter/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
@@ -63,7 +62,6 @@ func main() {
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
-	glogWorkaround()
 
 	var (
 		nodesCordoned = &view.View{
@@ -80,8 +78,15 @@ func main() {
 			Aggregation: view.Count(),
 			TagKeys:     []tag.Key{kubernetes.TagResult},
 		}
+		nodesDrainScheduled = &view.View{
+			Name:        "drain_scheduled_nodes_total",
+			Measure:     kubernetes.MeasureNodesDrainScheduled,
+			Description: "Number of nodes scheduled for drain.",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{kubernetes.TagResult},
+		}
 	)
-	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained), "cannot create metrics")
+	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained, nodesDrainScheduled), "cannot create metrics")
 	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
@@ -142,19 +147,24 @@ func main() {
 		}
 	}
 
-	sf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NodeSchedulableFilter, Handler: h}
-	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: sf}
+	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: h}
 	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: cf}
 	nodes := kubernetes.NewNodeWatch(cs, lf)
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")
 
+	// use a Go context so we can tell the leaderelection code when we
+	// want to step down
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	lock, err := resourcelock.New(
 		resourcelock.EndpointsResourceLock,
 		*namespace,
 		kubernetes.Component,
 		cs.CoreV1(),
+		cs.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      id,
 			EventRecorder: kubernetes.NewEventRecorder(cs),
@@ -162,13 +172,13 @@ func main() {
 	)
 	kingpin.FatalIfError(err, "cannot create lock")
 
-	leaderelection.RunOrDie(leaderelection.LeaderElectionConfig{
+	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:          lock,
 		LeaseDuration: 15 * time.Second,
 		RenewDeadline: 10 * time.Second,
 		RetryPeriod:   2 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(_ <-chan struct{}) {
+			OnStartedLeading: func(ctx context.Context) {
 				log.Info("node watcher is running")
 				kingpin.FatalIfError(await(nodes), "error watching")
 			},
@@ -212,12 +222,4 @@ func (r *httpRunner) Run(stop <-chan struct{}) {
 	}()
 	s.ListenAndServe() // nolint:errcheck
 	cancel()
-}
-
-// Many Kubernetes client things depend on glog. glog gets sad when flag.Parse()
-// is not called before it tries to emit a log line. flag.Parse() fights with
-// kingpin.
-func glogWorkaround() {
-	os.Args = []string{os.Args[0], "-logtostderr=true", "-v=0", "-vmodule="}
-	flag.Parse()
 }

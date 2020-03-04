@@ -69,6 +69,8 @@ Builds are tagged `planetlabs/draino:latest` and `planetlabs/draino:$(git rev-pa
 An [example Kubernetes deployment manifest](manifest.yml) is provided.
 
 ## Monitoring
+
+### Metrics
 Draino provides a simple healthcheck endpoint at `/healthz` and Prometheus
 metrics at `/metrics`. The following metrics exist:
 
@@ -83,4 +85,68 @@ draino_cordoned_nodes_total{result="failed"} 1
 # TYPE draino_drained_nodes_total counter
 draino_drained_nodes_total{result="succeeded"} 1
 draino_drained_nodes_total{result="failed"} 1
+```
+
+### Events
+Draino is generating event for every relevant step of the eviction process. Here is an example that ends with a reason `DrainFailed`. When everything is fine the last event for a given node will have a reason `DrainSucceeded`.
+```
+> kubectl get events -n default | grep -E '(^LAST|draino)'
+
+LAST SEEN   FIRST SEEN   COUNT   NAME                                               KIND TYPE      REASON             SOURCE MESSAGE
+5m          5m           1       node-demo.15fe0c35f0b4bd10    Node Warning   CordonStarting     draino Cordoning node
+5m          5m           1       node-demo.15fe0c35fe3386d8    Node Warning   CordonSucceeded    draino Cordoned node
+5m          5m           1       node-demo.15fe0c360bd516f8    Node Warning   DrainScheduled     draino Will drain node after 2020-03-20T16:19:14.91905+01:00
+5m          5m           1       node-demo.15fe0c3852986fe8    Node Warning   DrainStarting      draino Draining node
+4m          4m           1       node-demo.15fe0c48d010ecb0    Node Warning   DrainFailed        draino Draining failed: timed out waiting for evictions to complete: timed out
+```
+
+### Conditions
+When a drain is scheduled, on top of the event, a condition is added to the status of the node. This condition will hold information about the beginning and the end of the drain procedure. This is something that you can see by describing the node resource:
+
+```
+> kubectl describe node {node-name}
+......
+Unschedulable:      true
+Conditions:
+  Type                  Status  LastHeartbeatTime                 LastTransitionTime                Reason                       Message
+  ----                  ------  -----------------                 ------------------                ------                       -------
+  OutOfDisk             False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasSufficientDisk     kubelet has sufficient disk space available
+  MemoryPressure        False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasSufficientMemory   kubelet has sufficient memory available
+  DiskPressure          False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasNoDiskPressure     kubelet has no disk pressure
+  PIDPressure           False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasSufficientPID      kubelet has sufficient PID available
+  Ready                 True    Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:02:09 +0100   KubeletReady                 kubelet is posting ready status. AppArmor enabled
+  ec2-host-retirement   True    Fri, 20 Mar 2020 15:23:26 +0100   Fri, 20 Mar 2020 15:23:26 +0100   NodeProblemDetector          Condition added with tooling
+  DrainScheduled        True    Fri, 20 Mar 2020 15:50:50 +0100   Fri, 20 Mar 2020 15:23:26 +0100   Draino                       Drain activity scheduled 2020-03-20T15:50:34+01:00
+```
+
+  Later when the drain activity will be completed the condition will be ameded letting you know if it succeeded of failed:
+
+```
+> kubectl describe node {node-name}
+......
+Unschedulable:      true
+Conditions:
+  Type                  Status  LastHeartbeatTime                 LastTransitionTime                Reason                       Message
+  ----                  ------  -----------------                 ------------------                ------                       -------
+  OutOfDisk             False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasSufficientDisk     kubelet has sufficient disk space available
+  MemoryPressure        False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasSufficientMemory   kubelet has sufficient memory available
+  DiskPressure          False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasNoDiskPressure     kubelet has no disk pressure
+  PIDPressure           False   Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:01:59 +0100   KubeletHasSufficientPID      kubelet has sufficient PID available
+  Ready                 True    Fri, 20 Mar 2020 15:52:41 +0100   Fri, 20 Mar 2020 14:02:09 +0100   KubeletReady                 kubelet is posting ready status. AppArmor enabled
+  ec2-host-retirement   True    Fri, 20 Mar 2020 15:23:26 +0100   Fri, 20 Mar 2020 15:23:26 +0100   NodeProblemDetector          Condition added with tooling
+  DrainScheduled        True    Fri, 20 Mar 2020 15:50:50 +0100   Fri, 20 Mar 2020 15:23:26 +0100   Draino                       Drain activity scheduled 2020-03-20T15:50:34+01:00 | Completed: 2020-03-20T15:50:50+01:00
+  ```
+
+If the drain had failed the condition line would look like:
+```
+  DrainScheduled        True    Fri, 20 Mar 2020 15:50:50 +0100   Fri, 20 Mar 2020 15:23:26 +0100   Draino                       Drain activity scheduled 2020-03-20T15:50:34+01:00| Failed:2020-03-20T15:55:50+01:00
+```
+
+## Retrying drain
+
+In some cases the drain activity may failed because of restrictive Pod Disruption Budget or any other reason external to Draino. The node remains `cordon` and the drain condition 
+is marked as `Failed`. If you want to reschedule a drain tentative on that node, add the annotation: `draino/drain-retry: true`. A new drain schedule will be created. Note that the annotation is not modified and will trigger retries in loop in case the drain fails again.
+
+```
+kubectl annotate node {node-name} draino/drain-retry=true
 ```

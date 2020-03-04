@@ -83,16 +83,6 @@ func ParseConditions(conditions []string) []SuppliedCondition {
 	return parsed
 }
 
-// NodeSchedulableFilter returns true if the supplied object is a schedulable
-// node.
-func NodeSchedulableFilter(o interface{}) bool {
-	n, ok := o.(*core.Node)
-	if !ok {
-		return false
-	}
-	return !n.Spec.Unschedulable
-}
-
 // NodeProcessed tracks whether nodes have been processed before using a map.
 type NodeProcessed map[types.UID]bool
 
