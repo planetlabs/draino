@@ -4,20 +4,16 @@ services:
   - docker
 
 go:
-  - 1.10.x
+  - 1.13.x
 
 jobs:
   include:
     - stage: test
-      before_install:
-        - curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
-        - go get -u github.com/alecthomas/gometalinter
       install:
-        - dep ensure
-        - gometalinter --install
+        - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.24.0
       script:
         - ./scripts/test.sh
-        - gometalinter --fast --vendor --deadline 5m --disable gotype --disable gosec --exclude "\.pb.*\.go" --exclude "_strings\.go" --exclude "_test\.go" --exclude "not checked.+Close" ./...
+        - ./bin/golangci-lint run --timeout 5m --exclude "\.pb.*\.go" --exclude "_strings\.go" --exclude "_test\.go" --exclude "not checked.+Close" ./...
       after_success:
         - bash <(curl -s https://codecov.io/bash)
     - stage: push

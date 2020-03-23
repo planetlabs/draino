@@ -88,7 +88,7 @@ func main() {
 
 	web := &httpRunner{l: *listen, h: map[string]http.Handler{
 		"/metrics": p,
-		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:gosec
+		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:errcheck
 	}}
 
 	log, err := zap.NewProduction()
@@ -96,7 +96,7 @@ func main() {
 		log, err = zap.NewDevelopment()
 	}
 	kingpin.FatalIfError(err, "cannot create log")
-	defer log.Sync()
+	defer log.Sync() // nolint:errcheck
 
 	go func() {
 		log.Info("web server is running", zap.String("listen", *listen))
@@ -208,9 +208,9 @@ func (r *httpRunner) Run(stop <-chan struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), 0*time.Second)
 	go func() {
 		<-stop
-		s.Shutdown(ctx) // nolint:gosec
+		s.Shutdown(ctx) // nolint:errcheck
 	}()
-	s.ListenAndServe() // nolint:gosec
+	s.ListenAndServe() // nolint:errcheck
 	cancel()
 }
 
