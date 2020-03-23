@@ -4,7 +4,7 @@ services:
   - docker
 
 go:
-  - 1.10.x
+  - 1.13.x
 
 jobs:
   include:
@@ -13,7 +13,6 @@ jobs:
         - curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
         - go get -u github.com/alecthomas/gometalinter
       install:
-        - dep ensure
         - gometalinter --install
       script:
         - ./scripts/test.sh
