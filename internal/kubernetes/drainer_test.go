@@ -32,8 +32,6 @@ import (
 )
 
 const (
-	ns = "coolNamespace"
-
 	nodeName = "coolNode"
 	podName  = "coolPod"
 

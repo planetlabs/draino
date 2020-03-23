@@ -112,9 +112,7 @@ func (h *DrainingResourceEventHandler) OnUpdate(_, newObj interface{}) {
 }
 
 // OnDelete does nothing. There's no point cordoning or draining deleted nodes.
-func (h *DrainingResourceEventHandler) OnDelete(_ interface{}) {
-	return
-}
+func (h *DrainingResourceEventHandler) OnDelete(_ interface{}) {}
 
 // TODO(negz): Ideally we'd record which node condition caused us to cordon
 // and drain the node, but that information doesn't make it down to this level.

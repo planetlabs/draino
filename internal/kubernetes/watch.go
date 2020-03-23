@@ -28,10 +28,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-const (
-	resourceNode = "nodes"
-)
-
 // An NodeStore is a cache of node resources.
 type NodeStore interface {
 	// Get an node by name. Returns an error if the node does not exist.
