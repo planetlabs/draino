@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	TimeoutToSetCondition = 5 * time.Second
+	TimeoutToSetCondition = 10 * time.Second
 )
 
 type DrainScheduler interface {
@@ -71,7 +71,7 @@ func (d *DrainSchedules) DeleteSchedule(name string) {
 
 func (d *DrainSchedules) WhenNextSchedule() time.Time {
 	// compute drain schedule time
-	sooner := time.Now().Add(2 * TimeoutToSetCondition)
+	sooner := time.Now().Add(TimeoutToSetCondition + time.Second)
 	when := d.lastDrainScheduledFor.Add(d.period)
 	if when.Before(sooner) {
 		when = sooner

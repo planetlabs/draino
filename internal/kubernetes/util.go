@@ -18,6 +18,7 @@ package kubernetes
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -55,19 +56,34 @@ func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 
 func Until(f func() error, retryPeriod, timeout time.Duration) error {
 	stopChan := make(chan struct{})
+	var closureMutext sync.Mutex
+	var isClosed bool
+	terminate := func() bool {
+		closureMutext.Lock()
+		defer closureMutext.Unlock()
+		if isClosed {
+			return false
+		}
+		close(stopChan)
+		isClosed = true
+		return true
+	}
+
 	go wait.Until(func() {
 		if err := f(); err != nil {
 			return
 		}
-		close(stopChan)
+		terminate()
 	}, 50*time.Millisecond, stopChan)
 
 	timeoutTimer := time.NewTimer(timeout)
 	defer timeoutTimer.Stop()
 	select {
 	case <-timeoutTimer.C:
-		close(stopChan)
-		return fmt.Errorf("timeout")
+		if terminate() {
+			return fmt.Errorf("timeout")
+		}
+		return nil
 	case <-stopChan:
 		return nil
 	}

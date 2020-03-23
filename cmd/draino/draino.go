@@ -174,9 +174,9 @@ func main() {
 
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:          lock,
-		LeaseDuration: 15 * time.Second,
-		RenewDeadline: 10 * time.Second,
-		RetryPeriod:   2 * time.Second,
+		LeaseDuration: 60 * time.Second,
+		RenewDeadline: 30 * time.Second,
+		RetryPeriod:   5 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Info("node watcher is running")
