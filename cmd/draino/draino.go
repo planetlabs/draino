@@ -38,6 +38,13 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
+// Default leader election settings.
+const (
+	DefaultLeaderElectionLeaseDuration time.Duration = 15 * time.Minute
+	DefaultLeaderElectionRenewDeadline time.Duration = 10 * time.Second
+	DefaultLeaderElectionRetryPeriod   time.Duration = 2 * time.Second
+)
+
 func main() {
 	var (
 		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()
@@ -52,6 +59,10 @@ func main() {
 		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
 		nodeLabels       = app.Flag("node-label", "Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.").PlaceHolder("KEY=VALUE").StringMap()
 		namespace        = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
+
+		leaderElectionLeaseDuration = app.Flag("leader-election-lease-duration", "Lease duration for leader election.").Default(DefaultLeaderElectionLeaseDuration.String()).Duration()
+		leaderElectionRenewDeadline = app.Flag("leader-election-renew-deadline", "Leader election renew deadline.").Default(DefaultLeaderElectionRenewDeadline.String()).Duration()
+		leaderElectionRetryPeriod   = app.Flag("leader-election-retry-period", "Leader election retry period.").Default(DefaultLeaderElectionRetryPeriod.String()).Duration()
 
 		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
@@ -174,9 +185,9 @@ func main() {
 
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:          lock,
-		LeaseDuration: 60 * time.Second,
-		RenewDeadline: 30 * time.Second,
-		RetryPeriod:   5 * time.Second,
+		LeaseDuration: *leaderElectionLeaseDuration,
+		RenewDeadline: *leaderElectionRenewDeadline,
+		RetryPeriod:   *leaderElectionRetryPeriod,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Info("node watcher is running")
