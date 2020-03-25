@@ -93,7 +93,7 @@ func (d *DrainSchedules) Schedule(node *v1.Node) (time.Time, error) {
 	d.Unlock()
 
 	// Mark the node with the condition stating that drain is scheduled
-	if err := Until(
+	if err := RetryWithTimeout(
 		func() error {
 			return d.drainer.MarkDrain(node, when, time.Time{}, false)
 		},
@@ -132,7 +132,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 			stats.Record(tags, MeasureNodesDrained.M(1))
 			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", err)
-			if err := Until(
+			if err := RetryWithTimeout(
 				func() error {
 					return d.drainer.MarkDrain(node, when, sched.finish, true)
 				},
@@ -148,7 +148,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 		stats.Record(tags, MeasureNodesDrained.M(1))
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
-		if err := Until(
+		if err := RetryWithTimeout(
 			func() error {
 				return d.drainer.MarkDrain(node, when, sched.finish, false)
 			},

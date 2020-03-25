@@ -17,8 +17,6 @@ and limitations under the License.
 package kubernetes
 
 import (
-	"fmt"
-	"sync"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -54,37 +52,12 @@ func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 	return b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
 }
 
-func Until(f func() error, retryPeriod, timeout time.Duration) error {
-	stopChan := make(chan struct{})
-	var closureMutext sync.Mutex
-	var isClosed bool
-	terminate := func() bool {
-		closureMutext.Lock()
-		defer closureMutext.Unlock()
-		if isClosed {
-			return false
-		}
-		close(stopChan)
-		isClosed = true
-		return true
-	}
-
-	go wait.Until(func() {
-		if err := f(); err != nil {
-			return
-		}
-		terminate()
-	}, 50*time.Millisecond, stopChan)
-
-	timeoutTimer := time.NewTimer(timeout)
-	defer timeoutTimer.Stop()
-	select {
-	case <-timeoutTimer.C:
-		if terminate() {
-			return fmt.Errorf("timeout")
-		}
-		return nil
-	case <-stopChan:
-		return nil
-	}
+func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error {
+	return wait.PollImmediate(retryPeriod, timeout,
+		func() (bool, error) {
+			if err := f(); err != nil {
+				return false, nil
+			}
+			return true, nil
+		})
 }

@@ -40,7 +40,7 @@ import (
 
 // Default leader election settings.
 const (
-	DefaultLeaderElectionLeaseDuration time.Duration = 15 * time.Minute
+	DefaultLeaderElectionLeaseDuration time.Duration = 15 * time.Second
 	DefaultLeaderElectionRenewDeadline time.Duration = 10 * time.Second
 	DefaultLeaderElectionRetryPeriod   time.Duration = 2 * time.Second
 )
