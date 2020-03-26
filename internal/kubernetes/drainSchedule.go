@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	TimeoutToSetCondition = 10 * time.Second
+	SetConditionTimeout     = 10 * time.Second
+	SetConditionRetryPeriod = 50 * time.Millisecond
 )
 
 type DrainScheduler interface {
@@ -71,7 +72,7 @@ func (d *DrainSchedules) DeleteSchedule(name string) {
 
 func (d *DrainSchedules) WhenNextSchedule() time.Time {
 	// compute drain schedule time
-	sooner := time.Now().Add(TimeoutToSetCondition + time.Second)
+	sooner := time.Now().Add(SetConditionTimeout + time.Second)
 	when := d.lastDrainScheduledFor.Add(d.period)
 	if when.Before(sooner) {
 		when = sooner
@@ -97,8 +98,8 @@ func (d *DrainSchedules) Schedule(node *v1.Node) (time.Time, error) {
 		func() error {
 			return d.drainer.MarkDrain(node, when, time.Time{}, false)
 		},
-		50*time.Millisecond,
-		TimeoutToSetCondition,
+		SetConditionRetryPeriod,
+		SetConditionTimeout,
 	); err != nil {
 		// if we cannot mark the node, let's remove the schedule
 		d.DeleteSchedule(node.GetName())
@@ -136,8 +137,8 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 				func() error {
 					return d.drainer.MarkDrain(node, when, sched.finish, true)
 				},
-				50*time.Millisecond,
-				TimeoutToSetCondition,
+				SetConditionRetryPeriod,
+				SetConditionTimeout,
 			); err != nil {
 				log.Error("Failed to place condition following drain failure")
 			}
@@ -152,8 +153,8 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 			func() error {
 				return d.drainer.MarkDrain(node, when, sched.finish, false)
 			},
-			50*time.Millisecond,
-			TimeoutToSetCondition,
+			SetConditionRetryPeriod,
+			SetConditionTimeout,
 		); err != nil {
 			log.Error("Failed to place condition following drain success")
 		}
