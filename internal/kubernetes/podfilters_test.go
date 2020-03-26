@@ -184,6 +184,74 @@ func TestPodFilters(t *testing.T) {
 			passesFilter: true,
 		},
 		{
+			name: "PartOfStatefulSet",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
+						Controller: &isController,
+						Kind:       kindStatefulSet,
+						Name:       statefulsetName,
+					}},
+				},
+			},
+			filter:       NewStatefulSetPodFilter(newFakeClientSet(reactor{verb: "get", resource: "statefulsets"})),
+			passesFilter: false,
+		},
+		{
+			name: "ErrorGettingStatefulSet",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
+						Controller: &isController,
+						Kind:       kindStatefulSet,
+						Name:       statefulsetName,
+					}},
+				},
+			},
+			filter: NewStatefulSetPodFilter(newFakeClientSet(reactor{
+				verb:     "get",
+				resource: "statefulsets",
+				err:      errExploded,
+			})),
+			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
+		},
+		{
+			name: "OrphanedFromStatefulSet",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
+						Controller: &isController,
+						Kind:       kindStatefulSet,
+						Name:       statefulsetName,
+					}},
+				},
+			},
+			filter: NewStatefulSetPodFilter(newFakeClientSet(reactor{
+				verb:     "get",
+				resource: "statefulsets",
+				err:      apierrors.NewNotFound(schema.GroupResource{Resource: "statefulsets"}, statefulsetName),
+			})),
+			passesFilter: true,
+		},
+		{
+			name: "NotPartOfStatefulSet",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
+						Controller: &isController,
+						Kind:       kindDeployment,
+						Name:       deploymentName,
+					}},
+				},
+			},
+			filter:       NewStatefulSetPodFilter(newFakeClientSet()),
+			passesFilter: true,
+		},
+		{
 			name: "NoProtectionFromPodEviction",
 			pod: core.Pod{
 				ObjectMeta: meta.ObjectMeta{
