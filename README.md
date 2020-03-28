@@ -85,6 +85,8 @@ draino_cordoned_nodes_total{result="failed"} 1
 # TYPE draino_drained_nodes_total counter
 draino_drained_nodes_total{result="succeeded"} 1
 draino_drained_nodes_total{result="failed"} 1
+draino_drain_scheduled_nodes_total{result="succeeded"} 1
+draino_drain_scheduled_nodes_total{result="failed"} 1
 ```
 
 ### Events
