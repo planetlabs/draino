@@ -121,7 +121,7 @@ Conditions:
   DrainScheduled        True    Fri, 20 Mar 2020 15:50:50 +0100   Fri, 20 Mar 2020 15:23:26 +0100   Draino                       Drain activity scheduled 2020-03-20T15:50:34+01:00
 ```
 
-  Later when the drain activity will be completed the condition will be ameded letting you know if it succeeded of failed:
+Later, when the drain activity completes, the condition will be amended letting you know if it succeeded or failed:
 
 ```
 > kubectl describe node {node-name}
@@ -139,15 +139,23 @@ Conditions:
   DrainScheduled        True    Fri, 20 Mar 2020 15:50:50 +0100   Fri, 20 Mar 2020 15:23:26 +0100   Draino                       Drain activity scheduled 2020-03-20T15:50:34+01:00 | Completed: 2020-03-20T15:50:50+01:00
   ```
 
-If the drain had failed the condition line would look like:
+If the drain fails, the condition line will look like:
+
 ```
   DrainScheduled        True    Fri, 20 Mar 2020 15:50:50 +0100   Fri, 20 Mar 2020 15:23:26 +0100   Draino                       Drain activity scheduled 2020-03-20T15:50:34+01:00| Failed:2020-03-20T15:55:50+01:00
 ```
 
 ## Retrying drain
 
-In some cases the drain activity may failed because of restrictive Pod Disruption Budget or any other reason external to Draino. The node remains `cordon` and the drain condition 
-is marked as `Failed`. If you want to reschedule a drain tentative on that node, add the annotation: `draino/drain-retry: true`. A new drain schedule will be created. Note that the annotation is not modified and will trigger retries in loop in case the drain fails again.
+In some cases the drain activity may fail because of a restrictive
+[PodDisruptionBudget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/)
+or any other reason external to Draino.
+
+The node remains `cordoned` and the drain condition is marked as `Failed`. If you
+want to reschedule a drain tentative on that node, add the annotation:
+`draino/drain-retry: true`. A new drain schedule will be created. Note that the
+annotation is not modified and will trigger retries in loop in case the drain
+fails again.
 
 ```
 kubectl annotate node {node-name} draino/drain-retry=true
