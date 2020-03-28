@@ -3,6 +3,11 @@ FROM golang:1.13.9-alpine3.11 AS build
 RUN apk update && apk add git && apk add curl
 
 WORKDIR /go/src/github.com/planetlabs/draino
+COPY go.mod .
+COPY go.sum .
+
+RUN go mod download
+
 COPY . .
 
 RUN go build -o /draino ./cmd/draino
