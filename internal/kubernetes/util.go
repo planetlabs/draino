@@ -17,7 +17,10 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"time"
+
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -47,4 +50,14 @@ func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 	b := record.NewBroadcaster()
 	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(c.CoreV1().RESTClient()).Events("")})
 	return b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
+}
+
+func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error {
+	return wait.PollImmediate(retryPeriod, timeout,
+		func() (bool, error) {
+			if err := f(); err != nil {
+				return false, nil
+			}
+			return true, nil
+		})
 }

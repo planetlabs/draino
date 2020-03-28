@@ -18,15 +18,14 @@ package main
 
 import (
 	"context"
-	"flag"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/julienschmidt/httprouter"
 	"github.com/oklog/run"
-	"go.opencensus.io/exporter/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
@@ -37,6 +36,13 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
+)
+
+// Default leader election settings.
+const (
+	DefaultLeaderElectionLeaseDuration time.Duration = 15 * time.Second
+	DefaultLeaderElectionRenewDeadline time.Duration = 10 * time.Second
+	DefaultLeaderElectionRetryPeriod   time.Duration = 2 * time.Second
 )
 
 func main() {
@@ -54,6 +60,10 @@ func main() {
 		nodeLabels       = app.Flag("node-label", "Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.").PlaceHolder("KEY=VALUE").StringMap()
 		namespace        = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
 
+		leaderElectionLeaseDuration = app.Flag("leader-election-lease-duration", "Lease duration for leader election.").Default(DefaultLeaderElectionLeaseDuration.String()).Duration()
+		leaderElectionRenewDeadline = app.Flag("leader-election-renew-deadline", "Leader election renew deadline.").Default(DefaultLeaderElectionRenewDeadline.String()).Duration()
+		leaderElectionRetryPeriod   = app.Flag("leader-election-retry-period", "Leader election retry period.").Default(DefaultLeaderElectionRetryPeriod.String()).Duration()
+
 		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
@@ -63,7 +73,6 @@ func main() {
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
-	glogWorkaround()
 
 	var (
 		nodesCordoned = &view.View{
@@ -80,8 +89,15 @@ func main() {
 			Aggregation: view.Count(),
 			TagKeys:     []tag.Key{kubernetes.TagResult},
 		}
+		nodesDrainScheduled = &view.View{
+			Name:        "drain_scheduled_nodes_total",
+			Measure:     kubernetes.MeasureNodesDrainScheduled,
+			Description: "Number of nodes scheduled for drain.",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{kubernetes.TagResult},
+		}
 	)
-	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained), "cannot create metrics")
+	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained, nodesDrainScheduled), "cannot create metrics")
 	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
@@ -142,19 +158,24 @@ func main() {
 		}
 	}
 
-	sf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NodeSchedulableFilter, Handler: h}
-	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: sf}
+	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: h}
 	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: cf}
 	nodes := kubernetes.NewNodeWatch(cs, lf)
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")
 
+	// use a Go context so we can tell the leaderelection code when we
+	// want to step down
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	lock, err := resourcelock.New(
 		resourcelock.EndpointsResourceLock,
 		*namespace,
 		kubernetes.Component,
 		cs.CoreV1(),
+		cs.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      id,
 			EventRecorder: kubernetes.NewEventRecorder(cs),
@@ -162,13 +183,13 @@ func main() {
 	)
 	kingpin.FatalIfError(err, "cannot create lock")
 
-	leaderelection.RunOrDie(leaderelection.LeaderElectionConfig{
+	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:          lock,
-		LeaseDuration: 15 * time.Second,
-		RenewDeadline: 10 * time.Second,
-		RetryPeriod:   2 * time.Second,
+		LeaseDuration: *leaderElectionLeaseDuration,
+		RenewDeadline: *leaderElectionRenewDeadline,
+		RetryPeriod:   *leaderElectionRetryPeriod,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(_ <-chan struct{}) {
+			OnStartedLeading: func(ctx context.Context) {
 				log.Info("node watcher is running")
 				kingpin.FatalIfError(await(nodes), "error watching")
 			},
@@ -212,12 +233,4 @@ func (r *httpRunner) Run(stop <-chan struct{}) {
 	}()
 	s.ListenAndServe() // nolint:errcheck
 	cancel()
-}
-
-// Many Kubernetes client things depend on glog. glog gets sad when flag.Parse()
-// is not called before it tries to emit a log line. flag.Parse() fights with
-// kingpin.
-func glogWorkaround() {
-	os.Args = []string{os.Args[0], "-logtostderr=true", "-v=0", "-vmodule="}
-	flag.Parse()
 }

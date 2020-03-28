@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -35,6 +36,8 @@ const (
 	DefaultEvictionOverhead time.Duration = 30 * time.Second
 
 	kindDaemonSet = "DaemonSet"
+
+	ConditionDrainedScheduled = "DrainScheduled"
 )
 
 type errTimeout struct{}
@@ -64,6 +67,7 @@ type Cordoner interface {
 type Drainer interface {
 	// Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 	Drain(n *core.Node) error
+	MarkDrain(n *core.Node, when, finish time.Time, failed bool) error
 }
 
 // A CordonDrainer both cordons and drains nodes!
@@ -80,6 +84,11 @@ func (d *NoopCordonDrainer) Cordon(n *core.Node) error { return nil }
 
 // Drain does nothing.
 func (d *NoopCordonDrainer) Drain(n *core.Node) error { return nil }
+
+// MarkDrain does nothing.
+func (d *NoopCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool) error {
+	return nil
+}
 
 // APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
 type APICordonDrainer struct {
@@ -159,6 +168,68 @@ func (d *APICordonDrainer) Cordon(n *core.Node) error {
 		return errors.Wrapf(err, "cannot cordon node %s", fresh.GetName())
 	}
 	return nil
+}
+
+// MarkDrain set a condition on the node to mark that that drain is scheduled.
+func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool) error {
+	nodeName := n.Name
+	// Refresh the node object
+	freshNode, err := d.c.CoreV1().Nodes().Get(nodeName, meta.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	}
+
+	msgSuffix := ""
+	conditionStatus := core.ConditionTrue
+	if !finish.IsZero() {
+		if failed {
+			msgSuffix = fmt.Sprintf(" | Failed: %s", finish.Format(time.RFC3339))
+		} else {
+			msgSuffix = fmt.Sprintf(" | Completed: %s", finish.Format(time.RFC3339))
+		}
+		conditionStatus = core.ConditionFalse
+	}
+
+	// Create or update the condition associated to the monitor
+	now := meta.Time{Time: time.Now()}
+	conditionUpdated := false
+	for i, condition := range freshNode.Status.Conditions {
+		if string(condition.Type) == ConditionDrainedScheduled {
+			freshNode.Status.Conditions[i].LastHeartbeatTime = now
+			freshNode.Status.Conditions[i].Message = "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
+			freshNode.Status.Conditions[i].Status = conditionStatus
+			conditionUpdated = true
+			break
+		}
+	}
+	if !conditionUpdated { // There was no condition found, let's create one
+		freshNode.Status.Conditions = append(freshNode.Status.Conditions,
+			core.NodeCondition{
+				Type:               core.NodeConditionType(ConditionDrainedScheduled),
+				Status:             conditionStatus,
+				LastHeartbeatTime:  now,
+				LastTransitionTime: now,
+				Reason:             "Draino",
+				Message:            "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix,
+			},
+		)
+	}
+	if _, err := d.c.CoreV1().Nodes().UpdateStatus(freshNode); err != nil {
+		return err
+	}
+	return nil
+}
+
+func IsMarkedForDrain(n *core.Node) bool {
+	for _, condition := range n.Status.Conditions {
+		if string(condition.Type) == ConditionDrainedScheduled && condition.Status == core.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
