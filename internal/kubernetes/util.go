@@ -53,11 +53,17 @@ func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 }
 
 func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error {
-	return wait.PollImmediate(retryPeriod, timeout,
+	ierr := error(nil)
+	if err := wait.PollImmediate(retryPeriod, timeout,
 		func() (bool, error) {
 			if err := f(); err != nil {
+				ierr = err
 				return false, nil
 			}
 			return true, nil
-		})
+		}); err != nil {
+		return ierr
+	}
+
+	return nil
 }
