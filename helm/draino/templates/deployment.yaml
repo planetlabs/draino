@@ -49,6 +49,10 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       serviceAccountName: {{ if .Values.rbac.create }}{{ template "draino.fullname" . }}{{ else }}"{{ .Values.rbac.serviceAccountName }}"{{ end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

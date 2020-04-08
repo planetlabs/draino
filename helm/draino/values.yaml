@@ -38,3 +38,7 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# Security Context policies for pods
+# ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+securityContext: {}
