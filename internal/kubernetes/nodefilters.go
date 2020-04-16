@@ -17,28 +17,52 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/antonmedv/expr"
 )
 
-// NewNodeLabelFilter returns a filter that returns true if the supplied object
-// is a node with all of the supplied labels.
-func NewNodeLabelFilter(labels map[string]string) func(o interface{}) bool {
+// NewNodeLabelFilter returns a filter that returns true if the supplied node satisfies the boolean expression
+func NewNodeLabelFilter(expressionStr *string, log *zap.Logger) (func(o interface{}) bool, error) {
+	//This feels wrong but this is how the previous behavior worked so I'm only keeping it to maintain compatibility.
+
+	expression, err := expr.Compile(*expressionStr)
+	if err != nil && *expressionStr != "" {
+		return nil, err
+	}
+
 	return func(o interface{}) bool {
+		//This feels wrong but this is how the previous behavior worked so I'm only keeping it to maintain compatibility.
+		if *expressionStr == "" {
+			return true
+		}
+
 		n, ok := o.(*core.Node)
 		if !ok {
 			return false
 		}
-		for k, v := range labels {
-			if value, ok := n.GetLabels()[k]; value != v || !ok {
-				return false
-			}
+
+		nodeLabels := n.GetLabels()
+
+		parameters := map[string]interface{}{
+			"metadata": map[string]map[string]string{
+				"labels": nodeLabels,
+			},
 		}
-		return true
-	}
+
+		result, err := expr.Run(expression, parameters)
+		if err != nil {
+			log.Error(fmt.Sprintf("Could not parse expression: %v", err))
+		}
+		return result.(bool)
+	}, nil
 }
 
 // NewNodeConditionFilter returns a filter that returns true if the supplied
@@ -104,4 +128,26 @@ func (processed NodeProcessed) Filter(o interface{}) bool {
 	}
 	processed[n.GetUID()] = true
 	return true
+}
+
+// ConvertLabelsToFilterExpr Convert old list labels into new expression syntax
+func ConvertLabelsToFilterExpr(labels map[string]string) *string {
+	res := []string{}
+
+	//sort the maps so that the unit tests actually work
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		if k != "" && labels[k] == "" {
+			res = append(res, fmt.Sprintf(`'%s' in metadata.labels`, k))
+		} else {
+			res = append(res, fmt.Sprintf(`metadata.labels.%s == '%s'`, k, labels[k]))
+		}
+	}
+	temp := strings.Join(res, " && ")
+	return &temp
 }

@@ -162,7 +162,8 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 			SetConditionRetryPeriod,
 			SetConditionTimeout,
 		); err != nil {
-			log.Error("Failed to place condition following drain success")
+			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Failed to place drain condition: %v", err)
+			log.Error(fmt.Sprintf("Failed to place condition following drain success : %v", err))
 		}
 	})
 	return sched

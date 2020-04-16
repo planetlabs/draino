@@ -5,6 +5,8 @@
 *.so
 *.dylib
 
+draino
+
 # Test binary, build with `go test -c`
 *.test
 

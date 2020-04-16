@@ -21,11 +21,202 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestNodeLabelFilter(t *testing.T) {
+	cases := []struct {
+		name         string
+		logicType    string
+		obj          interface{}
+		expression   string
+		passesFilter bool
+	}{
+		{
+			name: "SingleMatchingLabel",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			expression:   "metadata.labels.cool == 'very'",
+			passesFilter: true,
+		},
+		{
+			name: "MatchesAllLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very", "lame": "nope"},
+				},
+			},
+			expression:   "metadata.labels.cool == 'very' && metadata.labels.lame == 'nope'",
+			passesFilter: true,
+		},
+		{
+			name: "DoesntMatchWrongLabel",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "nope"},
+				},
+			},
+			expression:   "metadata.labels.cool == 'very'",
+			passesFilter: false,
+		},
+		{
+			name: "PR75Example1",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						"region": "us-west-2",
+						"app":    "nginx",
+						"type":   "sup",
+					},
+				},
+			},
+			expression:   "(metadata.labels.region == 'us-west-2' && metadata.labels.app == 'nginx') || (metadata.labels.region == 'us-west-2' && metadata.labels.foo == 'bar') || (metadata.labels.type == 'toolbox')",
+			passesFilter: true,
+		},
+		{
+			name: "PR75Example2",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						"region": "us-west-2",
+						"app":    "nginx",
+						"type":   "sup",
+					},
+				},
+			},
+			expression:   "(metadata.labels.region == 'us-west-1' && metadata.labels.app == 'nginx') || (metadata.labels.region == 'us-west-2' && metadata.labels.foo == 'bar') || (metadata.labels.type == 'toolbox')",
+			passesFilter: false,
+		},
+		{
+			name: "MatchesSomeLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			expression:   "(metadata.labels.cool == 'lame') || (metadata.labels.cool == 'very')",
+			passesFilter: true,
+		},
+		{
+			name: "MatchesNoLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "nope"},
+				},
+			},
+			expression:   "(metadata.labels.cool == 'lame') || (metadata.labels.cool == 'very')",
+			passesFilter: false,
+		},
+		{
+			name: "InOperatorMatches",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			expression:   "metadata.labels.cool in ['very', 'lame']",
+			passesFilter: true,
+		},
+		{
+			name: "InOperatorFails",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			expression:   "metadata.labels.cool in ['lame', 'nope']",
+			passesFilter: false,
+		},
+		{
+			name: "NoNodeLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: make(map[string]string),
+				},
+			},
+			expression:   "metadata.labels.cool == 'very'",
+			passesFilter: false,
+		},
+		{
+			name: "NoFilterLabels",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			expression:   "",
+			passesFilter: true,
+		},
+		{
+			name: "FilterNodeThatHasLabel_InSyntax",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			expression:   "'cool' in metadata.labels",
+			passesFilter: true,
+		},
+		{
+			name: "FilterNodeThatHasLabel_AccessorSyntax",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"cool": "very"},
+				},
+			},
+			expression:   "metadata.labels.cool != ''",
+			passesFilter: true,
+		},
+		{
+			name: "FilterNodeThatIsMissingLabel_AccessorSyntax",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"sup": "very"},
+				},
+			},
+			expression:   "metadata.labels.cool != ''",
+			passesFilter: false,
+		},
+	}
+	log, _ := zap.NewDevelopment()
+
+	for _, tc := range cases {
+
+		t.Run(tc.name, func(t *testing.T) {
+			filter, err := NewNodeLabelFilter(&tc.expression, log)
+			if err != nil {
+				t.Errorf("Filter expression: %v, did not compile", err)
+				t.FailNow()
+			}
+
+			passesFilter := filter(tc.obj)
+			assert.Equal(t, tc.passesFilter, passesFilter)
+		})
+	}
+}
+
+func TestOldNodeLabelFilter(t *testing.T) {
 	cases := []struct {
 		name         string
 		obj          interface{}
@@ -89,7 +280,10 @@ func TestNodeLabelFilter(t *testing.T) {
 		{
 			name: "NoNodeLabels",
 			obj: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{},
+				},
 			},
 			labels:       map[string]string{"cool": "very"},
 			passesFilter: false,
@@ -139,13 +333,20 @@ func TestNodeLabelFilter(t *testing.T) {
 		},
 	}
 
+	log, _ := zap.NewDevelopment()
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			filter := NewNodeLabelFilter(tc.labels)
-			passesFilter := filter(tc.obj)
-			if passesFilter != tc.passesFilter {
-				t.Errorf("filter(tc.obj): want %v, got %v", tc.passesFilter, passesFilter)
+			labelExpr := ConvertLabelsToFilterExpr(tc.labels)
+
+			filter, err := NewNodeLabelFilter(labelExpr, log)
+			if err != nil {
+				t.Errorf("Filter expression: %v, did not compile", err)
+				t.FailNow()
 			}
+
+			passesFilter := filter(tc.obj)
+			assert.Equal(t, tc.passesFilter, passesFilter)
 		})
 	}
 }
@@ -356,4 +557,16 @@ func TestParseConditions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConvertLabelsToFilterExpr(t *testing.T) {
+	input := map[string]string{
+		"foo": "bar",
+		"sup": "cool",
+	}
+
+	desired := "metadata.labels.foo == 'bar' && metadata.labels.sup == 'cool'"
+	actual := ConvertLabelsToFilterExpr(input)
+
+	assert.Equal(t, desired, *actual)
 }
