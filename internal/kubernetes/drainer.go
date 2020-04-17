@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,9 +36,11 @@ const (
 	DefaultMaxGracePeriod   time.Duration = 8 * time.Minute
 	DefaultEvictionOverhead time.Duration = 30 * time.Second
 
-	kindDaemonSet = "DaemonSet"
+	kindDaemonSet   = "DaemonSet"
+	kindStatefulSet = "StatefulSet"
 
 	ConditionDrainedScheduled = "DrainScheduled"
+	DefaultSkipDrain          = false
 )
 
 type errTimeout struct{}
@@ -93,11 +96,13 @@ func (d *NoopCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, fail
 // APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
 type APICordonDrainer struct {
 	c kubernetes.Interface
+	l *zap.Logger
 
 	filter PodFilterFunc
 
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
+	skipDrain        bool
 }
 
 // SuppliedCondition defines the condition will be watched.
@@ -135,14 +140,31 @@ func WithPodFilter(f PodFilterFunc) APICordonDrainerOption {
 	}
 }
 
+// WithDrain determines if we're actually going to drain nodes
+func WithSkipDrain(b bool) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.skipDrain = b
+	}
+}
+
+// WithAPICordonDrainerLogger configures a APICordonDrainer to use the supplied
+// logger.
+func WithAPICordonDrainerLogger(l *zap.Logger) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.l = l
+	}
+}
+
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
 func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *APICordonDrainer {
 	d := &APICordonDrainer{
 		c:                c,
+		l:                zap.NewNop(),
 		filter:           NewPodFilters(),
 		maxGracePeriod:   DefaultMaxGracePeriod,
 		evictionHeadroom: DefaultEvictionOverhead,
+		skipDrain:        DefaultSkipDrain,
 	}
 	for _, o := range ao {
 		o(d)
@@ -234,6 +256,13 @@ func IsMarkedForDrain(n *core.Node) bool {
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 func (d *APICordonDrainer) Drain(n *core.Node) error {
+
+	// Do nothing if draining is not enabled.
+	if d.skipDrain {
+		d.l.Debug("Skipping drain because draining is disabled")
+		return nil
+	}
+
 	pods, err := d.getPods(n.GetName())
 	if err != nil {
 		return errors.Wrapf(err, "cannot get pods for node %s", n.GetName())

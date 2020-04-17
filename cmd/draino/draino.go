@@ -64,7 +64,9 @@ func main() {
 		leaderElectionRenewDeadline = app.Flag("leader-election-renew-deadline", "Leader election renew deadline.").Default(DefaultLeaderElectionRenewDeadline.String()).Duration()
 		leaderElectionRetryPeriod   = app.Flag("leader-election-retry-period", "Leader election retry period.").Default(DefaultLeaderElectionRetryPeriod.String()).Duration()
 
+		skipDrain             = app.Flag("skip-drain", "Whether to skip draining nodes after cordoning.").Default("false").Bool()
 		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
+		evictStatefulSetPods  = app.Flag("evict-statefulset-pods", "Evict pods that were created by an extant StatefulSet.").Bool()
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
 
@@ -135,6 +137,9 @@ func main() {
 	if !*evictDaemonSetPods {
 		pf = append(pf, kubernetes.NewDaemonSetPodFilter(cs))
 	}
+	if !*evictStatefulSetPods {
+		pf = append(pf, kubernetes.NewStatefulSetPodFilter(cs))
+	}
 	if len(*protectedPodAnnotations) > 0 {
 		pf = append(pf, kubernetes.UnprotectedPodFilter(*protectedPodAnnotations...))
 	}
@@ -142,7 +147,10 @@ func main() {
 		kubernetes.NewAPICordonDrainer(cs,
 			kubernetes.MaxGracePeriod(*maxGracePeriod),
 			kubernetes.EvictionHeadroom(*evictionHeadroom),
-			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...))),
+			kubernetes.WithSkipDrain(*skipDrain),
+			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
+			kubernetes.WithAPICordonDrainerLogger(log),
+		),
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer))

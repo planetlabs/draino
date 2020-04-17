@@ -38,6 +38,14 @@ Flags:
       --drain-buffer=10m0s       Minimum time between starting each drain. Nodes are always cordoned immediately.
       --node-label=KEY=VALUE ...
                                  Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
+      --namespace="kube-system"  Namespace used to create leader election lock object.
+      --leader-election-lease-duration=15s
+                                 Lease duration for leader election.
+      --leader-election-renew-deadline=10s
+                                 Leader election renew deadline.
+      --leader-election-retry-period=2s
+                                 Leader election retry period.
+      --skip-drain               Whether to skip draining nodes after cordoning.
       --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
@@ -46,7 +54,6 @@ Flags:
 
 Args:
   <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.
-
 ```
 
 ## Considerations
@@ -160,3 +167,11 @@ fails again.
 ```
 kubectl annotate node {node-name} draino/drain-retry=true
 ```
+
+## Modes
+
+### Dry Run
+Draino can be run in dry run mode using the `--dry-run` flag.
+
+### Cordon Only
+Draino can also optionally be run in a mode where the nodes are only cordoned, and not drained. This can be achieved by using the `--skip-drain` flag.
