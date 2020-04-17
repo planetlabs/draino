@@ -66,6 +66,7 @@ func main() {
 
 		skipDrain             = app.Flag("skip-drain", "Whether to skip draining nodes after cordoning.").Default("false").Bool()
 		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
+		evictStatefulSetPods  = app.Flag("evict-statefulset-pods", "Evict pods that were created by an extant StatefulSet.").Bool()
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
 
@@ -135,6 +136,9 @@ func main() {
 	}
 	if !*evictDaemonSetPods {
 		pf = append(pf, kubernetes.NewDaemonSetPodFilter(cs))
+	}
+	if !*evictStatefulSetPods {
+		pf = append(pf, kubernetes.NewStatefulSetPodFilter(cs))
 	}
 	if len(*protectedPodAnnotations) > 0 {
 		pf = append(pf, kubernetes.UnprotectedPodFilter(*protectedPodAnnotations...))

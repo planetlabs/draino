@@ -81,6 +81,27 @@ func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 	}
 }
 
+// NewStatefulSetPodFilter returns a FilterFunc that returns true if the supplied
+// pod is not managed by an extant StatefulSet.
+func NewStatefulSetPodFilter(client kubernetes.Interface) PodFilterFunc {
+	return func(p core.Pod) (bool, error) {
+		c := meta.GetControllerOf(&p)
+		if c == nil || c.Kind != kindStatefulSet {
+			return true, nil
+		}
+
+		// Pods pass the filter if they were created by a StatefulSet that no
+		// longer exists.
+		if _, err := client.AppsV1().StatefulSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
+			if apierrors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, errors.Wrapf(err, "cannot get StatefulSet %s/%s", p.GetNamespace(), c.Name)
+		}
+		return false, nil
+	}
+}
+
 // UnprotectedPodFilter returns a FilterFunc that returns true if the
 // supplied pod does not have any of the user-specified annotations for
 // protection from eviction

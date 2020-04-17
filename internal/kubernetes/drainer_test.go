@@ -35,9 +35,10 @@ const (
 	nodeName = "coolNode"
 	podName  = "coolPod"
 
-	daemonsetName  = "coolDaemonSet"
-	deploymentName = "coolDeployment"
-	kindDeployment = "Deployment"
+	daemonsetName   = "coolDaemonSet"
+	statefulsetName = "coolStatefulSet"
+	deploymentName  = "coolDeployment"
+	kindDeployment  = "Deployment"
 )
 
 var (
