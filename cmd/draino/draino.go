@@ -140,9 +140,10 @@ func main() {
 	if !*evictStatefulSetPods {
 		pf = append(pf, kubernetes.NewStatefulSetPodFilter(cs))
 	}
-	if len(*protectedPodAnnotations) > 0 {
-		pf = append(pf, kubernetes.UnprotectedPodFilter(*protectedPodAnnotations...))
+	systemKnownAnnotations := []string{
+		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
 	}
+	pf = append(pf, kubernetes.UnprotectedPodFilter(append(systemKnownAnnotations, *protectedPodAnnotations...)...))
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		kubernetes.NewAPICordonDrainer(cs,
 			kubernetes.MaxGracePeriod(*maxGracePeriod),
