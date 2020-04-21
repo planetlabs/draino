@@ -69,7 +69,7 @@ Keep the following in mind before deploying Draino:
 * Draino considers a drain to have failed if at least one pod eviction triggered
   by that drain fails. If Draino fails to evict two of five pods it will consider
   the Drain to have failed, but the remaining three pods will always be evicted.
-* Pods that can't be evited by the cluster-autoscaler won't be evicted by draino.
+* Pods that can't be evicted by the cluster-autoscaler won't be evicted by draino.
   See annotation `"cluster-autoscaler.kubernetes.io/safe-to-evict": "false"` in
   [cluster-autoscaler documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node)
 
