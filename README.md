@@ -129,7 +129,7 @@ Conditions:
   DrainScheduled        True    Fri, 20 Mar 2020 15:50:50 +0100   Fri, 20 Mar 2020 15:23:26 +0100   Draino                       Drain activity scheduled 2020-03-20T15:50:34+01:00
 ```
 
-  Later when the drain activity will be completed the condition will be ameded letting you know if it succeeded of failed:
+  Later when the drain activity will be completed the condition will be amended letting you know if it succeeded of failed:
 
 ```
 > kubectl describe node {node-name}
