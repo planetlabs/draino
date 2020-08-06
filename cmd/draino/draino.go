@@ -34,6 +34,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	"k8s.io/klog"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
 )
@@ -75,6 +76,9 @@ func main() {
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
 	kingpin.MustParse(app.Parse(os.Args[1:]))
+
+	// this is required to make all packages using klog write to stderr instead of tmp files
+	klog.InitFlags(nil)
 
 	var (
 		nodesCordoned = &view.View{
