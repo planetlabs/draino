@@ -46,3 +46,5 @@ securityContext:
   runAsGroup: 101
   runAsNonRoot: true
   runAsUser: 100
+  privileged: false
+  readOnlyRootFilesystem: true
