@@ -48,6 +48,10 @@ spec:
               port: 10002
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       serviceAccountName: {{ if .Values.rbac.create }}{{ template "draino.fullname" . }}{{ else }}"{{ .Values.rbac.serviceAccountName }}"{{ end }}
       {{- with .Values.securityContext }}
       securityContext:

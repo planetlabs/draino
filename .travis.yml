@@ -9,13 +9,25 @@ go:
 jobs:
   include:
     - stage: test
+      name: go tests
+      script:
+        - ./scripts/test.sh
+      after_success:
+        - bash <(curl -s https://codecov.io/bash)
+    - stage: test
+      name: go lint
       install:
         - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s v1.24.0
       script:
-        - ./scripts/test.sh
         - ./bin/golangci-lint run --timeout 5m --exclude "\.pb.*\.go" --exclude "_strings\.go" --exclude "_test\.go" --exclude "not checked.+Close" ./...
-      after_success:
-        - bash <(curl -s https://codecov.io/bash)
+    - stage: test
+      name: helm check
+      install:
+        - curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+        - curl -LO https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+        - tar xf kubeval-linux-amd64.tar.gz
+      script:
+        - helm template ./helm/draino/ | ./kubeval --strict
     - stage: push
       install: skip
       script:
