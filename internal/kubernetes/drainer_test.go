@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -79,83 +80,180 @@ func TestCordon(t *testing.T) {
 	cases := []struct {
 		name      string
 		node      *core.Node
+		mutators  []nodeMutatorFn
+		expected  *core.Node
 		reactions []reactor
 	}{
 		{
 			name: "CordonSchedulableNode",
 			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			reactions: []reactor{
-				reactor{
-					verb:     "get",
-					resource: "nodes",
-					ret: &core.Node{
-						ObjectMeta: meta.ObjectMeta{Name: nodeName},
-						Spec:       core.NodeSpec{Unschedulable: false},
-					},
-				},
-				reactor{
-					verb:     "update",
-					resource: "nodes",
-					ret: &core.Node{
-						ObjectMeta: meta.ObjectMeta{Name: nodeName},
-						Spec:       core.NodeSpec{Unschedulable: true},
-					},
-				},
+			expected: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
 			},
 		},
 		{
 			name: "CordonUnschedulableNode",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			reactions: []reactor{
-				reactor{
-					verb:     "get",
-					resource: "nodes",
-					ret: &core.Node{
-						ObjectMeta: meta.ObjectMeta{Name: nodeName},
-						Spec:       core.NodeSpec{Unschedulable: true},
-					},
-				},
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
+			},
+			expected: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
 			},
 		},
 		{
 			name: "CordonNonExistentNode",
 			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
 			reactions: []reactor{
-				reactor{verb: "get", resource: "nodes", err: errors.New("nope")},
+				{verb: "get", resource: "nodes", err: errors.New("nope")},
 			},
 		},
 		{
 			name: "ErrorCordoningSchedulableNode",
 			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
 			reactions: []reactor{
-				reactor{
-					verb:     "get",
-					resource: "nodes",
-					ret: &core.Node{
-						ObjectMeta: meta.ObjectMeta{Name: nodeName},
-						Spec:       core.NodeSpec{Unschedulable: false},
-					},
-				},
-				reactor{verb: "update", resource: "nodes", err: errors.New("nope")},
+				{verb: "update", resource: "nodes", err: errors.New("nope")},
+			},
+		},
+		{
+			name: "CordonSchedulableNodeWithMutator",
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			mutators: []nodeMutatorFn{func(n *core.Node) {
+				n.Annotations = map[string]string{"foo": "1"}
+			}},
+			expected: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName, Annotations: map[string]string{"foo": "1"}},
+				Spec:       core.NodeSpec{Unschedulable: true},
+			},
+		},
+		{
+			name: "CordonUnschedulableNodeWithMutator",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
+			},
+			mutators: []nodeMutatorFn{func(n *core.Node) {
+				n.Annotations = map[string]string{"foo": "1"}
+			}},
+			expected: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
 			},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &fake.Clientset{}
+			c := fake.NewSimpleClientset(tc.node)
 			for _, r := range tc.reactions {
-				c.AddReactor(r.verb, r.resource, r.Fn())
+				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
-
 			d := NewAPICordonDrainer(c)
-			if err := d.Cordon(tc.node); err != nil {
+			if err := d.Cordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Cause(err) == r.err {
 						return
 					}
 				}
 				t.Errorf("d.Cordon(%v): %v", tc.node.Name, err)
+			}
+			{
+				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				if err != nil {
+					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
+				}
+				if !reflect.DeepEqual(tc.expected, n) {
+					t.Errorf("node.Get(%v): want %#v, got %#v", tc.node.Name, tc.expected, n)
+				}
+			}
+		})
+	}
+}
+
+func TestUncordon(t *testing.T) {
+	cases := []struct {
+		name      string
+		node      *core.Node
+		mutators  []nodeMutatorFn
+		expected  *core.Node
+		reactions []reactor
+	}{
+		{
+			name:     "UncordonSchedulableNode",
+			node:     &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+		},
+		{
+			name: "UncordonUnschedulableNode",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
+			},
+			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+		},
+		{
+			name: "UncordonNonExistentNode",
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			reactions: []reactor{
+				{verb: "get", resource: "nodes", err: errors.New("nope")},
+			},
+		},
+		{
+			name: "ErrorUncordoningUnschedulableNode",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
+			},
+			reactions: []reactor{
+				{verb: "update", resource: "nodes", err: errors.New("nope")},
+			},
+		},
+		{
+			name: "UncordonSchedulableNodeWithMutator",
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			mutators: []nodeMutatorFn{func(n *core.Node) {
+				n.Annotations = map[string]string{"foo": "1"}
+			}},
+			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+		},
+		{
+			name: "UncordonUnschedulableNodeWithMutator",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
+			},
+			mutators: []nodeMutatorFn{func(n *core.Node) {
+				n.Annotations = map[string]string{"foo": "1"}
+			}},
+			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName, Annotations: map[string]string{"foo": "1"}}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fake.NewSimpleClientset(tc.node)
+			for _, r := range tc.reactions {
+				c.PrependReactor(r.verb, r.resource, r.Fn())
+			}
+			d := NewAPICordonDrainer(c)
+			if err := d.Uncordon(tc.node, tc.mutators...); err != nil {
+				for _, r := range tc.reactions {
+					if errors.Cause(err) == r.err {
+						return
+					}
+				}
+				t.Errorf("d.Uncordon(%v): %v", tc.node.Name, err)
+			}
+			{
+				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				if err != nil {
+					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
+				}
+				if !reflect.DeepEqual(tc.expected, n) {
+					t.Errorf("node.Get(%v): want %#v, got %#v", tc.node.Name, tc.expected, n)
+				}
 			}
 		})
 	}

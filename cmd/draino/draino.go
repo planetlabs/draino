@@ -90,6 +90,13 @@ func main() {
 			Aggregation: view.Count(),
 			TagKeys:     []tag.Key{kubernetes.TagResult},
 		}
+		nodesUncordoned = &view.View{
+			Name:        "uncordoned_nodes_total",
+			Measure:     kubernetes.MeasureNodesUncordoned,
+			Description: "Number of nodes uncordoned.",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{kubernetes.TagResult},
+		}
 		nodesDrained = &view.View{
 			Name:        "drained_nodes_total",
 			Measure:     kubernetes.MeasureNodesDrained,
@@ -106,7 +113,7 @@ func main() {
 		}
 	)
 
-	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained, nodesDrainScheduled), "cannot create metrics")
+	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled), "cannot create metrics")
 	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
@@ -161,7 +168,8 @@ func main() {
 		),
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
-		kubernetes.WithDrainBuffer(*drainBuffer))
+		kubernetes.WithDrainBuffer(*drainBuffer),
+		kubernetes.WithConditionsFilter(*conditions))
 
 	if *dryRun {
 		h = cache.FilteringResourceEventHandler{
@@ -170,11 +178,10 @@ func main() {
 				&kubernetes.NoopCordonDrainer{},
 				kubernetes.NewEventRecorder(cs),
 				kubernetes.WithLogger(log),
-				kubernetes.WithDrainBuffer(*drainBuffer)),
+				kubernetes.WithDrainBuffer(*drainBuffer),
+				kubernetes.WithConditionsFilter(*conditions)),
 		}
 	}
-
-	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: h}
 
 	if len(*nodeLabels) > 0 {
 		log.Debug("node labels", zap.Any("labels", nodeLabels))
@@ -193,7 +200,7 @@ func main() {
 		log.Sugar().Fatalf("Failed to parse node label expression: %v", err)
 	}
 
-	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: cf}
+	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
 
 	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
 
