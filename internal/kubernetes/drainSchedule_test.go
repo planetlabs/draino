@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,5 +83,47 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 				t.Errorf("Node %v should not been scheduled anymore", tt.node.Name)
 			}
 		})
+	}
+}
+
+type failDrainer struct {
+	NoopCordonDrainer
+}
+
+func (d *failDrainer) Drain(n *v1.Node) error { return errors.New("myerr") }
+
+// Test to ensure there are no races when calling HasSchedule while the
+// scheduler is draining a node.
+func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
+	scheduler := NewDrainSchedules(&failDrainer{}, &record.FakeRecorder{}, 0, zap.NewNop())
+	node := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}
+
+	when, err := scheduler.Schedule(node)
+	if err != nil {
+		t.Fatalf("DrainSchedules.Schedule() error = %v", err)
+	}
+
+	timeout := time.After(time.Until(when) + time.Minute)
+	for {
+		hasSchedule, _, failed := scheduler.HasSchedule(node.Name)
+		if !hasSchedule {
+			t.Fatalf("Missing schedule record for node %v", node.Name)
+		}
+		if failed {
+			// Having `failed` as true is the expected result here since this
+			// test is using the `failDrainer{}` drainer. It means that
+			// HasSchedule was successfully called during or after the draining
+			// function was scheduled and the test can complete successfully.
+			break
+		}
+		select {
+		case <-time.After(time.Second):
+			// Small sleep to ensure we're not running the CPU hot while
+			// polling `HasSchedule`.
+		case <-timeout:
+			// This timeout prevents this test from running forever in case
+			// some bug caused the draining function never to be scheduled.
+			t.Fatalf("timeout waiting for HasSchedule to fail")
+		}
 	}
 }
