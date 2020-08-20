@@ -56,7 +56,7 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Check that node is not yet scheduled for drain
-			hasSchedule, _, _ := scheduler.HasSchedule(tt.node.Name)
+			hasSchedule, _ := scheduler.HasSchedule(tt.node.Name)
 			if hasSchedule {
 				t.Errorf("Node %v should not have any schedule", tt.node.Name)
 			}
@@ -67,7 +67,7 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 				return
 			}
 			// Check that node is scheduled for drain
-			hasSchedule, _, _ = scheduler.HasSchedule(tt.node.Name)
+			hasSchedule, _ = scheduler.HasSchedule(tt.node.Name)
 			if !hasSchedule {
 				t.Errorf("Missing schedule record for node %v", tt.node.Name)
 			}
@@ -78,7 +78,7 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 			// Deleting schedule
 			scheduler.DeleteSchedule(tt.node.Name)
 			// Check that node is no more scheduled for drain
-			hasSchedule, _, _ = scheduler.HasSchedule(tt.node.Name)
+			hasSchedule, _ = scheduler.HasSchedule(tt.node.Name)
 			if hasSchedule {
 				t.Errorf("Node %v should not been scheduled anymore", tt.node.Name)
 			}
@@ -105,7 +105,7 @@ func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
 
 	timeout := time.After(time.Until(when) + time.Minute)
 	for {
-		hasSchedule, _, failed := scheduler.HasSchedule(node.Name)
+		hasSchedule, failed := scheduler.HasSchedule(node.Name)
 		if !hasSchedule {
 			t.Fatalf("Missing schedule record for node %v", node.Name)
 		}
