@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opencensus.io/stats"
@@ -21,7 +22,7 @@ const (
 )
 
 type DrainScheduler interface {
-	HasSchedule(name string) (has, running, failed bool)
+	HasSchedule(name string) (has, failed bool)
 	Schedule(node *v1.Node) (time.Time, error)
 	DeleteSchedule(name string)
 }
@@ -40,8 +41,7 @@ type DrainSchedules struct {
 
 func NewDrainSchedules(drainer Drainer, eventRecorder record.EventRecorder, period time.Duration, logger *zap.Logger) DrainScheduler {
 	return &DrainSchedules{
-		schedules: map[string]*schedule{},
-		//lastDrainScheduledFor: time.Now(),
+		schedules:     map[string]*schedule{},
 		period:        period,
 		logger:        logger,
 		drainer:       drainer,
@@ -49,14 +49,14 @@ func NewDrainSchedules(drainer Drainer, eventRecorder record.EventRecorder, peri
 	}
 }
 
-func (d *DrainSchedules) HasSchedule(name string) (has, running, failed bool) {
+func (d *DrainSchedules) HasSchedule(name string) (has, failed bool) {
 	d.Lock()
 	defer d.Unlock()
 	sched, ok := d.schedules[name]
 	if !ok {
-		return false, false, false
+		return false, false
 	}
-	return true, sched.running, sched.failed
+	return true, sched.isFailed()
 }
 
 func (d *DrainSchedules) DeleteSchedule(name string) {
@@ -109,11 +109,18 @@ func (d *DrainSchedules) Schedule(node *v1.Node) (time.Time, error) {
 }
 
 type schedule struct {
-	when    time.Time
-	running bool
-	failed  bool
-	finish  time.Time
-	timer   *time.Timer
+	when   time.Time
+	failed int32
+	finish time.Time
+	timer  *time.Timer
+}
+
+func (s *schedule) setFailed() {
+	atomic.StoreInt32(&s.failed, 1)
+}
+
+func (s *schedule) isFailed() bool {
+	return atomic.LoadInt32(&s.failed) == 1
 }
 
 func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
@@ -122,13 +129,12 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 	}
 	sched.timer = time.AfterFunc(time.Until(when), func() {
 		log := d.logger.With(zap.String("node", node.GetName()))
-		sched.running = true
 		nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainStarting, "Draining node")
 		if err := d.drainer.Drain(node); err != nil {
 			sched.finish = time.Now()
-			sched.failed = true
+			sched.setFailed()
 			log.Info("Failed to drain", zap.Error(err))
 			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 			stats.Record(tags, MeasureNodesDrained.M(1))

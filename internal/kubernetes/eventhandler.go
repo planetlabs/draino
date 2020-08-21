@@ -142,7 +142,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	}
 
 	// Let's ensure that a drain is scheduled
-	hasSChedule, _, failedDrain := h.drainScheduler.HasSchedule(n.GetName())
+	hasSChedule, failedDrain := h.drainScheduler.HasSchedule(n.GetName())
 	if !hasSChedule {
 		h.scheduleDrain(n)
 		return
