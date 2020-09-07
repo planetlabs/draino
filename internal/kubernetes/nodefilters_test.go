@@ -431,7 +431,7 @@ func TestConvertLabelsToFilterExpr(t *testing.T) {
 		"sup": "cool",
 	}
 
-	desired := "metadata.labels.foo == 'bar' && metadata.labels.sup == 'cool'"
+	desired := "metadata.labels['foo'] == 'bar' && metadata.labels['sup'] == 'cool'"
 	actual := ConvertLabelsToFilterExpr(input)
 
 	assert.Equal(t, desired, *actual)

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,6 +77,14 @@ func newFakeClientSet(rs ...reactor) kubernetes.Interface {
 	return cs
 }
 
+type fakeLimiter struct{}
+
+func (f fakeLimiter) CanCordon(node *core.Node) (bool, string)     { return true, "" }
+func (f fakeLimiter) SetNodeLister(lister NodeLister)              {}
+func (f fakeLimiter) AddLimiter(s string, limiterFunc LimiterFunc) {}
+
+var _ CordonLimiter = &fakeLimiter{}
+
 func TestCordon(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -83,6 +92,7 @@ func TestCordon(t *testing.T) {
 		mutators  []nodeMutatorFn
 		expected  *core.Node
 		reactions []reactor
+		limiters  map[string]LimiterFunc
 	}{
 		{
 			name: "CordonSchedulableNode",
@@ -150,7 +160,7 @@ func TestCordon(t *testing.T) {
 			for _, r := range tc.reactions {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
-			d := NewAPICordonDrainer(c)
+			d := NewAPICordonDrainer(c, WithCordonLimiter(&fakeLimiter{}))
 			if err := d.Cordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Cause(err) == r.err {
@@ -466,6 +476,11 @@ func TestDrain(t *testing.T) {
 				},
 			},
 			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
+		},
+		{
+			name:    "SkipDrain",
+			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			options: []APICordonDrainerOption{WithSkipDrain(true), WithAPICordonDrainerLogger(zap.NewNop())},
 		},
 		{
 			name: "ErrorListingPods",
