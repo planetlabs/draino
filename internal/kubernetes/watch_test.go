@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/go-test/deep"
@@ -30,14 +31,15 @@ const (
 )
 
 type getByKeyFunc func(key string) (interface{}, bool, error)
-
+type listFunc func() []interface{}
 type predictableInformer struct {
 	cache.SharedInformer
-	fn getByKeyFunc
+	fn     getByKeyFunc
+	fnList listFunc
 }
 
 func (i *predictableInformer) GetStore() cache.Store {
-	return &cache.FakeCustomStore{GetByKeyFunc: i.fn}
+	return &cache.FakeCustomStore{GetByKeyFunc: i.fn, ListFunc: i.fnList}
 }
 
 func TestNodeWatcher(t *testing.T) {
@@ -84,6 +86,36 @@ func TestNodeWatcher(t *testing.T) {
 
 			if diff := deep.Equal(tc.want, got); diff != nil {
 				t.Errorf("w.Get(%v): want != got %v", name, diff)
+			}
+		})
+	}
+}
+
+func TestNodeWatch_ListNodes(t *testing.T) {
+	tests := []struct {
+		name string
+		fc   listFunc
+		want int
+	}{
+		{
+			name: "empty",
+			fc:   func() []interface{} { return []interface{}{} },
+			want: 0,
+		},
+		{
+			name: "one",
+			fc: func() []interface{} {
+				return []interface{}{&core.Node{}}
+			},
+			want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			i := &predictableInformer{fnList: tt.fc}
+			w := &NodeWatch{SharedInformer: i}
+			if got := len(w.ListNodes()); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("len(ListNodes()) = %v, want %v", got, tt.want)
 			}
 		})
 	}

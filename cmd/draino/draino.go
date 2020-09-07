@@ -73,6 +73,10 @@ func main() {
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
 
+		maxSimultaneousCordon          = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
+		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
+		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
+
 		protectedPodAnnotations = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
@@ -111,9 +115,17 @@ func main() {
 			Aggregation: view.Count(),
 			TagKeys:     []tag.Key{kubernetes.TagResult},
 		}
+		limitedCordon = &view.View{
+			Name:        "limited_cordon_total",
+			Measure:     kubernetes.MeasureLimitedCordon,
+			Description: "Number of limited cordon encountered.",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{kubernetes.TagReason},
+		}
 	)
 
-	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled), "cannot create metrics")
+	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon), "cannot create metrics")
+
 	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
@@ -158,12 +170,37 @@ func main() {
 		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
 	}
 	pf = append(pf, kubernetes.UnprotectedPodFilter(append(systemKnownAnnotations, *protectedPodAnnotations...)...))
+
+	cordonLimiter := kubernetes.NewCordonLimiter(log)
+	for _, p := range *maxSimultaneousCordon {
+		max, percent, err := kubernetes.ParseCordonMax(p)
+		if err != nil {
+			kingpin.FatalIfError(err, "cannot parse 'max-simultaneous-cordon' argument")
+		}
+		cordonLimiter.AddLimiter("MaxSimultaneousCordon:"+p, kubernetes.MaxSimultaneousCordonLimiterFunc(max, percent))
+	}
+	for _, p := range *maxSimultaneousCordonForLabels {
+		max, percent, keys, err := kubernetes.ParseCordonMaxForKeys(p)
+		if err != nil {
+			kingpin.FatalIfError(err, "cannot parse 'max-simultaneous-cordon-for-labels' argument")
+		}
+		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForLabels:"+p, kubernetes.MaxSimultaneousCordonLimiterForLabelsFunc(max, percent, keys))
+	}
+	for _, p := range *maxSimultaneousCordonForTaints {
+		max, percent, keys, err := kubernetes.ParseCordonMaxForKeys(p)
+		if err != nil {
+			kingpin.FatalIfError(err, "cannot parse 'max-simultaneous-cordon-for-taints' argument")
+		}
+		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
+	}
+
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		kubernetes.NewAPICordonDrainer(cs,
 			kubernetes.MaxGracePeriod(*maxGracePeriod),
 			kubernetes.EvictionHeadroom(*evictionHeadroom),
 			kubernetes.WithSkipDrain(*skipDrain),
 			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
+			kubernetes.WithCordonLimiter(cordonLimiter),
 			kubernetes.WithAPICordonDrainerLogger(log),
 		),
 		kubernetes.NewEventRecorder(cs),
@@ -203,6 +240,8 @@ func main() {
 	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
 
 	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
+
+	cordonLimiter.SetNodeLister(nodes)
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")

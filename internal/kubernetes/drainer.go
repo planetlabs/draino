@@ -106,7 +106,8 @@ type APICordonDrainer struct {
 	c kubernetes.Interface
 	l *zap.Logger
 
-	filter PodFilterFunc
+	filter        PodFilterFunc
+	cordonLimiter CordonLimiter
 
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
@@ -163,6 +164,12 @@ func WithAPICordonDrainerLogger(l *zap.Logger) APICordonDrainerOption {
 	}
 }
 
+func WithCordonLimiter(limiter CordonLimiter) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.cordonLimiter = limiter
+	}
+}
+
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
 func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *APICordonDrainer {
@@ -193,6 +200,14 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 	if fresh.Spec.Unschedulable {
 		return nil
 	}
+
+	if d.cordonLimiter != nil {
+		canCordon, reason := d.cordonLimiter.CanCordon(n)
+		if !canCordon {
+			return NewLimiterError(reason)
+		}
+	}
+
 	fresh.Spec.Unschedulable = true
 	for _, m := range mutators {
 		m(fresh)

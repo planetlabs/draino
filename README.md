@@ -50,6 +50,14 @@ Flags:
       --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
+      --max-simultaneous-cordon=(Value|Value%)  ...
+                                 Maximum number of cordoned nodes in the cluster.
+      --max-simultaneous-cordon-for-labels=(Value|Value%),keys...   ...
+                                 Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'
+      --max-simultaneous-cordon-for-taints=(Value|Value%),keys...   ...
+                                 Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'
+
+
       --protected-pod-annotation=KEY[=VALUE] ...
                                  Protect pods with this annotation from eviction. May be specified multiple times.
 
@@ -79,6 +87,8 @@ Keep the following in mind before deploying Draino:
   conditions, but will wait a configurable amount of time (10 minutes by default)
   between draining nodes. i.e. If two nodes begin exhibiting a node condition
   simultaneously one node will be drained immediately and the other in 10 minutes.
+* It is possible to set a maximum number of nodes that can be cordon simultaneously.
+  This can be done for the whole cluster or by group of nodes.
 * Draino considers a drain to have failed if at least one pod eviction triggered
   by that drain fails. If Draino fails to evict two of five pods it will consider
   the Drain to have failed, but the remaining three pods will always be evicted.
@@ -185,3 +195,18 @@ Draino can be run in dry run mode using the `--dry-run` flag.
 
 ### Cordon Only
 Draino can also optionally be run in a mode where the nodes are only cordoned, and not drained. This can be achieved by using the `--skip-drain` flag.
+
+### Setting limits for cordon
+To prevent situation in which a too large subset of the cluster would be cordoned (waiting for the drain to happen according to schedule), it is possible to define and combine limits that are either global to the cluster or dedicated to a group of nodes.
+The limit can be set as a count of node of in percentage. Some example:
+```shell script
+      --max-simultaneous-cordon=80   # No node will be cordon if there are already at least 80 nodes cordon.
+      --max-simultaneous-cordon=10%  # No node will be cordon if this result in having more than 10% of the cluster being cordon.
+      --max-simultaneous-cordon-for-labels=3,app,shard
+                                     # No more then 3 nodes will be cordon for group having same pair of values for label keys `app` and `shard`
+      --max-simultaneous-cordon-for-labels=20%,app,shard
+                                     # No more then 20% of the group of nodes having same pair of values for label keys `app` and `shard` can be cordon
+      --max-simultaneous-cordon-for-taints=33%,node
+                                     # No more then 33% of the group of nodes having same value for taint with key `node` can be cordon
+```
+It is possible to set multiple limits, the cordon activity is blocked as soon as at least one of the limit is reached. When some nodes are uncordoned or if they are deleted/replace, this will reopen some slots bellow the limit and some nodes can be cordoned again.

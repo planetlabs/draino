@@ -65,3 +65,13 @@ func (w *NodeWatch) Get(name string) (*core.Node, error) {
 	}
 	return o.(*core.Node), nil
 }
+
+// Get an node by name. Returns an error if the node does not exist.
+func (w *NodeWatch) ListNodes() []*core.Node {
+	list := w.GetStore().List()
+	nodes := make([]*core.Node, len(list))
+	for i, o := range list {
+		nodes[i] = o.(*core.Node)
+	}
+	return nodes
+}
