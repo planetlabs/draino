@@ -71,7 +71,7 @@ func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 
 		// Pods pass the filter if they were created by a DaemonSet that no
 		// longer exists.
-		if _, err := client.ExtensionsV1beta1().DaemonSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
+		if _, err := client.AppsV1().DaemonSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
