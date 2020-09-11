@@ -57,6 +57,18 @@ Args:
   <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.
 ```
 
+### Labels and Label Expressions
+
+Draino allows filtering the elligible set of nodes using `--node-label` and `--node-label-expr`.
+The original flag `--node-label` is limited to the boolean AND of the specified labels. To express more complex predicates, the new `--node-label-expr`
+flag allows for mixed OR/AND/NOT logic via https://github.com/antonmedv/expr.
+
+An example of `--node-label-expr`:
+
+```
+(metadata.labels.region == 'us-west-1' && metadata.labels.app == 'nginx') || (metadata.labels.region == 'us-west-2' && metadata.labels.app == 'nginx')
+```
+
 ## Considerations
 Keep the following in mind before deploying Draino:
 
