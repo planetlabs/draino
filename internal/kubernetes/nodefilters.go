@@ -65,29 +65,6 @@ func NewNodeLabelFilter(expressionStr *string, log *zap.Logger) (func(o interfac
 	}, nil
 }
 
-// NewNodeConditionFilter returns a filter that returns true if the supplied
-// object is a node with any of the supplied node conditions.
-func NewNodeConditionFilter(ct []string) func(o interface{}) bool {
-	return func(o interface{}) bool {
-		n, ok := o.(*core.Node)
-		if !ok {
-			return false
-		}
-		if len(ct) == 0 {
-			return true
-		}
-		pc := ParseConditions(ct)
-		for _, t := range pc {
-			for _, c := range n.Status.Conditions {
-				if c.Type == t.Type && c.Status == t.Status && c.LastTransitionTime.Add(t.MinimumDuration).Before(time.Now()) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-}
-
 // ParseConditions can parse the string array of conditions to a list of
 // SuppliedContion to support particular status value and duration.
 func ParseConditions(conditions []string) []SuppliedCondition {

@@ -43,6 +43,8 @@ const (
 	DefaultSkipDrain          = false
 )
 
+type nodeMutatorFn func(*core.Node)
+
 type errTimeout struct{}
 
 func (e errTimeout) Error() string {
@@ -63,7 +65,10 @@ func IsTimeout(err error) bool {
 // A Cordoner cordons nodes.
 type Cordoner interface {
 	// Cordon the supplied node. Marks it unschedulable for new pods.
-	Cordon(n *core.Node) error
+	Cordon(n *core.Node, mutators ...nodeMutatorFn) error
+
+	// Uncordon the supplied node. Marks it schedulable for new pods.
+	Uncordon(n *core.Node, mutators ...nodeMutatorFn) error
 }
 
 // A Drainer drains nodes.
@@ -83,7 +88,10 @@ type CordonDrainer interface {
 type NoopCordonDrainer struct{}
 
 // Cordon does nothing.
-func (d *NoopCordonDrainer) Cordon(n *core.Node) error { return nil }
+func (d *NoopCordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error { return nil }
+
+// Uncordon does nothing.
+func (d *NoopCordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) error { return nil }
 
 // Drain does nothing.
 func (d *NoopCordonDrainer) Drain(n *core.Node) error { return nil }
@@ -177,7 +185,7 @@ func (d *APICordonDrainer) deleteTimeout() time.Duration {
 }
 
 // Cordon the supplied node. Marks it unschedulable for new pods.
-func (d *APICordonDrainer) Cordon(n *core.Node) error {
+func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error {
 	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "cannot get node %s", n.GetName())
@@ -186,8 +194,30 @@ func (d *APICordonDrainer) Cordon(n *core.Node) error {
 		return nil
 	}
 	fresh.Spec.Unschedulable = true
+	for _, m := range mutators {
+		m(fresh)
+	}
 	if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
 		return errors.Wrapf(err, "cannot cordon node %s", fresh.GetName())
+	}
+	return nil
+}
+
+// Uncordon the supplied node. Marks it schedulable for new pods.
+func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) error {
+	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "cannot get node %s", n.GetName())
+	}
+	if !fresh.Spec.Unschedulable {
+		return nil
+	}
+	fresh.Spec.Unschedulable = false
+	for _, m := range mutators {
+		m(fresh)
+	}
+	if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
+		return errors.Wrapf(err, "cannot uncordon node %s", fresh.GetName())
 	}
 	return nil
 }
