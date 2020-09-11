@@ -74,8 +74,13 @@ Keep the following in mind before deploying Draino:
   [cluster-autoscaler documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node)
 
 ## Deployment
+
 Draino is automatically built from master and pushed to the [Docker Hub](https://hub.docker.com/r/planetlabs/draino/).
-Builds are tagged `planetlabs/draino:latest` and `planetlabs/draino:$(git rev-parse --short HEAD)`.
+Builds are tagged `planetlabs/draino:$(git rev-parse --short HEAD)`.
+
+**Note:** As of September, 2020 we no longer publish `planetlabs/draino:latest`
+in order to encourage explicit and pinned releases.
+
 An [example Kubernetes deployment manifest](manifest.yml) is provided.
 
 ## Monitoring
