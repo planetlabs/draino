@@ -36,9 +36,10 @@ Flags:
       --max-grace-period=8m0s    Maximum time evicted pods will be given to terminate gracefully.
       --eviction-headroom=30s    Additional time to wait after a pod's termination grace period for it to have been deleted.
       --drain-buffer=10m0s       Minimum time between starting each drain. Nodes are always cordoned immediately.
-      --node-label=KEY=VALUE ...
-                                 Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
-      --namespace="kube-system"  Namespace used to create leader election lock object.
+      --node-label="foo=bar"     (DEPRECATED) Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
+      --node-label-expr="metadata.labels.foo == 'bar'"
+                                 This is an expr string https://github.com/antonmedv/expr that must return true or false. See `nodefilters_test.go` for examples
+      --namespace="kube-system"  Namespace used to create leader election lock object.	
       --leader-election-lease-duration=15s
                                  Lease duration for leader election.
       --leader-election-renew-deadline=10s

@@ -58,7 +58,8 @@ func main() {
 		maxGracePeriod   = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
 		evictionHeadroom = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
 		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
-		nodeLabels       = app.Flag("node-label", "Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.").PlaceHolder("KEY=VALUE").StringMap()
+		nodeLabels       = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").StringMap()
+		nodeLabelsExpr   = app.Flag("node-label-expr", "Nodes that match this expression will be eligible for cordoning and draining.").String()
 		namespace        = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
 
 		leaderElectionLeaseDuration = app.Flag("leader-election-lease-duration", "Lease duration for leader election.").Default(DefaultLeaderElectionLeaseDuration.String()).Duration()
@@ -104,6 +105,7 @@ func main() {
 			TagKeys:     []tag.Key{kubernetes.TagResult},
 		}
 	)
+
 	kingpin.FatalIfError(view.Register(nodesCordoned, nodesDrained, nodesDrainScheduled), "cannot create metrics")
 	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
@@ -173,8 +175,28 @@ func main() {
 	}
 
 	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: h}
-	lf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeLabelFilter(*nodeLabels), Handler: cf}
-	nodes := kubernetes.NewNodeWatch(cs, lf)
+
+	log.Sugar().Infof("node labels: %v", nodeLabels)
+
+	if len(*nodeLabels) > 0 {
+		if *nodeLabelsExpr != "" {
+			kingpin.Fatalf("nodeLabels and NodeLabelsExpr cannot both be set")
+		}
+
+		nodeLabelsExpr = kubernetes.ConvertLabelsToFilterExpr(*nodeLabels)
+	}
+
+	var nodeLabelFilter cache.ResourceEventHandler
+
+	log.Sugar().Infof("label expression: %v", nodeLabelsExpr)
+	nodeLabelFilterFunc, err := kubernetes.NewNodeLabelFilter(nodeLabelsExpr, log)
+	if err != nil {
+		log.Sugar().Fatalf("Failed to parse node label expression: %v", err)
+	}
+
+	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: cf}
+
+	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")
