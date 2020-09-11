@@ -65,7 +65,7 @@ func main() {
 		leaderElectionLeaseDuration = app.Flag("leader-election-lease-duration", "Lease duration for leader election.").Default(DefaultLeaderElectionLeaseDuration.String()).Duration()
 		leaderElectionRenewDeadline = app.Flag("leader-election-renew-deadline", "Leader election renew deadline.").Default(DefaultLeaderElectionRenewDeadline.String()).Duration()
 		leaderElectionRetryPeriod   = app.Flag("leader-election-retry-period", "Leader election retry period.").Default(DefaultLeaderElectionRetryPeriod.String()).Duration()
-		leaderElectionTokenName   = app.Flag("leader-election-token-name", "Leader election token name.").Default(kubernetes.Component).String()
+		leaderElectionTokenName     = app.Flag("leader-election-token-name", "Leader election token name.").Default(kubernetes.Component).String()
 
 		skipDrain             = app.Flag("skip-drain", "Whether to skip draining nodes after cordoning.").Default("false").Bool()
 		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
@@ -176,9 +176,8 @@ func main() {
 
 	cf := cache.FilteringResourceEventHandler{FilterFunc: kubernetes.NewNodeConditionFilter(*conditions), Handler: h}
 
-	log.Sugar().Infof("node labels: %v", nodeLabels)
-
 	if len(*nodeLabels) > 0 {
+		log.Debug("node labels", zap.Any("labels", nodeLabels))
 		if *nodeLabelsExpr != "" {
 			kingpin.Fatalf("nodeLabels and NodeLabelsExpr cannot both be set")
 		}
@@ -187,8 +186,8 @@ func main() {
 	}
 
 	var nodeLabelFilter cache.ResourceEventHandler
+	log.Debug("label expression", zap.Any("expr", nodeLabelsExpr))
 
-	log.Sugar().Infof("label expression: %v", nodeLabelsExpr)
 	nodeLabelFilterFunc, err := kubernetes.NewNodeLabelFilter(nodeLabelsExpr, log)
 	if err != nil {
 		log.Sugar().Fatalf("Failed to parse node label expression: %v", err)
