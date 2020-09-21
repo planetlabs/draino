@@ -122,7 +122,7 @@ func ConvertLabelsToFilterExpr(labels map[string]string) *string {
 		if k != "" && labels[k] == "" {
 			res = append(res, fmt.Sprintf(`'%s' in metadata.labels`, k))
 		} else {
-			res = append(res, fmt.Sprintf(`metadata.labels.%s == '%s'`, k, labels[k]))
+			res = append(res, fmt.Sprintf(`metadata.labels['%s'] == '%s'`, k, labels[k]))
 		}
 	}
 	temp := strings.Join(res, " && ")

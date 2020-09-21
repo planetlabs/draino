@@ -235,6 +235,17 @@ func TestOldNodeLabelFilter(t *testing.T) {
 			passesFilter: true,
 		},
 		{
+			name: "SingleMatchingLabel.WithDomain",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"planetlabs.com/cool": "very"},
+				},
+			},
+			labels:       map[string]string{"planetlabs.com/cool": "very"},
+			passesFilter: true,
+		},
+		{
 			name: "ManyMatchingLabels",
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
@@ -431,7 +442,7 @@ func TestConvertLabelsToFilterExpr(t *testing.T) {
 		"sup": "cool",
 	}
 
-	desired := "metadata.labels.foo == 'bar' && metadata.labels.sup == 'cool'"
+	desired := "metadata.labels['foo'] == 'bar' && metadata.labels['sup'] == 'cool'"
 	actual := ConvertLabelsToFilterExpr(input)
 
 	assert.Equal(t, desired, *actual)
