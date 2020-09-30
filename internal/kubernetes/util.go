@@ -17,10 +17,15 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	core "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -60,4 +65,114 @@ func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error 
 			}
 			return true, nil
 		})
+}
+
+func GetAPIResources(discoveryClient discovery.DiscoveryInterface) ([]metav1.APIResource, error) {
+	groupList, err := discoveryClient.ServerGroups()
+	if groupList == nil || err != nil || groupList.Groups == nil {
+		return nil, fmt.Errorf("Fail to discover groups")
+	}
+
+	var allServerResources []metav1.APIResource
+
+	for _, g := range groupList.Groups {
+		for _, gvd := range g.Versions {
+			gv, err := schema.ParseGroupVersion(gvd.GroupVersion)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing gvd %s, %s", gvd.GroupVersion, err)
+			}
+			resourceLists, err := discoveryClient.ServerResourcesForGroupVersion(gvd.GroupVersion)
+			if err != nil {
+				return nil, fmt.Errorf("cannot list server resources, %s", err)
+			}
+
+			if resourceLists == nil {
+				continue
+			}
+			for i := range resourceLists.APIResources {
+				resourceLists.APIResources[i].Group = gv.Group
+				resourceLists.APIResources[i].Version = gv.Version
+				allServerResources = append(allServerResources, resourceLists.APIResources[i])
+			}
+		}
+	}
+	return allServerResources, nil
+}
+
+// GetAPIResourcesForGroupsKindVersion return the list of APIResources that match the group kind version
+func GetAPIResourcesForGroupsKindVersion(apiResources []metav1.APIResource, gvks []string) ([]metav1.APIResource, error) {
+	var outputAPIResources []metav1.APIResource
+	for _, gvkInput := range gvks {
+
+		if gvkInput == "" {
+			return nil, fmt.Errorf("Empty GroupVersionKind value")
+		}
+
+		atLeastOneResourceFound := false
+		var gvk schema.GroupVersionKind
+		if gvkPtr, gk := schema.ParseKindArg(gvkInput); gvkPtr != nil {
+			gvk = *gvkPtr
+		} else {
+			gvk.Kind = gk.Kind
+			gvk.Group = gk.Group
+		}
+
+		for i, apiresource := range apiResources {
+			if gvk.Version != "" && gvk.Version != apiresource.Version {
+				continue
+			}
+
+			if gvk.Group != "" && gvk.Group != apiresource.Group {
+				continue
+			}
+
+			if gvk.Kind != apiresource.Kind {
+				continue
+			}
+			outputAPIResources = append(outputAPIResources, apiResources[i])
+			atLeastOneResourceFound = true
+		}
+
+		if !atLeastOneResourceFound {
+			return nil, fmt.Errorf("Could not find any APIResource matching kind[.version[.group]]='%s'", gvkInput)
+		}
+	}
+	return outputAPIResources, nil
+}
+
+// GetAPIResourcesForGVK retrieves the apiResources that match the given 'Kind.Version.Group'
+// taking into account the empty case that associate a nil value in the list (used for uncontrolled pod filtering)
+// and filtering out subresources
+func GetAPIResourcesForGVK(discovery discovery.DiscoveryInterface, gvks []string) ([]*metav1.APIResource, error) {
+	hasEmptyGVK := false
+	var nonEmptyGVKs []string
+	for _, v := range gvks {
+		if v == "" {
+			hasEmptyGVK = true
+			continue
+		}
+		nonEmptyGVKs = append(nonEmptyGVKs, v)
+	}
+
+	allAPIResources, err := GetAPIResources(discovery)
+	if err != nil {
+		return nil, err
+	}
+
+	apiResources, err := GetAPIResourcesForGroupsKindVersion(allAPIResources, nonEmptyGVKs)
+	if err != nil {
+		return nil, err
+	}
+
+	var output []*metav1.APIResource
+	if hasEmptyGVK {
+		output = append(output, nil)
+	}
+
+	for i := range apiResources {
+		if !strings.Contains(apiResources[i].Name, "/") { // filtering out subresources
+			output = append(output, &apiResources[i])
+		}
+	}
+	return output, nil
 }

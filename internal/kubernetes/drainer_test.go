@@ -27,8 +27,12 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+
+	//"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
 
@@ -74,6 +78,14 @@ func newFakeClientSet(rs ...reactor) kubernetes.Interface {
 		cs.AddReactor(r.verb, r.resource, r.Fn())
 	}
 	return cs
+}
+
+func newFakeDynamicClient(objects ...runtime.Object) dynamic.Interface {
+	scheme := runtime.NewScheme()
+	if err := fake.AddToScheme(scheme); err != nil {
+		return nil
+	}
+	return dynamicfake.NewSimpleDynamicClient(scheme, objects...)
 }
 
 func TestCordon(t *testing.T) {

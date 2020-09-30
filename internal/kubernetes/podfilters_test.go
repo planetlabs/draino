@@ -20,19 +20,21 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
+	v1 "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func TestPodFilters(t *testing.T) {
 	cases := []struct {
-		name         string
-		filter       PodFilterFunc
-		pod          core.Pod
-		passesFilter bool
-		errFn        func(err error) bool
+		name              string
+		filterBuilderFunc func(obj ...runtime.Object) PodFilterFunc
+		objects           []runtime.Object
+		pod               core.Pod
+		passesFilter      bool
+		errFn             func(err error) bool
 	}{
 		{
 			name: "IsMirror",
@@ -42,14 +44,14 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{core.MirrorPodAnnotationKey: "definitelyahash"},
 				},
 			},
-			filter:       MirrorPodFilter,
-			passesFilter: false,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return MirrorPodFilter },
+			passesFilter:      false,
 		},
 		{
-			name:         "IsNotMirror",
-			pod:          core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filter:       MirrorPodFilter,
-			passesFilter: true,
+			name:              "IsNotMirror",
+			pod:               core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return MirrorPodFilter },
+			passesFilter:      true,
 		},
 		{
 			name: "HasLocalStorage",
@@ -62,8 +64,8 @@ func TestPodFilters(t *testing.T) {
 					},
 				},
 			},
-			filter:       LocalStoragePodFilter,
-			passesFilter: false,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return LocalStoragePodFilter },
+			passesFilter:      false,
 		},
 		{
 			name: "DoesNotHaveLocalStorage",
@@ -73,13 +75,15 @@ func TestPodFilters(t *testing.T) {
 					Volumes: []core.Volume{core.Volume{VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{}}}},
 				},
 			},
-			filter:       LocalStoragePodFilter,
-			passesFilter: true,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return LocalStoragePodFilter },
+			passesFilter:      true,
 		},
 		{
-			name:         "Unreplicated",
-			pod:          core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filter:       UnreplicatedPodFilter,
+			name: "Unreplicated",
+			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{nil})
+			},
 			passesFilter: false,
 		},
 		{
@@ -94,7 +98,9 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter:       UnreplicatedPodFilter,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{nil})
+			},
 			passesFilter: true,
 		},
 		{
@@ -103,7 +109,9 @@ func TestPodFilters(t *testing.T) {
 				ObjectMeta: meta.ObjectMeta{Name: podName},
 				Status:     core.PodStatus{Phase: core.PodSucceeded},
 			},
-			filter:       UnreplicatedPodFilter,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{nil})
+			},
 			passesFilter: true,
 		},
 		{
@@ -112,7 +120,9 @@ func TestPodFilters(t *testing.T) {
 				ObjectMeta: meta.ObjectMeta{Name: podName},
 				Status:     core.PodStatus{Phase: core.PodFailed},
 			},
-			filter:       UnreplicatedPodFilter,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{nil})
+			},
 			passesFilter: true,
 		},
 		{
@@ -122,32 +132,28 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
 						Controller: &isController,
-						Kind:       kindDaemonSet,
+						Kind:       KindDaemonSet,
 						Name:       daemonsetName,
+						APIVersion: "apps/v1",
 					}},
 				},
 			},
-			filter:       NewDaemonSetPodFilter(newFakeClientSet(reactor{verb: "get", resource: "daemonsets"})),
+			objects: []runtime.Object{
+				&v1.DaemonSet{
+					ObjectMeta: meta.ObjectMeta{
+						Name: daemonsetName,
+					},
+				},
+			},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{{
+					Name:    "daemonsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindDaemonSet,
+				}})
+			},
 			passesFilter: false,
-		},
-		{
-			name: "ErrorGettingDaemonSet",
-			pod: core.Pod{
-				ObjectMeta: meta.ObjectMeta{
-					Name: podName,
-					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
-						Controller: &isController,
-						Kind:       kindDaemonSet,
-						Name:       daemonsetName,
-					}},
-				},
-			},
-			filter: NewDaemonSetPodFilter(newFakeClientSet(reactor{
-				verb:     "get",
-				resource: "daemonsets",
-				err:      errExploded,
-			})),
-			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
 		},
 		{
 			name: "OrphanedFromDaemonSet",
@@ -156,16 +162,20 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
 						Controller: &isController,
-						Kind:       kindDaemonSet,
+						Kind:       KindDaemonSet,
 						Name:       daemonsetName,
+						APIVersion: "apps/v1",
 					}},
 				},
 			},
-			filter: NewDaemonSetPodFilter(newFakeClientSet(reactor{
-				verb:     "get",
-				resource: "daemonsets",
-				err:      apierrors.NewNotFound(schema.GroupResource{Resource: "daemonsets"}, daemonsetName),
-			})),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{{
+					Name:    "daemonsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindDaemonSet,
+				}})
+			},
 			passesFilter: true,
 		},
 		{
@@ -177,10 +187,18 @@ func TestPodFilters(t *testing.T) {
 						Controller: &isController,
 						Kind:       kindDeployment,
 						Name:       deploymentName,
+						APIVersion: "apps/v1",
 					}},
 				},
 			},
-			filter:       NewDaemonSetPodFilter(newFakeClientSet()),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{{
+					Name:    "daemonsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindDaemonSet,
+				}})
+			},
 			passesFilter: true,
 		},
 		{
@@ -190,32 +208,63 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
 						Controller: &isController,
-						Kind:       kindStatefulSet,
+						Kind:       KindStatefulSet,
 						Name:       statefulsetName,
+						APIVersion: "apps/v1",
 					}},
 				},
 			},
-			filter:       NewStatefulSetPodFilter(newFakeClientSet(reactor{verb: "get", resource: "statefulsets"})),
+			objects: []runtime.Object{
+				&v1.StatefulSet{
+					ObjectMeta: meta.ObjectMeta{
+						Name: statefulsetName,
+					},
+				},
+			},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{{
+					Name:    "statefulsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindStatefulSet,
+				}})
+			},
 			passesFilter: false,
 		},
 		{
-			name: "ErrorGettingStatefulSet",
+			name: "PartOfStatefulSet - multiple filters",
 			pod: core.Pod{
 				ObjectMeta: meta.ObjectMeta{
 					Name: podName,
 					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
 						Controller: &isController,
-						Kind:       kindStatefulSet,
+						Kind:       KindStatefulSet,
 						Name:       statefulsetName,
+						APIVersion: "apps/v1",
 					}},
 				},
 			},
-			filter: NewStatefulSetPodFilter(newFakeClientSet(reactor{
-				verb:     "get",
-				resource: "statefulsets",
-				err:      errExploded,
-			})),
-			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
+			objects: []runtime.Object{
+				&v1.StatefulSet{
+					ObjectMeta: meta.ObjectMeta{
+						Name: statefulsetName,
+					},
+				},
+			},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{nil, {
+					Name:    "daemonsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindDaemonSet,
+				}, {
+					Name:    "statefulsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindStatefulSet,
+				}})
+			},
+			passesFilter: false,
 		},
 		{
 			name: "OrphanedFromStatefulSet",
@@ -224,16 +273,20 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
 						Controller: &isController,
-						Kind:       kindStatefulSet,
+						Kind:       KindStatefulSet,
 						Name:       statefulsetName,
+						APIVersion: "apps/v1",
 					}},
 				},
 			},
-			filter: NewStatefulSetPodFilter(newFakeClientSet(reactor{
-				verb:     "get",
-				resource: "statefulsets",
-				err:      apierrors.NewNotFound(schema.GroupResource{Resource: "statefulsets"}, statefulsetName),
-			})),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{{
+					Name:    "statefulsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindStatefulSet,
+				}})
+			},
 			passesFilter: true,
 		},
 		{
@@ -245,10 +298,46 @@ func TestPodFilters(t *testing.T) {
 						Controller: &isController,
 						Kind:       kindDeployment,
 						Name:       deploymentName,
+						APIVersion: "apps/v1",
 					}},
 				},
 			},
-			filter:       NewStatefulSetPodFilter(newFakeClientSet()),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{{
+					Name:    "statefulsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindStatefulSet,
+				}})
+			},
+			passesFilter: true,
+		},
+		{
+			name: "NotPartOfStatefulSet - multiple filters",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
+						Controller: &isController,
+						Kind:       kindDeployment,
+						Name:       deploymentName,
+						APIVersion: "apps/v1",
+					}},
+				},
+			},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{nil, {
+					Name:    "daemonsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindDaemonSet,
+				}, {
+					Name:    "statefulsets",
+					Group:   "apps",
+					Version: "v1",
+					Kind:    KindStatefulSet,
+				}})
+			},
 			passesFilter: true,
 		},
 		{
@@ -259,8 +348,8 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Random": "true"},
 				},
 			},
-			filter:       UnprotectedPodFilter(),
-			passesFilter: true,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter() },
+			passesFilter:      true,
 		},
 		{
 			name: "NoPodAnnotations",
@@ -269,8 +358,8 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 				},
 			},
-			filter:       UnprotectedPodFilter("Protect"),
-			passesFilter: true,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect") },
+			passesFilter:      true,
 		},
 		{
 			name: "NoPodAnnotationsWithEmptyUserValue",
@@ -279,8 +368,8 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 				},
 			},
-			filter:       UnprotectedPodFilter("Protect="),
-			passesFilter: true,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect=") },
+			passesFilter:      true,
 		},
 		{
 			name: "NoMatchingProtectionAnnotations",
@@ -290,8 +379,8 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Useless": "true"},
 				},
 			},
-			filter:       UnprotectedPodFilter("Protect", "ProtectTwo=true"),
-			passesFilter: true,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect", "ProtectTwo=true") },
+			passesFilter:      true,
 		},
 		{
 			name: "AltNoMatchingProtectionAnnotations",
@@ -301,7 +390,9 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"NeedsAValue": ""},
 				},
 			},
-			filter:       UnprotectedPodFilter("Protect", "ProtectTwo=true", "NeedsAValue=true"),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("Protect", "ProtectTwo=true", "NeedsAValue=true")
+			},
 			passesFilter: true,
 		},
 		{
@@ -312,8 +403,8 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Protect": ""},
 				},
 			},
-			filter:       UnprotectedPodFilter("Protect"),
-			passesFilter: false,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect") },
+			passesFilter:      false,
 		},
 		{
 			name: "MultipleKeyOnlyProtectionAnnotations",
@@ -323,8 +414,8 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectTwo": ""},
 				},
 			},
-			filter:       UnprotectedPodFilter("ProtectOne", "ProtectTwo"),
-			passesFilter: false,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("ProtectOne", "ProtectTwo") },
+			passesFilter:      false,
 		},
 		{
 			name: "SingleProtectionAnnotation",
@@ -334,8 +425,8 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Protect": "true"},
 				},
 			},
-			filter:       UnprotectedPodFilter("Protect=true"),
-			passesFilter: false,
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect=true") },
+			passesFilter:      false,
 		},
 		{
 			name: "MultipleProtectionAnnotations",
@@ -345,7 +436,9 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectTwo": "true"},
 				},
 			},
-			filter:       UnprotectedPodFilter("ProtectOne=true", "ProtectTwo=true"),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("ProtectOne=true", "ProtectTwo=true")
+			},
 			passesFilter: false,
 		},
 		{
@@ -356,7 +449,9 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectTwo": ""},
 				},
 			},
-			filter:       UnprotectedPodFilter("ProtectOne=true", "ProtectTwo"),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("ProtectOne=true", "ProtectTwo")
+			},
 			passesFilter: false,
 		},
 		{
@@ -367,47 +462,90 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectOne": "true"},
 				},
 			},
-			filter:       UnprotectedPodFilter("ProtectOne", "ProtectTwo=true"),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("ProtectOne", "ProtectTwo=true")
+			},
 			passesFilter: false,
 		},
 		{
-			name:         "NoFiltersProvided",
-			pod:          core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filter:       NewPodFilters(),
-			passesFilter: true,
+			name:              "NoFiltersProvided",
+			pod:               core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return NewPodFilters() },
+			passesFilter:      true,
 		},
 		{
 			name: "AllFiltersPass",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filter: NewPodFilters(
-				func(_ core.Pod) (bool, error) { return true, nil },
-				func(_ core.Pod) (bool, error) { return true, nil },
-			),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodFilters(
+					func(_ core.Pod) (bool, error) { return true, nil },
+					func(_ core.Pod) (bool, error) { return true, nil },
+				)
+			},
 			passesFilter: true,
 		},
 		{
 			name: "OneFilterFails",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filter: NewPodFilters(
-				func(_ core.Pod) (bool, error) { return true, nil },
-				func(_ core.Pod) (bool, error) { return false, nil },
-			),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodFilters(
+					func(_ core.Pod) (bool, error) { return true, nil },
+					func(_ core.Pod) (bool, error) { return false, nil },
+				)
+			},
 			passesFilter: false,
 		},
 		{
 			name: "OneFilterErrors",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filter: NewPodFilters(
-				func(_ core.Pod) (bool, error) { return true, nil },
-				func(_ core.Pod) (bool, error) { return false, errExploded },
-			),
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodFilters(
+					func(_ core.Pod) (bool, error) { return true, nil },
+					func(_ core.Pod) (bool, error) { return false, errExploded },
+				)
+			},
 			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
+		},
+		{
+			name: "ControlledBySomething",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+					OwnerReferences: []meta.OwnerReference{meta.OwnerReference{
+						Controller: &isController,
+						Kind:       "Something",
+						Name:       "some-name",
+						APIVersion: "agroup/v3",
+					}},
+				},
+			},
+			objects: []runtime.Object{
+				&unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"apiVersion": "agroup/v3",
+						"kind":       "Something",
+						"metadata": map[string]interface{}{
+							"name": "some-name",
+						},
+					},
+				},
+			},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodControlledByFilter(newFakeDynamicClient(obj...), []*meta.APIResource{{
+					Name:    "somethings",
+					Group:   "agroup",
+					Version: "v3",
+					Kind:    "Something",
+				}})
+			},
+			passesFilter: false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			passesFilter, err := tc.filter(tc.pod)
+			filter := tc.filterBuilderFunc(tc.objects...)
+			passesFilter, err := filter(tc.pod)
 			if err != nil && tc.errFn != nil && !tc.errFn(err) {
 				t.Errorf("tc.filter(%v): %v", tc.pod.GetName(), err)
 			}
