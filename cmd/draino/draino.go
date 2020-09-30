@@ -30,6 +30,7 @@ import (
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	"gopkg.in/alecthomas/kingpin.v2"
+	"k8s.io/client-go/dynamic"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
@@ -67,11 +68,9 @@ func main() {
 		leaderElectionRetryPeriod   = app.Flag("leader-election-retry-period", "Leader election retry period.").Default(DefaultLeaderElectionRetryPeriod.String()).Duration()
 		leaderElectionTokenName     = app.Flag("leader-election-token-name", "Leader election token name.").Default(kubernetes.Component).String()
 
-		skipDrain             = app.Flag("skip-drain", "Whether to skip draining nodes after cordoning.").Default("false").Bool()
-		evictDaemonSetPods    = app.Flag("evict-daemonset-pods", "Evict pods that were created by an extant DaemonSet.").Bool()
-		evictStatefulSetPods  = app.Flag("evict-statefulset-pods", "Evict pods that were created by an extant StatefulSet.").Bool()
-		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
-		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
+		skipDrain                 = app.Flag("skip-drain", "Whether to skip draining nodes after cordoning.").Default("false").Bool()
+		doNotEvictPodControlledBy = app.Flag("do-not-evict-pod-controlled-by", "Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.").PlaceHolder("kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1").Default("", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet).Strings()
+		evictLocalStoragePods     = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 
 		maxSimultaneousCordon          = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
 		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
@@ -157,15 +156,22 @@ func main() {
 	if !*evictLocalStoragePods {
 		pf = append(pf, kubernetes.LocalStoragePodFilter)
 	}
-	if !*evictUnreplicatedPods {
-		pf = append(pf, kubernetes.UnreplicatedPodFilter)
+
+	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotEvictPodControlledBy)
+	if err != nil {
+		kingpin.FatalIfError(err, "can't get resources for controlby filtering")
 	}
-	if !*evictDaemonSetPods {
-		pf = append(pf, kubernetes.NewDaemonSetPodFilter(cs))
+	if len(apiResources) > 0 {
+		for _, apiResource := range apiResources {
+			if apiResource == nil {
+				log.Info("Filtering pod the are uncontrolled")
+			} else {
+				log.Info("Filtering pod controlled by apiresource", zap.Any("apiresource", *apiResource))
+			}
+		}
+		pf = append(pf, kubernetes.NewPodControlledByFilter(dynamic.NewForConfigOrDie(c), apiResources))
 	}
-	if !*evictStatefulSetPods {
-		pf = append(pf, kubernetes.NewStatefulSetPodFilter(cs))
-	}
+
 	systemKnownAnnotations := []string{
 		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
 	}

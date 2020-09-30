@@ -23,7 +23,8 @@ import (
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 )
 
 // A PodFilterFunc returns true if the supplied pod passes the filter.
@@ -47,59 +48,37 @@ func LocalStoragePodFilter(p core.Pod) (bool, error) {
 	return true, nil
 }
 
-// UnreplicatedPodFilter returns true if the pod is replicated, i.e. is managed
-// by a controller (deployment, daemonset, statefulset, etc) of some sort.
-func UnreplicatedPodFilter(p core.Pod) (bool, error) {
-	// We're fine with 'evicting' unreplicated pods that aren't actually running.
-	if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
+func NewPodControlledByFilter(client dynamic.Interface, controlledByAPIResources []*meta.APIResource) PodFilterFunc {
+	return func(p core.Pod) (bool, error) {
+		for _, controlledBy := range controlledByAPIResources {
+
+			if controlledBy == nil { //means uncontrolled pod
+				if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
+					continue
+				}
+				if meta.GetControllerOf(&p) == nil {
+					return false, nil
+				}
+				continue
+			}
+
+			c := meta.GetControllerOf(&p)
+			if c == nil || c.Kind != controlledBy.Kind || c.APIVersion != controlledBy.Group+"/"+controlledBy.Version {
+				continue
+			}
+
+			if _, err := client.Resource(schema.GroupVersionResource{Group: controlledBy.Group, Version: controlledBy.Version, Resource: controlledBy.Name}).Namespace(p.Namespace).Get(c.Name, meta.GetOptions{}); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return false, errors.Wrapf(err, "cannot get pod %s/%s controlled by %s", p.GetNamespace(), c.Name, controlledBy)
+			} else {
+				return false, nil
+			}
+		}
 		return true, nil
 	}
-	if meta.GetControllerOf(&p) == nil {
-		return false, nil
-	}
-	return true, nil
-}
 
-// NewDaemonSetPodFilter returns a FilterFunc that returns true if the supplied
-// pod is not managed by an extant DaemonSet.
-func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
-	return func(p core.Pod) (bool, error) {
-		c := meta.GetControllerOf(&p)
-		if c == nil || c.Kind != kindDaemonSet {
-			return true, nil
-		}
-
-		// Pods pass the filter if they were created by a DaemonSet that no
-		// longer exists.
-		if _, err := client.AppsV1().DaemonSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
-			if apierrors.IsNotFound(err) {
-				return true, nil
-			}
-			return false, errors.Wrapf(err, "cannot get DaemonSet %s/%s", p.GetNamespace(), c.Name)
-		}
-		return false, nil
-	}
-}
-
-// NewStatefulSetPodFilter returns a FilterFunc that returns true if the supplied
-// pod is not managed by an extant StatefulSet.
-func NewStatefulSetPodFilter(client kubernetes.Interface) PodFilterFunc {
-	return func(p core.Pod) (bool, error) {
-		c := meta.GetControllerOf(&p)
-		if c == nil || c.Kind != kindStatefulSet {
-			return true, nil
-		}
-
-		// Pods pass the filter if they were created by a StatefulSet that no
-		// longer exists.
-		if _, err := client.AppsV1().StatefulSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
-			if apierrors.IsNotFound(err) {
-				return true, nil
-			}
-			return false, errors.Wrapf(err, "cannot get StatefulSet %s/%s", p.GetNamespace(), c.Name)
-		}
-		return false, nil
-	}
 }
 
 // UnprotectedPodFilter returns a FilterFunc that returns true if the
@@ -132,6 +111,7 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied
 // FilterFuncs return true.
+
 func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
 	return func(p core.Pod) (bool, error) {
 		for _, fn := range filters {

@@ -17,6 +17,7 @@ require (
 	github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf // indirect
 	github.com/antonmedv/expr v1.8.8
 	github.com/go-test/deep v1.0.1
+	github.com/googleapis/gnostic v0.0.0-20170729233727-0c5108395e2d
 	github.com/julienschmidt/httprouter v1.1.0
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/oklog/run v1.0.0

@@ -36,18 +36,22 @@ Flags:
       --max-grace-period=8m0s    Maximum time evicted pods will be given to terminate gracefully.
       --eviction-headroom=30s    Additional time to wait after a pod's termination grace period for it to have been deleted.
       --drain-buffer=10m0s       Minimum time between starting each drain. Nodes are always cordoned immediately.
-      --node-label="foo=bar"     (DEPRECATED) Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
-      --node-label-expr="metadata.labels.foo == 'bar'"
-                                 This is an expr string https://github.com/antonmedv/expr that must return true or false. See `nodefilters_test.go` for examples
-      --namespace="kube-system"  Namespace used to create leader election lock object.	
-      --leader-election-lease-duration=15s
+      --node-label=NODE-LABEL ...  
+                                 (Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times
+      --node-label-expr=NODE-LABEL-EXPR  
+                                 Nodes that match this expression will be eligible for cordoning and draining.
+      --namespace="kube-system"  Namespace used to create leader election lock object.
+      --leader-election-lease-duration=15s  
                                  Lease duration for leader election.
-      --leader-election-renew-deadline=10s
+      --leader-election-renew-deadline=10s  
                                  Leader election renew deadline.
-      --leader-election-retry-period=2s
+      --leader-election-retry-period=2s  
                                  Leader election retry period.
+      --leader-election-token-name="draino"  
+                                 Leader election token name.
       --skip-drain               Whether to skip draining nodes after cordoning.
-      --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
+      --do-not-evict-pod-controlled-by=kind[[.version].group] examples: StatefulSets StatefulSets.apps StatefulSets.v1.apps ...  
+                                 Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
       --max-simultaneous-cordon=(Value|Value%)  ...
@@ -63,6 +67,7 @@ Flags:
 
 Args:
   <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.
+
 ```
 
 ### Labels and Label Expressions
@@ -77,6 +82,24 @@ An example of `--node-label-expr`:
 (metadata.labels.region == 'us-west-1' && metadata.labels.app == 'nginx') || (metadata.labels.region == 'us-west-2' && metadata.labels.app == 'nginx')
 ```
 
+### Ignore pod controlled by ...
+It is possible to prevent eviction of pods that are under control of:
+- daemonset
+- statefulset
+- Custom Resource
+- ...
+
+or not even on control of anything. For this, use the flag `do-not-evict-pod-controlled-by`; it can be repeated. An empty value means that we block eviction on pods that are uncontrolled.
+The value can be a `kind` or a `kind.group` or a `kind.version.group` to designate the owner resource type. If the `version` or/and the `group` are omitted it acts as a wildcard (any version, any group). It is case-sensitive and must match the API Resource definition.
+
+Example:
+```shell script
+        - --do-not-evict-controlled-by=StatefulSet
+        - --do-not-evict-controlled-by=DaemonSet
+        - --do-not-evict-controlled-by=ExtendedDaemonSet.v1alpha1.datadoghq.com
+        - --do-not-evict-controlled-by=
+```
+  
 ## Considerations
 Keep the following in mind before deploying Draino:
 
@@ -95,6 +118,8 @@ Keep the following in mind before deploying Draino:
 * Pods that can't be evicted by the cluster-autoscaler won't be evicted by draino.
   See annotation `"cluster-autoscaler.kubernetes.io/safe-to-evict": "false"` in
   [cluster-autoscaler documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node)
+
+
 
 ## Deployment
 
