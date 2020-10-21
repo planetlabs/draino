@@ -147,12 +147,12 @@ func main() {
 
 	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotEvictPodControlledBy)
 	if err != nil {
-		kingpin.FatalIfError(err, "can't get resources for controlby filtering")
+		kingpin.FatalIfError(err, "can't get resources for controlled-by filtering")
 	}
 	if len(apiResources) > 0 {
 		for _, apiResource := range apiResources {
 			if apiResource == nil {
-				log.Info("Filtering pod the are uncontrolled")
+				log.Info("Pod filtering is unconstrained by controller")
 			} else {
 				log.Info("Filtering pod controlled by apiresource", zap.Any("apiresource", *apiResource))
 			}

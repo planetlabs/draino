@@ -111,7 +111,6 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied
 // FilterFuncs return true.
-
 func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
 	return func(p core.Pod) (bool, error) {
 		for _, fn := range filters {

@@ -75,13 +75,13 @@ An example of `--node-label-expr`:
 
 ### Ignore pod controlled by ...
 It is possible to prevent eviction of pods that are under control of:
-- daemonset
-- statefulset
+- DaemonSet
+- StatefulSet
 - Custom Resource
 - ...
 
-or not even on control of anything. For this, use the flag `do-not-evict-pod-controlled-by`; it can be repeated. An empty value means that we block eviction on pods that are uncontrolled.
-The value can be a `kind` or a `kind.group` or a `kind.version.group` to designate the owner resource type. If the `version` or/and the `group` are omitted it acts as a wildcard (any version, any group). It is case-sensitive and must match the API Resource definition.
+or not even under the control of any controller. For this, use the flag `do-not-evict-pod-controlled-by`; it can be repeated. An empty value means that we block eviction on pods that are uncontrolled.
+The value can be a `kind` or a `kind.group` or a `kind.version.group` to designate the owner resource type. If the `version` or/and the `group` are omitted it acts as a wildcard (any version, any group). It is case-sensitive and must match the API Resource definition. See documentation of [ParseKindArg](https://godoc.org/k8s.io/apimachinery/pkg/runtime/schema#ParseKindArg) for more details.
 
 Example:
 ```shell script
@@ -107,8 +107,6 @@ Keep the following in mind before deploying Draino:
 * Pods that can't be evicted by the cluster-autoscaler won't be evicted by draino.
   See annotation `"cluster-autoscaler.kubernetes.io/safe-to-evict": "false"` in
   [cluster-autoscaler documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node)
-
-
 
 ## Deployment
 
