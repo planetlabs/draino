@@ -44,7 +44,7 @@ type NodeLister interface {
 func NewCordonLimiter(logger *zap.Logger) CordonLimiter {
 	return &Limiter{
 		logger:      logger,
-		rateLimiter: flowcontrol.NewTokenBucketRateLimiter(2, 2),
+		rateLimiter: flowcontrol.NewTokenBucketRateLimiter(1, 1),	// limiters are computing % on top of the cache. Here we ensure that the cache has time to be updated.
 	}
 }
 

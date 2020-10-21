@@ -167,7 +167,9 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 
 	// First cordon the node if it is not yet cordonned
 	if !n.Spec.Unschedulable {
-		h.cordon(n, badConditions)
+		if err:= h.cordon(n, badConditions); err!=nil {
+			return
+		}
 	}
 
 	// Let's ensure that a drain is scheduled
@@ -254,7 +256,7 @@ func removeAnnotationMutator(n *core.Node) {
 	delete(n.Annotations, drainoConditionsAnnotationKey)
 }
 
-func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []SuppliedCondition) {
+func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []SuppliedCondition) error {
 	log := h.logger.With(zap.String("node", n.GetName()))
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 	// Events must be associated with this object reference, rather than the
@@ -272,19 +274,20 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 			stats.Record(tags, MeasureLimitedCordon.M(1))
 			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonBlockedByLimit, reason)
 			h.logger.Info("cordon limiter", zap.String("node", n.Name), zap.String("reason", reason))
-			return
+			return err
 		}
 
 		log.Info("Failed to cordon", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 		stats.Record(tags, MeasureNodesCordoned.M(1))
 		h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonCordonFailed, "Cordoning failed: %v", err)
-		return
+		return err
 	}
 	log.Info("Cordoned")
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 	stats.Record(tags, MeasureNodesCordoned.M(1))
 	h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
+	return nil
 }
 
 func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node) {
