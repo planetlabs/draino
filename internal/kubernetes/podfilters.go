@@ -68,16 +68,16 @@ func NewPodControlledByFilter(client dynamic.Interface, controlledByAPIResources
 
 			if _, err := client.Resource(schema.GroupVersionResource{Group: controlledBy.Group, Version: controlledBy.Version, Resource: controlledBy.Name}).Namespace(p.Namespace).Get(c.Name, meta.GetOptions{}); err != nil {
 				if apierrors.IsNotFound(err) {
+					// the controller was deleted, so the pod can be deleted/evicted also.
 					continue
 				}
 				return false, errors.Wrapf(err, "cannot get pod %s/%s controlled by %s", p.GetNamespace(), c.Name, controlledBy)
-			} else {
-				return false, nil
 			}
+			// the pod is still under control, so we protect the pod from eviction
+			return false, nil
 		}
 		return true, nil
 	}
-
 }
 
 // UnprotectedPodFilter returns a FilterFunc that returns true if the

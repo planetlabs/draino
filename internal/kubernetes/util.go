@@ -70,7 +70,7 @@ func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error 
 func GetAPIResources(discoveryClient discovery.DiscoveryInterface) ([]metav1.APIResource, error) {
 	groupList, err := discoveryClient.ServerGroups()
 	if groupList == nil || err != nil || groupList.Groups == nil {
-		return nil, fmt.Errorf("Fail to discover groups")
+		return nil, fmt.Errorf("failed to discover groups")
 	}
 
 	var allServerResources []metav1.APIResource
@@ -103,9 +103,8 @@ func GetAPIResources(discoveryClient discovery.DiscoveryInterface) ([]metav1.API
 func GetAPIResourcesForGroupsKindVersion(apiResources []metav1.APIResource, gvks []string) ([]metav1.APIResource, error) {
 	var outputAPIResources []metav1.APIResource
 	for _, gvkInput := range gvks {
-
 		if gvkInput == "" {
-			return nil, fmt.Errorf("Empty GroupVersionKind value")
+			return nil, fmt.Errorf("empty GroupVersionKind value")
 		}
 
 		atLeastOneResourceFound := false
@@ -134,7 +133,7 @@ func GetAPIResourcesForGroupsKindVersion(apiResources []metav1.APIResource, gvks
 		}
 
 		if !atLeastOneResourceFound {
-			return nil, fmt.Errorf("Could not find any APIResource matching kind[.version[.group]]='%s'", gvkInput)
+			return nil, fmt.Errorf("could not find any APIResource matching kind[.version[.group]]='%s'", gvkInput)
 		}
 	}
 	return outputAPIResources, nil
@@ -143,7 +142,7 @@ func GetAPIResourcesForGroupsKindVersion(apiResources []metav1.APIResource, gvks
 // GetAPIResourcesForGVK retrieves the apiResources that match the given 'Kind.Version.Group'
 // taking into account the empty case that associate a nil value in the list (used for uncontrolled pod filtering)
 // and filtering out subresources
-func GetAPIResourcesForGVK(discovery discovery.DiscoveryInterface, gvks []string) ([]*metav1.APIResource, error) {
+func GetAPIResourcesForGVK(discoveryInterface discovery.DiscoveryInterface, gvks []string) ([]*metav1.APIResource, error) {
 	hasEmptyGVK := false
 	var nonEmptyGVKs []string
 	for _, v := range gvks {
@@ -154,7 +153,7 @@ func GetAPIResourcesForGVK(discovery discovery.DiscoveryInterface, gvks []string
 		nonEmptyGVKs = append(nonEmptyGVKs, v)
 	}
 
-	allAPIResources, err := GetAPIResources(discovery)
+	allAPIResources, err := GetAPIResources(discoveryInterface)
 	if err != nil {
 		return nil, err
 	}

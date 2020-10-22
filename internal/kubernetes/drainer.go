@@ -29,18 +29,24 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/record"
 )
 
 // Default pod eviction settings.
 const (
-	DefaultMaxGracePeriod   time.Duration = 8 * time.Minute
-	DefaultEvictionOverhead time.Duration = 30 * time.Second
+	DefaultMaxGracePeriod               time.Duration = 8 * time.Minute
+	DefaultEvictionOverhead             time.Duration = 30 * time.Second
+	DefaultPVCRecreateTimeout           time.Duration = 3 * time.Minute
+	DefaultPodDeletePeriodWaitingForPVC time.Duration = 10 * time.Second
 
 	KindDaemonSet   = "DaemonSet"
 	KindStatefulSet = "StatefulSet"
 
 	ConditionDrainedScheduled = "DrainScheduled"
 	DefaultSkipDrain          = false
+
+	PVCStorageClassCleanupAnnotationKey   = "draino/delete-pvc-and-pv"
+	PVCStorageClassCleanupAnnotationValue = "true"
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -103,8 +109,9 @@ func (d *NoopCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, fail
 
 // APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
 type APICordonDrainer struct {
-	c kubernetes.Interface
-	l *zap.Logger
+	c             kubernetes.Interface
+	l             *zap.Logger
+	eventRecorder record.EventRecorder
 
 	filter        PodFilterFunc
 	cordonLimiter CordonLimiter
@@ -112,6 +119,8 @@ type APICordonDrainer struct {
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
 	skipDrain        bool
+
+	storageClassesAllowingPVDeletion map[string]struct{}
 }
 
 // SuppliedCondition defines the condition will be watched.
@@ -164,9 +173,20 @@ func WithAPICordonDrainerLogger(l *zap.Logger) APICordonDrainerOption {
 	}
 }
 
+// WithCordonLimiter configures an APICordonDrainer to limit cordon activity
 func WithCordonLimiter(limiter CordonLimiter) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.cordonLimiter = limiter
+	}
+}
+
+// WithStorageClassesAllowingDeletion configures an APICordonDrainer to allow deletion of PV/PVC for some storage classes only
+func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.storageClassesAllowingPVDeletion = map[string]struct{}{}
+		for _, sc := range storageClasses {
+			d.storageClassesAllowingPVDeletion[sc] = struct{}{}
+		}
 	}
 }
 
@@ -180,6 +200,7 @@ func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *
 		maxGracePeriod:   DefaultMaxGracePeriod,
 		evictionHeadroom: DefaultEvictionOverhead,
 		skipDrain:        DefaultSkipDrain,
+		eventRecorder:    NewEventRecorder(c),
 	}
 	for _, o := range ao {
 		o(d)
@@ -199,6 +220,9 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 			return NewLimiterError(reason)
 		}
 	}
+	if n.Spec.Unschedulable {
+		return nil
+	}
 
 	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 	if err != nil {
@@ -207,7 +231,6 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 	if fresh.Spec.Unschedulable {
 		return nil
 	}
-
 	fresh.Spec.Unschedulable = true
 	for _, m := range mutators {
 		m(fresh)
@@ -264,13 +287,13 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 	now := meta.Time{Time: time.Now()}
 	conditionUpdated := false
 	for i, condition := range freshNode.Status.Conditions {
-		if string(condition.Type) == ConditionDrainedScheduled {
-			freshNode.Status.Conditions[i].LastHeartbeatTime = now
-			freshNode.Status.Conditions[i].Message = "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
-			freshNode.Status.Conditions[i].Status = conditionStatus
-			conditionUpdated = true
-			break
+		if string(condition.Type) != ConditionDrainedScheduled {
+			continue
 		}
+		freshNode.Status.Conditions[i].LastHeartbeatTime = now
+		freshNode.Status.Conditions[i].Message = "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
+		freshNode.Status.Conditions[i].Status = conditionStatus
+		conditionUpdated = true
 	}
 	if !conditionUpdated { // There was no condition found, let's create one
 		freshNode.Status.Conditions = append(freshNode.Status.Conditions,
@@ -301,7 +324,6 @@ func IsMarkedForDrain(n *core.Node) bool {
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 func (d *APICordonDrainer) Drain(n *core.Node) error {
-
 	// Do nothing if draining is not enabled.
 	if d.skipDrain {
 		d.l.Debug("Skipping drain because draining is disabled")
@@ -315,8 +337,8 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 
 	abort := make(chan struct{})
 	errs := make(chan error, 1)
-	for _, pod := range pods {
-		go d.evict(pod, abort, errs)
+	for i := range pods {
+		go d.evict(&pods[i], abort, errs)
 	}
 	// This will _eventually_ abort evictions. Evictions may spend up to
 	// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
@@ -358,10 +380,10 @@ func (d *APICordonDrainer) getPodsToDrain(node string) ([]core.Pod, error) {
 	return include, nil
 }
 
-func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- error) {
+func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}, e chan<- error) {
 	gracePeriod := int64(d.maxGracePeriod.Seconds())
-	if p.Spec.TerminationGracePeriodSeconds != nil && *p.Spec.TerminationGracePeriodSeconds < gracePeriod {
-		gracePeriod = *p.Spec.TerminationGracePeriodSeconds
+	if pod.Spec.TerminationGracePeriodSeconds != nil && *pod.Spec.TerminationGracePeriodSeconds < gracePeriod {
+		gracePeriod = *pod.Spec.TerminationGracePeriodSeconds
 	}
 	for {
 		select {
@@ -369,8 +391,8 @@ func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- err
 			e <- errors.New("pod eviction aborted")
 			return
 		default:
-			err := d.c.CoreV1().Pods(p.GetNamespace()).Evict(&policy.Eviction{
-				ObjectMeta:    meta.ObjectMeta{Namespace: p.GetNamespace(), Name: p.GetName()},
+			err := d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
+				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
 				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
 			})
 			switch {
@@ -383,28 +405,203 @@ func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- err
 				e <- nil
 				return
 			case err != nil:
-				e <- errors.Wrapf(err, "cannot evict pod %s/%s", p.GetNamespace(), p.GetName())
+				e <- errors.Wrapf(err, "cannot evict pod %s/%s", pod.GetNamespace(), pod.GetName())
 				return
 			default:
-				e <- errors.Wrapf(d.awaitDeletion(p, d.deleteTimeout()), "cannot confirm pod %s/%s was deleted", p.GetNamespace(), p.GetName())
+				e <- errors.Wrapf(d.awaitDeletion(pod, d.deleteTimeout()), "cannot confirm pod %s/%s was deleted", pod.GetNamespace(), pod.GetName())
 				return
 			}
 		}
 	}
 }
 
-func (d *APICordonDrainer) awaitDeletion(p core.Pod, timeout time.Duration) error {
-	return wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
-		got, err := d.c.CoreV1().Pods(p.GetNamespace()).Get(p.GetName(), meta.GetOptions{})
+func (d *APICordonDrainer) awaitDeletion(pod *core.Pod, timeout time.Duration) error {
+	err := wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
+		got, err := d.c.CoreV1().Pods(pod.GetNamespace()).Get(pod.GetName(), meta.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
 		}
 		if err != nil {
-			return false, errors.Wrapf(err, "cannot get pod %s/%s", p.GetNamespace(), p.GetName())
+			return false, errors.Wrapf(err, "cannot get pod %s/%s", pod.GetNamespace(), pod.GetName())
 		}
-		if got.GetUID() != p.GetUID() {
+		if got.GetUID() != pod.GetUID() {
 			return true, nil
 		}
+		return false, nil
+	})
+	if err != nil {
+		return errors.Wrapf(err, "at least one PVC associated to that pod was deleted before failure/timeout")
+	}
+
+	pvcDeleted, err := d.deletePVCAssociatedWithStorageClass(pod)
+	if err != nil {
+		return err
+	}
+
+	// now if the pod is pending because it is missing the PVC and if it is controlled by a statefulset we should delete it to have statefulset controller rebuilding the PVC
+	if len(pvcDeleted) > 0 {
+		if err := d.deletePVAssociatedWithDeletedPVC(pod, pvcDeleted); err != nil {
+			return err
+		}
+		for _, pvc := range pvcDeleted {
+			if err := d.podDeleteRetryWaitingForPVC(pod, pvc); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(pod *core.Pod, pvc *core.PersistentVolumeClaim) error {
+	podDeleteCheckPVCFunc := func() (bool, error) {
+		// check if the PVC was created
+		gotPVC, err := d.c.CoreV1().PersistentVolumeClaims(pvc.GetNamespace()).Get(pvc.GetName(), meta.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+
+		if !apierrors.IsNotFound(err) {
+			if gotPVC != nil && string(gotPVC.UID) != "" && string(gotPVC.UID) != string(pvc.UID) {
+				d.l.Info("associated pvc was recreated", zap.String("pod", pod.GetName()), zap.String("namespace", pod.GetNamespace()), zap.String("pvc", pvc.GetName()), zap.String("pvc-old-uid", string(pvc.GetUID())), zap.String("pvc-new-uid", string(gotPVC.GetUID())))
+				return true, nil
+			}
+		}
+
+		d.l.Info("deleting pod to force pvc recreate", zap.String("pod", pod.GetName()), zap.String("namespace", pod.GetNamespace()))
+		err = d.c.CoreV1().Pods(pod.GetNamespace()).Delete(pod.GetName(), &meta.DeleteOptions{})
+		if err != nil {
+			return false, errors.Wrapf(err, "cannot delete pod %s/%s to regenerated PVC", pod.GetNamespace(), pod.GetName())
+		}
+		return false, nil
+	}
+	return wait.PollImmediate(DefaultPodDeletePeriodWaitingForPVC, DefaultPVCRecreateTimeout, podDeleteCheckPVCFunc)
+}
+
+func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(pod *core.Pod, pvcDeleted []*core.PersistentVolumeClaim) error {
+	for _, claim := range pvcDeleted {
+		if claim.Spec.VolumeName == "" {
+			continue
+		}
+		pv, err := d.c.CoreV1().PersistentVolumes().Get(claim.Spec.VolumeName, meta.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			d.l.Info("GET: PV not found", zap.String("name", claim.Spec.VolumeName), zap.String("claim", claim.Name), zap.String("claimNamespace", claim.Namespace))
+			continue // This PV was already deleted
+		}
+
+		d.eventRecorder.Event(pv, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pvc %s/%s and pod %s/%s", claim.Namespace, claim.Name, pod.Namespace, pod.Name))
+		d.eventRecorder.Event(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PV %s", pv.Name))
+
+		err = d.c.CoreV1().PersistentVolumes().Delete(pv.Name, nil)
+		if apierrors.IsNotFound(err) {
+			d.l.Info("DELETE: PV not found", zap.String("name", pv.Name))
+			continue // This PV was already deleted
+		}
+		if err != nil {
+			d.eventRecorder.Event(pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV"))
+			d.eventRecorder.Event(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV %s", pv.Name))
+			return errors.Wrapf(err, "cannot delete pv %s", pv.Name)
+		}
+		d.l.Info("deleting pv", zap.String("pv", pv.Name))
+
+		// wait for PVC complete deletion
+		if err := d.awaitPVDeletion(pv, time.Minute); err != nil {
+			return errors.Wrapf(err, "pv deletion timeout %s", pv.Name)
+		}
+	}
+	return nil
+}
+
+func (d *APICordonDrainer) awaitPVDeletion(pv *core.PersistentVolume, timeout time.Duration) error {
+	return wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
+		got, err := d.c.CoreV1().PersistentVolumes().Get(pv.GetName(), meta.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, errors.Wrapf(err, "cannot get pv %s", pv.GetName())
+		}
+		if string(got.GetUID()) != string(pv.GetUID()) {
+			return true, nil
+		}
+		return false, nil
+	})
+}
+
+// deletePVCAssociatedWithStorageClass takes care of deleting the PVCs associated with the annotated classes
+// returns the list of deleted PVCs and the first error encountered if any
+func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([]*core.PersistentVolumeClaim, error) {
+	if d.storageClassesAllowingPVDeletion == nil {
+		return nil, nil
+	}
+
+	valAnnotation := pod.Annotations[PVCStorageClassCleanupAnnotationKey]
+	if valAnnotation != PVCStorageClassCleanupAnnotationValue {
+		return nil, nil
+	}
+
+	deletedPVCs := []*core.PersistentVolumeClaim{}
+
+	for _, v := range pod.Spec.Volumes {
+		if v.PersistentVolumeClaim == nil {
+			continue
+		}
+		d.l.Info("looking at volume with PVC", zap.String("name", v.Name), zap.String("claim", v.PersistentVolumeClaim.ClaimName))
+		pvc, err := d.c.CoreV1().PersistentVolumeClaims(pod.GetNamespace()).Get(v.PersistentVolumeClaim.ClaimName, meta.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			d.l.Info("GET: PVC not found", zap.String("name", v.Name), zap.String("claim", v.PersistentVolumeClaim.ClaimName))
+			continue // This PVC was already deleted
+		}
+		if err != nil {
+			return deletedPVCs, errors.Wrapf(err, "cannot get pvc %s/%s", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName)
+		}
+		if pvc.Spec.StorageClassName == nil {
+			d.l.Info("PVC with no StorageClassName", zap.String("claim", v.PersistentVolumeClaim.ClaimName))
+			continue
+		}
+		if _, ok := d.storageClassesAllowingPVDeletion[*pvc.Spec.StorageClassName]; !ok {
+			d.l.Info("Skipping StorageClassName", zap.String("storageClassName", *pvc.Spec.StorageClassName))
+			continue
+		}
+
+		d.eventRecorder.Event(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PVC %s/%s", pvc.Namespace, pvc.Name))
+		d.eventRecorder.Event(pvc, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pod %s/%s", pod.Namespace, pod.Name))
+
+		err = d.c.CoreV1().PersistentVolumeClaims(pod.GetNamespace()).Delete(v.PersistentVolumeClaim.ClaimName, nil)
+		if apierrors.IsNotFound(err) {
+			d.l.Info("DELETE: PVC not found", zap.String("name", v.Name), zap.String("claim", v.PersistentVolumeClaim.ClaimName))
+			continue // This PVC was already deleted
+		}
+		if err != nil {
+			d.eventRecorder.Event(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PVC %s/%s", pvc.Namespace, pvc.Name))
+			return deletedPVCs, errors.Wrapf(err, "cannot delete pvc %s/%s", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName)
+		}
+		d.l.Info("deleting pvc", zap.String("pvc", v.PersistentVolumeClaim.ClaimName), zap.String("namespace", pod.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
+
+		// wait for PVC complete deletion
+		if err := d.awaitPVCDeletion(pvc, time.Minute); err != nil {
+			return deletedPVCs, errors.Wrapf(err, "pvc deletion timeout %s/%s", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName)
+		}
+		deletedPVCs = append(deletedPVCs, pvc)
+	}
+	return deletedPVCs, nil
+}
+
+func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, timeout time.Duration) error {
+	return wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
+		d.l.Info("waiting for pvc complete deletion", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
+		got, err := d.c.CoreV1().PersistentVolumeClaims(pvc.GetNamespace()).Get(pvc.GetName(), meta.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			d.l.Info("pvc not found. It is deleted.", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
+			return true, nil
+		}
+		if err != nil {
+			return false, errors.Wrapf(err, "cannot get pvc %s/%s", pvc.GetNamespace(), pvc.GetName())
+		}
+		if string(got.GetUID()) != string(pvc.GetUID()) {
+			d.l.Info("pvc found but with different UID. It is deleted.", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())), zap.String("pvc-new-uid", string(got.GetUID())))
+			return true, nil
+		}
+		d.l.Info("pvc still present", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
 		return false, nil
 	})
 }

@@ -21,7 +21,6 @@ Adding Draino to the mix enables autoremediation:
 
 ## Usage
 ```
-$ docker run planetlabs/draino /draino --help
 usage: draino [<flags>] <node-conditions>...
 
 Automatically cordons and drains nodes that match the supplied conditions.
@@ -50,24 +49,27 @@ Flags:
       --leader-election-token-name="draino"  
                                  Leader election token name.
       --skip-drain               Whether to skip draining nodes after cordoning.
-      --do-not-evict-pod-controlled-by=kind[[.version].group] examples: StatefulSets StatefulSets.apps StatefulSets.v1.apps ...  
+      --do-not-evict-pod-controlled-by=kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1 ...  
                                  Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
-      --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
-      --max-simultaneous-cordon=(Value|Value%)  ...
-                                 Maximum number of cordoned nodes in the cluster.
-      --max-simultaneous-cordon-for-labels=(Value|Value%),keys...   ...
-                                 Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'
-      --max-simultaneous-cordon-for-taints=(Value|Value%),keys...   ...
-                                 Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'
-
-
-      --protected-pod-annotation=KEY[=VALUE] ...
+      --protected-pod-annotation=KEY[=VALUE] ...  
                                  Protect pods with this annotation from eviction. May be specified multiple times.
+      --do-not-cordon-pod-controlled-by=kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1 ...  
+                                 Do not cordon nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.
+      --cordon-emptydir-pods     Evict pods with local storage, i.e. with emptyDir volumes.
+      --cordon-protected-pod-annotation=KEY[=VALUE] ...  
+                                 Protect nodes hosting pods with this annotation from cordon. May be specified multiple times.
+      --max-simultaneous-cordon=(Value|Value%) ...  
+                                 Maximum number of cordoned nodes in the cluster.
+      --max-simultaneous-cordon-for-labels=(Value|Value%),keys... ...  
+                                 Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'
+      --max-simultaneous-cordon-for-taints=(Value|Value%),keys... ...  
+                                 Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'
+      --storage-class-allows-pv-deletion=storageClassName ...  
+                                 Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.
 
 Args:
   <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.
-
 ```
 
 ### Labels and Label Expressions
@@ -235,3 +237,10 @@ The limit can be set as a count of node of in percentage. Some example:
                                      # No more then 33% of the group of nodes having same value for taint with key `node` can be cordon
 ```
 It is possible to set multiple limits, the cordon activity is blocked as soon as at least one of the limit is reached. When some nodes are uncordoned or if they are deleted/replace, this will reopen some slots bellow the limit and some nodes can be cordoned again.
+
+### Deleting PV/PVC associated with the evicted pods
+Draino can take care of deleting the PVs/PVCs associated with the evicted pod. This is interesting especially for pods using the `local-storage` storage class. Since the old nodes are not eligible for scheduling, the PVCs/PVs of the pod must be recycled to ensure that the pods can be scheduled on another node.
+
+The list of eligible storage classes must be given to draino at start-up: `--storage-class-allows-pv-deletion=local-data` . This flag can be repeated if multiple classes are eligible.
+
+Then each pods has to explicitly opt-in for that data deletion using an annotation: `draino/delete-pvc-and-pv=true`

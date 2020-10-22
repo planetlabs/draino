@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/util/flowcontrol"
 )
@@ -385,7 +385,6 @@ func TestParseCordonMaxForKeys(t *testing.T) {
 }
 
 func TestIsLimiterError(t *testing.T) {
-
 	tests := []struct {
 		name string
 		err  error

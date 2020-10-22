@@ -48,6 +48,7 @@ const (
 )
 
 func main() {
+	//nolint:lll // accept long lines in option declarations
 	var (
 		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()
 
@@ -83,6 +84,9 @@ func main() {
 		maxSimultaneousCordon          = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
 		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
+
+		// PV/PVC management
+		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
@@ -135,17 +139,18 @@ func main() {
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
 
-	web := &httpRunner{l: *listen, h: map[string]http.Handler{
-		"/metrics": p,
-		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:errcheck
-	}}
-
 	log, err := zap.NewProduction()
 	if *debug {
 		log, err = zap.NewDevelopment()
 	}
+
+	web := &httpRunner{address: *listen, logger: log, h: map[string]http.Handler{
+		"/metrics": p,
+		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:errcheck // no err management in health check
+	}}
+
 	kingpin.FatalIfError(err, "cannot create log")
-	defer log.Sync() // nolint:errcheck
+	defer log.Sync() // nolint:errcheck // no check required on program exit
 
 	go func() {
 		log.Info("web server is running", zap.String("listen", *listen))
@@ -180,7 +185,8 @@ func main() {
 		pf = append(pf, kubernetes.NewPodControlledByFilter(dynamic.NewForConfigOrDie(c), apiResources))
 	}
 	systemKnownAnnotations := []string{
-		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
+		// https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
+		"cluster-autoscaler.kubernetes.io/safe-to-evict=false",
 	}
 	pf = append(pf, kubernetes.UnprotectedPodFilter(append(systemKnownAnnotations, *protectedPodAnnotations...)...))
 
@@ -208,23 +214,23 @@ func main() {
 	// Cordon limiter
 	cordonLimiter := kubernetes.NewCordonLimiter(log)
 	for _, p := range *maxSimultaneousCordon {
-		max, percent, err := kubernetes.ParseCordonMax(p)
-		if err != nil {
-			kingpin.FatalIfError(err, "cannot parse 'max-simultaneous-cordon' argument")
+		max, percent, parseErr := kubernetes.ParseCordonMax(p)
+		if parseErr != nil {
+			kingpin.FatalIfError(parseErr, "cannot parse 'max-simultaneous-cordon' argument")
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordon:"+p, kubernetes.MaxSimultaneousCordonLimiterFunc(max, percent))
 	}
 	for _, p := range *maxSimultaneousCordonForLabels {
-		max, percent, keys, err := kubernetes.ParseCordonMaxForKeys(p)
-		if err != nil {
-			kingpin.FatalIfError(err, "cannot parse 'max-simultaneous-cordon-for-labels' argument")
+		max, percent, keys, parseErr := kubernetes.ParseCordonMaxForKeys(p)
+		if parseErr != nil {
+			kingpin.FatalIfError(parseErr, "cannot parse 'max-simultaneous-cordon-for-labels' argument")
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForLabels:"+p, kubernetes.MaxSimultaneousCordonLimiterForLabelsFunc(max, percent, keys))
 	}
 	for _, p := range *maxSimultaneousCordonForTaints {
-		max, percent, keys, err := kubernetes.ParseCordonMaxForKeys(p)
-		if err != nil {
-			kingpin.FatalIfError(err, "cannot parse 'max-simultaneous-cordon-for-taints' argument")
+		max, percent, keys, parseErr := kubernetes.ParseCordonMaxForKeys(p)
+		if parseErr != nil {
+			kingpin.FatalIfError(parseErr, "cannot parse 'max-simultaneous-cordon-for-taints' argument")
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
 
@@ -237,6 +243,7 @@ func main() {
 			kubernetes.WithSkipDrain(*skipDrain),
 			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
 			kubernetes.WithCordonLimiter(cordonLimiter),
+			kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
 			kubernetes.WithAPICordonDrainerLogger(log),
 		),
 		kubernetes.NewEventRecorder(cs),
@@ -258,7 +265,7 @@ func main() {
 	}
 
 	if len(*nodeLabels) > 0 {
-		log.Debug("node labels", zap.Any("labels", nodeLabels))
+		log.Info("node labels", zap.Any("labels", nodeLabels))
 		if *nodeLabelsExpr != "" {
 			kingpin.Fatalf("nodeLabels and NodeLabelsExpr cannot both be set")
 		}
@@ -332,8 +339,9 @@ func await(rs ...runner) error {
 }
 
 type httpRunner struct {
-	l string
-	h map[string]http.Handler
+	address string
+	logger  *zap.Logger
+	h       map[string]http.Handler
 }
 
 func (r *httpRunner) Run(stop <-chan struct{}) {
@@ -342,12 +350,17 @@ func (r *httpRunner) Run(stop <-chan struct{}) {
 		rt.Handler("GET", path, handler)
 	}
 
-	s := &http.Server{Addr: r.l, Handler: rt}
+	s := &http.Server{Addr: r.address, Handler: rt}
 	ctx, cancel := context.WithTimeout(context.Background(), 0*time.Second)
 	go func() {
 		<-stop
-		s.Shutdown(ctx) // nolint:errcheck
+		if err := s.Shutdown(ctx); err != nil {
+			r.logger.Error("Failed to shutdown httpRunner", zap.Error(err))
+			return
+		}
 	}()
-	s.ListenAndServe() // nolint:errcheck
+	if err := s.ListenAndServe(); err != nil {
+		r.logger.Error("Failed to ListenAndServe httpRunner", zap.Error(err))
+	}
 	cancel()
 }

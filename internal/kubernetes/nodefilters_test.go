@@ -85,6 +85,21 @@ func TestNodeLabelFilter(t *testing.T) {
 			passesFilter: true,
 		},
 		{
+			name: "Exclusion on match",
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						"region": "us-west-2",
+						"app":    "nginx",
+						"type":   "sup-xyz",
+					},
+				},
+			},
+			expression:   "metadata.labels['region'] == 'us-west-2' && metadata.labels['app'] == 'nginx' && not ( metadata.labels['type'] matches 'sup-x.+')",
+			passesFilter: false,
+		},
+		{
 			name: "PR75Example2",
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{

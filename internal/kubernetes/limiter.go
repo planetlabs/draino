@@ -29,12 +29,12 @@ import (
 )
 
 type CordonLimiter interface {
-	//Check if the node can be cordon. If not possible to cordon the name of the limiter is returned
+	// Check if the node can be cordoned. If not, the name of the limiter is returned
 	CanCordon(node *core.Node) (bool, string)
 
 	SetNodeLister(lister NodeLister)
 
-	//Add a named limiter function to the limiter.
+	// Add a named limiter function to the limiter.
 	AddLimiter(string, LimiterFunc)
 }
 type NodeLister interface {
@@ -44,7 +44,7 @@ type NodeLister interface {
 func NewCordonLimiter(logger *zap.Logger) CordonLimiter {
 	return &Limiter{
 		logger:      logger,
-		rateLimiter: flowcontrol.NewTokenBucketRateLimiter(1, 1),	// limiters are computing % on top of the cache. Here we ensure that the cache has time to be updated.
+		rateLimiter: flowcontrol.NewTokenBucketRateLimiter(1, 1), // limiters are computing % on top of the cache. Here we ensure that the cache has time to be updated.
 	}
 }
 
@@ -85,10 +85,9 @@ func (l *Limiter) SetNodeLister(lister NodeLister) {
 	l.nodeLister = lister
 }
 
-func (l *Limiter) CanCordon(node *core.Node) (bool, string) {
-
+func (l *Limiter) CanCordon(node *core.Node) (can bool, reason string) {
 	if node.Spec.Unschedulable {
-		return true, "" //it is already cordon anyway
+		return true, "" // it is already cordon anyway
 	}
 
 	allNodes := l.nodeLister.ListNodes()
@@ -124,16 +123,16 @@ func (l *Limiter) AddLimiter(name string, f LimiterFunc) {
 	l.limiterfuncs[name] = f
 }
 
-func ParseCordonMax(param string) (int, bool, error) {
+func ParseCordonMax(param string) (max int, isPercent bool, err error) {
 	percent := strings.HasSuffix(param, "%")
-	max, err := strconv.Atoi(strings.TrimSuffix(param, "%"))
+	max, err = strconv.Atoi(strings.TrimSuffix(param, "%"))
 	if err != nil {
 		return -1, percent, fmt.Errorf("can't Parse argument for cordon limiter value")
 	}
 	return max, percent, nil
 }
 
-func ParseCordonMaxForKeys(param string) (int, bool, []string, error) {
+func ParseCordonMaxForKeys(param string) (max int, isPercent bool, splittedKeys []string, err error) {
 	tokens := strings.SplitN(param, ",", 2)
 	if len(tokens) < 2 {
 		return -1, false, nil, fmt.Errorf("can't Parse argument for cordon limiter, at least 2 tokens are expected in field max-simultaneous-cordon-for-labels")
@@ -158,7 +157,7 @@ func MaxSimultaneousCordonLimiterFunc(max int, percent bool) LimiterFunc {
 		if percent {
 			return math.Ceil(100*float64(len(cordonNodes)+1)/float64(len(allNodes))) <= float64(max), nil
 		}
-		return len(cordonNodes)+1 <= max, nil
+		return len(cordonNodes) < max, nil
 	}
 }
 
@@ -169,7 +168,7 @@ func MaxSimultaneousCordonLimiterForLabelsFunc(max int, percent bool, labelKeys 
 		}
 
 		selectorSet := map[string]string{}
-		//check if the node has the labels and build the selector
+		// check if the node has the labels and build the selector
 		for _, key := range labelKeys {
 			value, found := n.Labels[key]
 			if !found {
@@ -190,8 +189,7 @@ func MaxSimultaneousCordonLimiterForLabelsFunc(max int, percent bool, labelKeys 
 			percentCordon := int(math.Ceil(100 * float64(cordonCount+1) / float64(totalMatchCount)))
 			return percentCordon <= max, nil
 		}
-		return cordonCount+1 <= max, nil
-
+		return cordonCount < max, nil
 	}
 }
 
@@ -214,13 +212,12 @@ func MaxSimultaneousCordonLimiterForTaintsFunc(max int, percent bool, taintKeys 
 		}
 
 		selectorSet := map[string]string{}
-		//check if the node has the labels and build the selector
+		// check if the node has the labels and build the selector
 		for _, key := range taintKeys {
-		taintInNodeLoop:
 			for _, t := range n.Spec.Taints {
 				if t.Key == key {
 					selectorSet[key] = t.Value
-					break taintInNodeLoop
+					break
 				}
 			}
 		}
@@ -241,7 +238,7 @@ func MaxSimultaneousCordonLimiterForTaintsFunc(max int, percent bool, taintKeys 
 			percentCordon := int(math.Ceil(100 * float64(cordonCount+1) / float64(totalMatchCount)))
 			return percentCordon <= max, nil
 		}
-		return cordonCount+1 <= max, nil
+		return cordonCount < max, nil
 	}
 }
 
