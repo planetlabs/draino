@@ -88,6 +88,7 @@ func (f fakeLimiter) SetNodeLister(lister NodeLister)              {}
 func (f fakeLimiter) AddLimiter(s string, limiterFunc LimiterFunc) {}
 
 var _ CordonLimiter = &fakeLimiter{}
+
 func newFakeDynamicClient(objects ...runtime.Object) dynamic.Interface {
 	scheme := runtime.NewScheme()
 	if err := fake.AddToScheme(scheme); err != nil {
