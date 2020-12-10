@@ -18,9 +18,13 @@ package kubernetes
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
 	core "k8s.io/api/core/v1"
@@ -359,6 +363,90 @@ func TestOffendingConditions(t *testing.T) {
 			badConditions := h.offendingConditions(tc.obj)
 			if !reflect.DeepEqual(badConditions, tc.expected) {
 				t.Errorf("offendingConditions(tc.obj): want %#v, got %#v", tc.expected, badConditions)
+			}
+		})
+	}
+}
+
+func TestDrainingResourceEventHandler_checkCordonFilters(t *testing.T) {
+
+	node := &core.Node{
+		ObjectMeta: meta.ObjectMeta{Name: "test-node"},
+	}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "test-pod"},
+		Spec:       core.PodSpec{NodeName: "test-node"},
+	}
+	otherPod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "other-pod"},
+		Spec:       core.PodSpec{NodeName: "other-node"},
+	}
+
+	tests := []struct {
+		name         string
+		pods         []runtime.Object
+		cordonFilter PodFilterFunc
+		want         bool
+	}{
+		{
+			name: "no Pods,no Filters",
+			want: true,
+		},
+		{
+			name:         "no Pods, Filter true",
+			cordonFilter: func(p core.Pod) (bool, error) { return true, nil },
+			want:         true,
+		},
+		{
+			name:         "no Pods, Filter false",
+			cordonFilter: func(p core.Pod) (bool, error) { return false, nil },
+			want:         true,
+		},
+		{
+			name:         "Pods, Filter true",
+			pods:         []runtime.Object{pod, otherPod},
+			cordonFilter: func(p core.Pod) (bool, error) { return true, nil },
+			want:         true,
+		},
+		{
+			name:         "Pods, Filter false",
+			pods:         []runtime.Object{pod, otherPod},
+			cordonFilter: func(p core.Pod) (bool, error) { return false, nil },
+			want:         false,
+		},
+		{
+			name:         "Pods on other node, Filter false",
+			pods:         []runtime.Object{otherPod},
+			cordonFilter: func(p core.Pod) (bool, error) { return false, nil },
+			want:         true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Prepare podStore
+			w := NewPodWatch(fake.NewSimpleClientset(tt.pods...))
+			stop := make(chan struct{})
+			defer close(stop)
+			go w.SharedIndexInformer.Run(stop)
+			// Wait for the informer to sync
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for !w.HasSynced() {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}()
+			wg.Wait()
+
+			h := &DrainingResourceEventHandler{
+				logger:        zap.NewNop(),
+				eventRecorder: &record.FakeRecorder{},
+				podStore:      w,
+				cordonFilter:  tt.cordonFilter,
+			}
+			if got := h.checkCordonFilters(node); got != tt.want {
+				t.Errorf("checkCordonFilters() = %v, want %v", got, tt.want)
 			}
 		})
 	}

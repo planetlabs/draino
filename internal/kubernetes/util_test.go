@@ -67,7 +67,7 @@ var (
 	}
 
 	DaemonSetV1Apps = metav1.APIResource{
-		Name: "daemonsets",
+		Name:         "daemonsets",
 		SingularName: "daemonset",
 		Namespaced:   true,
 		Group:        "apps",
@@ -75,7 +75,7 @@ var (
 		Kind:         "DaemonSet",
 	}
 	StatefulSetSetV1Apps = metav1.APIResource{
-		Name: "statefulsets",
+		Name:         "statefulsets",
 		SingularName: "statefulset",
 		Namespaced:   true,
 		Group:        "apps",
@@ -83,7 +83,7 @@ var (
 		Kind:         "StatefulSet",
 	}
 	StatefulSetSetV1beta2Apps = metav1.APIResource{
-		Name: "statefulsets",
+		Name:         "statefulsets",
 		SingularName: "statefulset",
 		Namespaced:   true,
 		Group:        "apps",
@@ -202,18 +202,18 @@ func TestGetAPIResourcesForGVK(t *testing.T) {
 		{
 			name:    "statefulsets",
 			gvks:    []string{"StatefulSet"},
-			want:    []*metav1.APIResource{&StatefulSetSetV1Apps,&StatefulSetSetV1beta2Apps},
+			want:    []*metav1.APIResource{&StatefulSetSetV1Apps, &StatefulSetSetV1beta2Apps},
 			wantErr: false,
 		},
 		{
 			name:    "all",
-			gvks:    []string{"StatefulSet","DaemonSet","","ExtendedDaemonSet"},
-			want:    []*metav1.APIResource{nil,&StatefulSetSetV1Apps,&StatefulSetSetV1beta2Apps,&DaemonSetV1Apps,&ExtendedDaemonSetV1alpha1Datadog},
+			gvks:    []string{"StatefulSet", "DaemonSet", "", "ExtendedDaemonSet"},
+			want:    []*metav1.APIResource{nil, &StatefulSetSetV1Apps, &StatefulSetSetV1beta2Apps, &DaemonSetV1Apps, &ExtendedDaemonSetV1alpha1Datadog},
 			wantErr: false,
 		},
 		{
 			name:    "error not found",
-			gvks:    []string{"StatefulSet","DaemonSet","","ExtendedDaemonSet","Wrong"},
+			gvks:    []string{"StatefulSet", "DaemonSet", "", "ExtendedDaemonSet", "Wrong"},
 			want:    nil,
 			wantErr: true,
 		},

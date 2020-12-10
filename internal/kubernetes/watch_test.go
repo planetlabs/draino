@@ -18,11 +18,17 @@ package kubernetes
 
 import (
 	"reflect"
+	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-test/deep"
 	"github.com/pkg/errors"
 	core "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -116,6 +122,162 @@ func TestNodeWatch_ListNodes(t *testing.T) {
 			w := &NodeWatch{SharedInformer: i}
 			if got := len(w.ListNodes()); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("len(ListNodes()) = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPodWatch_ListPodsForNode(t *testing.T) {
+	tests := []struct {
+		name     string
+		nodeName string
+		objects  []runtime.Object
+		want     []*core.Pod
+	}{
+		{
+			name:     "empty",
+			nodeName: "node1",
+			objects: []runtime.Object{
+				&core.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				},
+			},
+			want: []*core.Pod{},
+		},
+		{
+			name:     "pod1 on node1",
+			nodeName: "node1",
+			objects: []runtime.Object{
+				&core.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				},
+				&core.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "pod1",
+					},
+				},
+				&core.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "podSched",
+					},
+					Spec: core.PodSpec{
+						NodeName: "node1",
+					},
+				},
+			},
+			want: []*core.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "podSched",
+					},
+					Spec: core.PodSpec{
+						NodeName: "node1",
+					},
+				},
+			},
+		},
+		{
+			name:     "pod1 on node1",
+			nodeName: "node1",
+			objects: []runtime.Object{
+				&core.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				},
+				&core.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "pod1",
+					},
+				},
+				&core.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "podSched",
+					},
+					Spec: core.PodSpec{
+						NodeName: "node1",
+					},
+				},
+				&core.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "podSched2",
+					},
+					Spec: core.PodSpec{
+						NodeName: "node1",
+					},
+				},
+			},
+			want: []*core.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "podSched",
+					},
+					Spec: core.PodSpec{
+						NodeName: "node1",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "podSched2",
+					},
+					Spec: core.PodSpec{
+						NodeName: "node1",
+					},
+				},
+			},
+		},
+		{
+			name:     "no pod on node2",
+			nodeName: "node2",
+			objects: []runtime.Object{
+				&core.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node2",
+					},
+				},
+				&core.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "pod1",
+					},
+				},
+				&core.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "pod2",
+					},
+					Spec: core.PodSpec{
+						NodeName: "node1",
+					},
+				},
+			},
+			want: []*core.Pod{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := NewPodWatch(fake.NewSimpleClientset(tt.objects...))
+			stop := make(chan struct{})
+			defer close(stop)
+			go w.SharedIndexInformer.Run(stop)
+			// Wait for the informer to sync
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for !w.HasSynced() {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}()
+			wg.Wait()
+
+			// Test the function
+			got, _ := w.ListPodsForNode(tt.nodeName)
+			sort.Sort(PodsSortedByName(tt.want))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ListPodsForNode() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

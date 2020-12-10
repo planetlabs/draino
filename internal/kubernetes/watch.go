@@ -17,6 +17,9 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -75,3 +78,58 @@ func (w *NodeWatch) ListNodes() []*core.Node {
 	}
 	return nodes
 }
+
+type PodStore interface {
+	// List all the pods of a given node
+	ListPodsForNode(nodeName string) ([]*core.Pod, error)
+}
+
+// A PodWatch is a cache of node resources that notifies registered
+// handlers when its contents change.
+type PodWatch struct {
+	cache.SharedIndexInformer
+}
+
+// NewNodeWatch creates a watch on node resources. Nodes are cached and the
+// provided ResourceEventHandlers are called when the cache changes.
+func NewPodWatch(c kubernetes.Interface) *PodWatch {
+	lw := &cache.ListWatch{
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().Pods("").List(o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Pods("").Watch(o) },
+	}
+
+	i := cache.NewSharedIndexInformer(lw, &core.Pod{}, 30*time.Minute, cache.Indexers{".spec.nodeName": func(obj interface{}) ([]string, error) {
+		p, ok := obj.(*core.Pod)
+		if !ok {
+			return []string{""}, nil
+		}
+		return []string{p.Spec.NodeName}, nil
+	}})
+	return &PodWatch{i}
+}
+
+func (w *PodWatch) ListPodsForNode(nodeName string) ([]*core.Pod, error) {
+	if !w.HasSynced() {
+		return nil, fmt.Errorf("pod informer not yet synced")
+	}
+	objs, err := w.GetIndexer().ByIndex(".spec.nodeName", nodeName)
+	if err != nil {
+		return nil, err
+	}
+	pods := make([]*core.Pod, len(objs))
+	for i, obj := range objs {
+		p, ok := obj.(*core.Pod)
+		if !ok {
+			return nil, fmt.Errorf("unexpected object type in Pod store")
+		}
+		pods[i] = p
+	}
+	sort.Sort(PodsSortedByName(pods))
+	return pods, nil
+}
+
+type PodsSortedByName []*core.Pod
+
+func (a PodsSortedByName) Len() int           { return len(a) }
+func (a PodsSortedByName) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a PodsSortedByName) Less(i, j int) bool { return strings.Compare(a[i].Name, a[j].Name) > 0 }

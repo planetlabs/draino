@@ -68,15 +68,21 @@ func main() {
 		leaderElectionRetryPeriod   = app.Flag("leader-election-retry-period", "Leader election retry period.").Default(DefaultLeaderElectionRetryPeriod.String()).Duration()
 		leaderElectionTokenName     = app.Flag("leader-election-token-name", "Leader election token name.").Default(kubernetes.Component).String()
 
+		// Eviction filtering flags
 		skipDrain                 = app.Flag("skip-drain", "Whether to skip draining nodes after cordoning.").Default("false").Bool()
 		doNotEvictPodControlledBy = app.Flag("do-not-evict-pod-controlled-by", "Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.").PlaceHolder("kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1").Default("", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet).Strings()
 		evictLocalStoragePods     = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
+		protectedPodAnnotations   = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
+		// Cordon filtering flags
+		doNotCordonPodControlledBy    = app.Flag("do-not-cordon-pod-controlled-by", "Do not cordon nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.").PlaceHolder("kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1").Default("", kubernetes.KindStatefulSet).Strings()
+		cordonLocalStoragePods        = app.Flag("cordon-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Default("true").Bool()
+		cordonProtectedPodAnnotations = app.Flag("cordon-protected-pod-annotation", "Protect nodes hosting pods with this annotation from cordon. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+
+		// Cordon limiter flags
 		maxSimultaneousCordon          = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
 		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
-
-		protectedPodAnnotations = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
@@ -152,31 +158,54 @@ func main() {
 	cs, err := client.NewForConfig(c)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
 
+	pods := kubernetes.NewPodWatch(cs)
+
+	// Eviction Filtering
 	pf := []kubernetes.PodFilterFunc{kubernetes.MirrorPodFilter}
 	if !*evictLocalStoragePods {
 		pf = append(pf, kubernetes.LocalStoragePodFilter)
 	}
-
 	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotEvictPodControlledBy)
 	if err != nil {
-		kingpin.FatalIfError(err, "can't get resources for controlby filtering")
+		kingpin.FatalIfError(err, "can't get resources for controlby filtering for eviction")
 	}
 	if len(apiResources) > 0 {
 		for _, apiResource := range apiResources {
 			if apiResource == nil {
-				log.Info("Filtering pod the are uncontrolled")
+				log.Info("Filtering pod that are uncontrolled for eviction")
 			} else {
-				log.Info("Filtering pod controlled by apiresource", zap.Any("apiresource", *apiResource))
+				log.Info("Filtering pods controlled by apiresource for eviction", zap.Any("apiresource", *apiResource))
 			}
 		}
 		pf = append(pf, kubernetes.NewPodControlledByFilter(dynamic.NewForConfigOrDie(c), apiResources))
 	}
-
 	systemKnownAnnotations := []string{
 		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
 	}
 	pf = append(pf, kubernetes.UnprotectedPodFilter(append(systemKnownAnnotations, *protectedPodAnnotations...)...))
 
+	// Cordon Filtering
+	pf_cordon := []kubernetes.PodFilterFunc{}
+	if !*cordonLocalStoragePods {
+		pf_cordon = append(pf_cordon, kubernetes.LocalStoragePodFilter)
+	}
+	apiResourcesCordon, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotCordonPodControlledBy)
+	if err != nil {
+		kingpin.FatalIfError(err, "can't get resources for 'controlledBy' filtering for cordon")
+	}
+	if len(apiResourcesCordon) > 0 {
+		for _, apiResource := range apiResourcesCordon {
+			if apiResource == nil {
+				log.Info("Filtering pods that are uncontrolled for cordon")
+			} else {
+				log.Info("Filtering pods controlled by apiresource for cordon", zap.Any("apiresource", *apiResource))
+			}
+		}
+		pf_cordon = append(pf_cordon, kubernetes.NewPodControlledByFilter(dynamic.NewForConfigOrDie(c), apiResourcesCordon))
+	}
+	pf_cordon = append(pf_cordon, kubernetes.UnprotectedPodFilter(*cordonProtectedPodAnnotations...))
+
+	// Cordon limiter
 	cordonLimiter := kubernetes.NewCordonLimiter(log)
 	for _, p := range *maxSimultaneousCordon {
 		max, percent, err := kubernetes.ParseCordonMax(p)
@@ -198,6 +227,7 @@ func main() {
 			kingpin.FatalIfError(err, "cannot parse 'max-simultaneous-cordon-for-taints' argument")
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
+
 	}
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
@@ -212,7 +242,8 @@ func main() {
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
-		kubernetes.WithConditionsFilter(*conditions))
+		kubernetes.WithConditionsFilter(*conditions),
+		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(pf_cordon...), pods))
 
 	if *dryRun {
 		h = cache.FilteringResourceEventHandler{
@@ -244,7 +275,6 @@ func main() {
 	}
 
 	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
-
 	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
 
 	cordonLimiter.SetNodeLister(nodes)
@@ -277,8 +307,8 @@ func main() {
 		RetryPeriod:   *leaderElectionRetryPeriod,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				log.Info("node watcher is running")
-				kingpin.FatalIfError(await(nodes), "error watching")
+				log.Info("watchers are running")
+				kingpin.FatalIfError(await(nodes, pods), "error watching")
 			},
 			OnStoppedLeading: func() {
 				kingpin.Fatalf("lost leader election")
