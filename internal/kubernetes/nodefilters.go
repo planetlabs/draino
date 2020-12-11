@@ -108,9 +108,18 @@ func (processed NodeProcessed) Filter(o interface{}) bool {
 }
 
 // ConvertLabelsToFilterExpr Convert old list labels into new expression syntax
-func ConvertLabelsToFilterExpr(labels map[string]string) *string {
+func ConvertLabelsToFilterExpr(labelsSlice []string) (*string, error) {
+	labels := map[string]string{}
+	for _, label := range labelsSlice {
+		tokens := strings.SplitN(label, "=", 2)
+		key := tokens[0]
+		value := tokens[1]
+		if v, found := labels[key]; found && v != value {
+			return nil, fmt.Errorf("node-label parameter is used twice with the same key and different values: '%s' , '%s", v, value)
+		}
+		labels[key] = value
+	}
 	res := []string{}
-
 	//sort the maps so that the unit tests actually work
 	keys := make([]string, 0, len(labels))
 	for k := range labels {
@@ -126,5 +135,5 @@ func ConvertLabelsToFilterExpr(labels map[string]string) *string {
 		}
 	}
 	temp := strings.Join(res, " && ")
-	return &temp
+	return &temp, nil
 }
