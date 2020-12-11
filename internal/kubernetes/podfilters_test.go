@@ -27,6 +27,16 @@ import (
 )
 
 func TestPodFilters(t *testing.T) {
+
+	localStorageStr := "local-data"
+
+	pvcLocalStorage := core.PersistentVolumeClaim{
+		ObjectMeta: meta.ObjectMeta{Name: "pvc1"},
+		Spec: core.PersistentVolumeClaimSpec{
+			StorageClassName: &localStorageStr,
+		},
+	}
+
 	cases := []struct {
 		name         string
 		filter       PodFilterFunc
@@ -402,6 +412,75 @@ func TestPodFilters(t *testing.T) {
 				func(_ core.Pod) (bool, error) { return false, errExploded },
 			),
 			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
+		},
+		{
+			name: "StorageClass local-data but no filter",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+				},
+				Spec: core.PodSpec{
+					Volumes: []core.Volume{{
+						VolumeSource: core.VolumeSource{
+							PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+								ClaimName: "pvc1",
+							},
+						},
+					}},
+				},
+			},
+			filter: NewPodUsingStorageClassFilter(newFakeClientSet(reactor{
+				verb:     "get",
+				resource: "persistentvolumeclaims",
+				ret:      &pvcLocalStorage,
+			}), []string{}),
+			passesFilter: true,
+		},
+		{
+			name: "StorageClass local-data with filter",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+				},
+				Spec: core.PodSpec{
+					Volumes: []core.Volume{{
+						VolumeSource: core.VolumeSource{
+							PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+								ClaimName: "pvc1",
+							},
+						},
+					}},
+				},
+			},
+			filter: NewPodUsingStorageClassFilter(newFakeClientSet(reactor{
+				verb:     "get",
+				resource: "persistentvolumeclaims",
+				ret:      &pvcLocalStorage,
+			}), []string{"local-data"}),
+			passesFilter: false,
+		},
+		{
+			name: "StorageClass local-data with other filter",
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name: podName,
+				},
+				Spec: core.PodSpec{
+					Volumes: []core.Volume{{
+						VolumeSource: core.VolumeSource{
+							PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+								ClaimName: "pvc1",
+							},
+						},
+					}},
+				},
+			},
+			filter: NewPodUsingStorageClassFilter(newFakeClientSet(reactor{
+				verb:     "get",
+				resource: "persistentvolumeclaims",
+				ret:      &pvcLocalStorage,
+			}), []string{"other-class"}),
+			passesFilter: true,
 		},
 	}
 

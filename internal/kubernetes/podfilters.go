@@ -102,6 +102,37 @@ func NewStatefulSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 	}
 }
 
+// NewPodUsingStorageClassFilter returns a FilterFunc that returns false if the supplied
+// pod is using one of the given storage class
+func NewPodUsingStorageClassFilter(client kubernetes.Interface, storageClasses []string) PodFilterFunc {
+	storageClassesSet := map[string]struct{}{}
+	for _, sc := range storageClasses {
+		storageClassesSet[sc] = struct{}{}
+	}
+	return func(pod core.Pod) (bool, error) {
+		for _, v := range pod.Spec.Volumes {
+			if v.PersistentVolumeClaim == nil {
+				continue
+			}
+			pvc, err := client.CoreV1().PersistentVolumeClaims(pod.GetNamespace()).Get(v.PersistentVolumeClaim.ClaimName, meta.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			if pvc.Spec.StorageClassName == nil {
+				continue
+			}
+
+			if _, found := storageClassesSet[*pvc.Spec.StorageClassName]; found {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+}
+
 // UnprotectedPodFilter returns a FilterFunc that returns true if the
 // supplied pod does not have any of the user-specified annotations for
 // protection from eviction

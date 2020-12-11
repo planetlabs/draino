@@ -73,7 +73,8 @@ func main() {
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
 
-		protectedPodAnnotations = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		protectedPodAnnotations       = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		protectedPodUsingStorageClass = app.Flag("protected-pod-using-storage-class", "Protect pods with pvc using a given storage class. May be specified multiple times.").Strings()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
@@ -153,6 +154,9 @@ func main() {
 	}
 	if !*evictStatefulSetPods {
 		pf = append(pf, kubernetes.NewStatefulSetPodFilter(cs))
+	}
+	if protectedPodUsingStorageClass != nil && len(*protectedPodUsingStorageClass) > 0 {
+		pf = append(pf, kubernetes.NewPodUsingStorageClassFilter(cs, *protectedPodUsingStorageClass))
 	}
 	systemKnownAnnotations := []string{
 		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
