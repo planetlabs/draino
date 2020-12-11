@@ -147,6 +147,7 @@ func (h *DrainingResourceEventHandler) OnDelete(obj interface{}) {
 			return
 		}
 		h.drainScheduler.DeleteSchedule(d.Key)
+		return
 	}
 
 	h.drainScheduler.DeleteSchedule(n.GetName())
