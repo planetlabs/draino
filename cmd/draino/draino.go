@@ -74,6 +74,7 @@ func main() {
 		doNotEvictPodControlledBy = app.Flag("do-not-evict-pod-controlled-by", "Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.").PlaceHolder("kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1").Default("", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet).Strings()
 		evictLocalStoragePods     = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		protectedPodAnnotations   = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		drainGroupLabelKey        = app.Flag("drain-group-labels", "Comma separated list of label keys to be used to form draining groups.").PlaceHolder("KEY1,KEY2,...").Default("").String()
 
 		// Cordon filtering flags
 		doNotCordonPodControlledBy    = app.Flag("do-not-cordon-pod-controlled-by", "Do not cordon nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.").PlaceHolder("kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1").Default("", kubernetes.KindStatefulSet).Strings()
@@ -249,6 +250,7 @@ func main() {
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
+		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
 		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(pf_cordon...), pods))
 
@@ -260,6 +262,7 @@ func main() {
 				kubernetes.NewEventRecorder(cs),
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer),
+				kubernetes.WithDrainGroups(*drainGroupLabelKey),
 				kubernetes.WithConditionsFilter(*conditions)),
 		}
 	}
