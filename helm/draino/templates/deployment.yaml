@@ -36,7 +36,13 @@ spec:
             - --dry-run
           {{ end }}
           {{- range $key, $value := .Values.extraArgs }}
+            {{- if eq $key "node-label" }}
+            {{- range $value }}
+            - --node-label={{ . }}
+            {{- end }}
+            {{- else }}
             - --{{ $key }}{{ if $value }}={{ $value }}{{ end }}
+            {{- end }}
           {{- end }}
           {{- range .Values.conditions }}
             - {{ . }}
