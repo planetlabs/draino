@@ -1,0 +1,26 @@
+{{- if .Values.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "draino.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "draino.name" . }}
+    helm.sh/chart: {{ include "draino.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- if .Values.service.labels }}
+{{ toYaml .Values.service.labels | indent 4 }}
+{{- end }}
+  annotations:
+{{ toYaml .Values.service.annotations | indent 4 }}
+spec:
+  type: {{ default "ClusterIP" .Values.service.type }}
+  ports:
+    - name: draino-port
+      port: {{ default "9121" .Values.service.port }}
+      targetPort: 10002
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ include "draino.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
