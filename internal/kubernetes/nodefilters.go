@@ -22,17 +22,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antonmedv/expr"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/antonmedv/expr"
 )
 
 // NewNodeLabelFilter returns a filter that returns true if the supplied node satisfies the boolean expression
 func NewNodeLabelFilter(expressionStr *string, log *zap.Logger) (func(o interface{}) bool, error) {
 	//This feels wrong but this is how the previous behavior worked so I'm only keeping it to maintain compatibility.
-
 	expression, err := expr.Compile(*expressionStr)
 	if err != nil && *expressionStr != "" {
 		return nil, err
@@ -50,6 +48,9 @@ func NewNodeLabelFilter(expressionStr *string, log *zap.Logger) (func(o interfac
 		}
 
 		nodeLabels := n.GetLabels()
+
+		//_, ok = nodeLabels["node-role.kubernetes.io/demo-eviction"]
+		//return ok
 
 		parameters := map[string]interface{}{
 			"metadata": map[string]map[string]string{

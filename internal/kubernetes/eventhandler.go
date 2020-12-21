@@ -154,7 +154,6 @@ func (h *DrainingResourceEventHandler) OnUpdate(_, newObj interface{}) {
 }
 
 // OnDelete does nothing. There's no point cordoning or draining deleted nodes.
-
 func (h *DrainingResourceEventHandler) OnDelete(obj interface{}) {
 	n, ok := obj.(*core.Node)
 	if !ok {
@@ -163,15 +162,17 @@ func (h *DrainingResourceEventHandler) OnDelete(obj interface{}) {
 			return
 		}
 		h.drainScheduler.DeleteSchedule(d.Key)
+		return
 	}
-
 	h.drainScheduler.DeleteSchedule(n.GetName())
 }
 
 func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
+	logger := h.logger.With(zap.String("node", n.Name))
 	badConditions := h.offendingConditions(n)
 	if len(badConditions) == 0 {
 		if shouldUncordon(n) {
+			logger.Info("node will be uncordoned and schedule deleted")
 			h.drainScheduler.DeleteSchedule(n.GetName())
 			h.uncordon(n)
 		}
@@ -182,10 +183,16 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	if !n.Spec.Unschedulable {
 		// check if the node passes filters
 		if !h.checkCordonFilters(n) {
+			logger.Info("checkCordonFilter rejected the node")
 			return
 		}
-		if err := h.cordon(n, badConditions); err != nil {
+		done, err := h.cordon(n, badConditions)
+		if err != nil {
+			logger.Error(err.Error())
 			return
+		}
+		if !done {
+			return // we have probably been rate limited
 		}
 	}
 
@@ -300,7 +307,7 @@ func removeAnnotationMutator(n *core.Node) {
 	delete(n.Annotations, drainoConditionsAnnotationKey)
 }
 
-func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []SuppliedCondition) error {
+func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []SuppliedCondition) (cordon bool, err error) {
 	log := h.logger.With(zap.String("node", n.GetName()))
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 	// Events must be associated with this object reference, rather than the
@@ -314,24 +321,24 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 	if err := h.cordonDrainer.Cordon(n, conditionAnnotationMutator(badConditions)); err != nil {
 		if IsLimiterError(err) {
 			reason := err.Error()
-			tags, _ := tag.New(context.Background(), tag.Upsert(TagReason, reason))
+			tags, _ = tag.New(context.Background(), tag.Upsert(TagReason, reason))
 			stats.Record(tags, MeasureLimitedCordon.M(1))
 			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonBlockedByLimit, reason)
 			h.logger.Info("cordon limiter", zap.String("node", n.Name), zap.String("reason", reason))
-			return err
+			return false, nil
 		}
 
 		log.Info("Failed to cordon", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 		stats.Record(tags, MeasureNodesCordoned.M(1))
 		h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonCordonFailed, "Cordoning failed: %v", err)
-		return err
+		return false, err
 	}
 	log.Info("Cordoned")
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 	stats.Record(tags, MeasureNodesCordoned.M(1))
 	h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
-	return nil
+	return true, nil
 }
 
 func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node) {
@@ -345,6 +352,7 @@ func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node)
 		}
 		n.Annotations[drainoConditionsAnnotationKey] = strings.Join(value, ";")
 	}
+	return func(n *core.Node) {}
 }
 
 // drain schedule the draining activity
