@@ -133,6 +133,18 @@ in order to encourage explicit and pinned releases.
 
 An [example Kubernetes deployment manifest](manifest.yml) is provided.
 
+### Troubleshooting
+
+To perform `*-pod-controlled-by` filtering `draino` has to discover resources. It is using the classic kubernetes resources discovery api. If `draino` fails to start with the following message:
+```text
+draino: error: can't get resources for controlby filtering for eviction: cannot list server resources, the server is currently unable to handle the request
+```
+you should check the list of api-services and validate that all listed API are responding. For this use the following command:
+```shell
+kubectl get apiservices
+```
+You should especially pay attention to the availability of the non local api services (e.g. `v1beta1.external.metrics.k8s.io`)
+
 ## Monitoring
 
 ### Metrics
