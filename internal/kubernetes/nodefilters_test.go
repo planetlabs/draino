@@ -235,7 +235,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 	cases := []struct {
 		name         string
 		obj          interface{}
-		labels       map[string]string
+		labels       []string
 		passesFilter bool
 	}{
 		{
@@ -246,7 +246,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "very"},
 				},
 			},
-			labels:       map[string]string{"cool": "very"},
+			labels:       []string{"cool=very"},
 			passesFilter: true,
 		},
 		{
@@ -257,7 +257,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"planetlabs.com/cool": "very"},
 				},
 			},
-			labels:       map[string]string{"planetlabs.com/cool": "very"},
+			labels:       []string{"planetlabs.com/cool=very"},
 			passesFilter: true,
 		},
 		{
@@ -268,7 +268,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "very", "lame": "nope"},
 				},
 			},
-			labels:       map[string]string{"cool": "very", "lame": "nope"},
+			labels:       []string{"cool=very", "lame=nope"},
 			passesFilter: true,
 		},
 		{
@@ -279,7 +279,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "notsocool"},
 				},
 			},
-			labels:       map[string]string{"cool": "very"},
+			labels:       []string{"cool=very"},
 			passesFilter: false,
 		},
 		{
@@ -290,7 +290,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "very", "lame": "somehowyes"},
 				},
 			},
-			labels:       map[string]string{"cool": "very", "lame": "nope"},
+			labels:       []string{"cool=very", "lame=nope"},
 			passesFilter: false,
 		}, {
 			name: "PartiallyAbsentLabels",
@@ -300,7 +300,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "very"},
 				},
 			},
-			labels:       map[string]string{"cool": "very", "lame": "nope"},
+			labels:       []string{"cool=very", "lame=nope"},
 			passesFilter: false,
 		},
 		{
@@ -311,7 +311,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{},
 				},
 			},
-			labels:       map[string]string{"cool": "very"},
+			labels:       []string{"cool=very"},
 			passesFilter: false,
 		},
 		{
@@ -332,7 +332,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "very"},
 				},
 			},
-			labels:       map[string]string{"keyWithNoValue": ""},
+			labels:       []string{"keyWithNoValue="},
 			passesFilter: false,
 		},
 		{
@@ -343,7 +343,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "very", "keyWithNoValue": ""},
 				},
 			},
-			labels:       map[string]string{"keyWithNoValue": ""},
+			labels:       []string{"keyWithNoValue="},
 			passesFilter: true,
 		},
 		{
@@ -354,7 +354,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 					Labels: map[string]string{"cool": "very"},
 				},
 			},
-			labels:       map[string]string{"cool": "very"},
+			labels:       []string{"cool=very"},
 			passesFilter: false,
 		},
 	}
@@ -363,7 +363,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			labelExpr := ConvertLabelsToFilterExpr(tc.labels)
+			labelExpr, err := ConvertLabelsToFilterExpr(tc.labels)
 
 			filter, err := NewNodeLabelFilter(labelExpr, log)
 			if err != nil {
@@ -452,13 +452,53 @@ func TestParseConditions(t *testing.T) {
 }
 
 func TestConvertLabelsToFilterExpr(t *testing.T) {
-	input := map[string]string{
-		"foo": "bar",
-		"sup": "cool",
+	cases := []struct {
+		name     string
+		input    []string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "2 labels",
+			input:    []string{"foo=bar", "sup=cool"},
+			expected: "metadata.labels['foo'] == 'bar' && metadata.labels['sup'] == 'cool'",
+		},
+		{
+			name:     "2 labels same key",
+			input:    []string{"foo=bar", "foo=cool"},
+			expected: "",
+			wantErr:  true,
+		},
+		{
+			name:     "no filter",
+			input:    nil,
+			expected: "",
+			wantErr:  false,
+		},
 	}
 
-	desired := "metadata.labels['foo'] == 'bar' && metadata.labels['sup'] == 'cool'"
-	actual := ConvertLabelsToFilterExpr(input)
-
-	assert.Equal(t, desired, *actual)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := ConvertLabelsToFilterExpr(tc.input)
+			if tc.wantErr && err == nil {
+				t.Errorf("error was expected for that case")
+				return
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("no error was expected for that case")
+				return
+			}
+			if tc.wantErr && err != nil {
+				return
+			}
+			if actual == nil {
+				t.Errorf("string value was expected")
+				return
+			}
+			got := *actual
+			if !reflect.DeepEqual(tc.expected, got) {
+				t.Errorf("expect %v, got: %v", tc.expected, got)
+			}
+		})
+	}
 }

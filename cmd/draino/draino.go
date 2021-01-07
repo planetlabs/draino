@@ -60,7 +60,7 @@ func main() {
 		maxGracePeriod   = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
 		evictionHeadroom = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
 		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
-		nodeLabels       = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").StringMap()
+		nodeLabels       = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").Strings()
 		nodeLabelsExpr   = app.Flag("node-label-expr", "Nodes that match this expression will be eligible for cordoning and draining.").String()
 		namespace        = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
 
@@ -269,8 +269,9 @@ func main() {
 		if *nodeLabelsExpr != "" {
 			kingpin.Fatalf("nodeLabels and NodeLabelsExpr cannot both be set")
 		}
-
-		nodeLabelsExpr = kubernetes.ConvertLabelsToFilterExpr(*nodeLabels)
+		if nodeLabelsExpr, err = kubernetes.ConvertLabelsToFilterExpr(*nodeLabels); err != nil {
+			kingpin.Fatalf(err.Error())
+		}
 	}
 
 	var nodeLabelFilter cache.ResourceEventHandler
