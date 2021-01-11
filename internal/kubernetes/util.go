@@ -70,7 +70,7 @@ func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error 
 func GetAPIResources(discoveryClient discovery.DiscoveryInterface) ([]metav1.APIResource, error) {
 	groupList, err := discoveryClient.ServerGroups()
 	if groupList == nil || err != nil || groupList.Groups == nil {
-		return nil, fmt.Errorf("failed to discover groups")
+		return nil, fmt.Errorf("Fail to discover groups. Error: %v\n", err)
 	}
 
 	var allServerResources []metav1.APIResource

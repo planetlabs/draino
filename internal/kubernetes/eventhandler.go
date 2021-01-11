@@ -35,7 +35,6 @@ const (
 	// DefaultDrainBuffer is the default minimum time between node drains.
 	DefaultDrainBuffer = 10 * time.Minute
 
-	eventReasonCordonStarting       = "CordonStarting"
 	eventReasonCordonBlockedByLimit = "CordonBlockedByLimit"
 	eventReasonCordonSucceeded      = "CordonSucceeded"
 	eventReasonCordonFailed         = "CordonFailed"
@@ -50,6 +49,7 @@ const (
 	eventReasonDrainStarting         = "DrainStarting"
 	eventReasonDrainSucceeded        = "DrainSucceeded"
 	eventReasonDrainFailed           = "DrainFailed"
+	eventReasonDrainConfig           = "DrainConfig"
 
 	tagResultSucceeded = "succeeded"
 	tagResultFailed    = "failed"
@@ -83,8 +83,9 @@ type DrainingResourceEventHandler struct {
 	podStore     PodStore
 	cordonFilter PodFilterFunc
 
-	lastDrainScheduledFor time.Time
-	buffer                time.Duration
+	lastDrainScheduledFor   time.Time
+	buffer                  time.Duration
+	labelsKeyForDrainGroups []string
 
 	conditions []SuppliedCondition
 }
@@ -123,6 +124,17 @@ func WithCordonPodFilter(f PodFilterFunc, podStore PodStore) DrainingResourceEve
 	}
 }
 
+// WithDrainGroups configures draining groups. Schedules are done per groups
+func WithDrainGroups(labelKeysForDrainGroup string) DrainingResourceEventHandlerOption {
+	var drainGroup []string
+	if labelKeysForDrainGroup != "" {
+		drainGroup = strings.Split(labelKeysForDrainGroup, ",")
+	}
+	return func(d *DrainingResourceEventHandler) {
+		d.labelsKeyForDrainGroups = drainGroup
+	}
+}
+
 // NewDrainingResourceEventHandler returns a new DrainingResourceEventHandler.
 func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
 	h := &DrainingResourceEventHandler{
@@ -135,7 +147,7 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 	for _, o := range ho {
 		o(h)
 	}
-	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.logger)
+	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.logger)
 	return h
 }
 
@@ -161,10 +173,11 @@ func (h *DrainingResourceEventHandler) OnDelete(obj interface{}) {
 		if !ok {
 			return
 		}
-		h.drainScheduler.DeleteSchedule(d.Key)
+		h.drainScheduler.DeleteScheduleByName(d.Key)
 		return
 	}
-	h.drainScheduler.DeleteSchedule(n.GetName())
+
+	h.drainScheduler.DeleteSchedule(n)
 }
 
 func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
@@ -172,8 +185,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	badConditions := h.offendingConditions(n)
 	if len(badConditions) == 0 {
 		if shouldUncordon(n) {
-			logger.Info("node will be uncordoned and schedule deleted")
-			h.drainScheduler.DeleteSchedule(n.GetName())
+			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 		}
 		return
@@ -197,7 +209,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	}
 
 	// Let's ensure that a drain is scheduled
-	hasSChedule, failedDrain := h.drainScheduler.HasSchedule(n.GetName())
+	hasSChedule, failedDrain := h.drainScheduler.HasSchedule(n)
 	if !hasSChedule {
 		h.scheduleDrain(n)
 		return
@@ -205,7 +217,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 
 	// Is there a request to retry a failed drain activity. If yes reschedule drain
 	if failedDrain && HasDrainRetryAnnotation(n) {
-		h.drainScheduler.DeleteSchedule(n.GetName())
+		h.drainScheduler.DeleteSchedule(n)
 		h.scheduleDrain(n)
 		return
 	}
@@ -316,8 +328,6 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 	// https://github.com/kubernetes/kubernetes/blob/17740a2/pkg/printers/internalversion/describe.go#L2711
 	nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 
-	log.Debug("Cordoning")
-	h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonStarting, "Cordoning node")
 	if err := h.cordonDrainer.Cordon(n, conditionAnnotationMutator(badConditions)); err != nil {
 		if IsLimiterError(err) {
 			reason := err.Error()
