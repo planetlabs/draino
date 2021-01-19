@@ -17,10 +17,15 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+	"go.opencensus.io/stats"
+	"go.opencensus.io/tag"
+	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -37,6 +42,8 @@ import (
 
 // Component is the name of this application.
 const Component = "draino"
+const LabelKeyNodeGroupName = "nodegroups.datadoghq.com/name"
+const LabelKeyNodeGroupNamespace = "nodegroups.datadoghq.com/namespace"
 
 // BuildConfigFromFlags is clientcmd.BuildConfigFromFlags with no annoying
 // dependencies on glog.
@@ -104,7 +111,7 @@ func GetAPIResourcesForGroupsKindVersion(apiResources []metav1.APIResource, gvks
 	var outputAPIResources []metav1.APIResource
 	for _, gvkInput := range gvks {
 		if gvkInput == "" {
-			return nil, fmt.Errorf("empty GroupVersionKind value")
+			return nil, errors.New("empty GroupVersionKind value")
 		}
 
 		atLeastOneResourceFound := false
@@ -174,4 +181,27 @@ func GetAPIResourcesForGVK(discoveryInterface discovery.DiscoveryInterface, gvks
 		}
 	}
 	return output, nil
+}
+
+func StatRecordForEachCondition(ctx context.Context, node *core.Node, conditions []string, m stats.Measurement) {
+	team := node.Labels["managed_by_team"]
+	if team == "" {
+		team = node.Labels["team"]
+	}
+	ngName := node.Labels[LabelKeyNodeGroupName]
+	ngNamespace := node.Labels[LabelKeyNodeGroupNamespace]
+	tagsWithNg, _ := tag.New(ctx, tag.Upsert(TagNodegroupNamespace, ngNamespace), tag.Upsert(TagNodegroupName, ngName), tag.Upsert(TagTeam, team))
+
+	for _, c := range conditions {
+		tags, _ := tag.New(tagsWithNg, tag.Upsert(TagConditions, c))
+		stats.Record(tags, m)
+	}
+}
+
+func LoggerForNode(n *core.Node, logger *zap.Logger) *zap.Logger {
+	team := n.Labels["managed_by_team"]
+	if team == "" {
+		team = n.Labels["team"]
+	}
+	return logger.With(zap.String("node", n.Name), zap.String("ng_name", n.Labels[LabelKeyNodeGroupName]), zap.String("ng_namespace", n.Labels[LabelKeyNodeGroupNamespace]),zap.String("node_team", n.Labels[LabelKeyNodeGroupNamespace]))
 }

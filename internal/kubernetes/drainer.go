@@ -18,6 +18,7 @@ package kubernetes
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -34,10 +35,10 @@ import (
 
 // Default pod eviction settings.
 const (
-	DefaultMaxGracePeriod               time.Duration = 8 * time.Minute
-	DefaultEvictionOverhead             time.Duration = 30 * time.Second
-	DefaultPVCRecreateTimeout           time.Duration = 3 * time.Minute
-	DefaultPodDeletePeriodWaitingForPVC time.Duration = 10 * time.Second
+	DefaultMaxGracePeriod               = 8 * time.Minute
+	DefaultEvictionOverhead             = 30 * time.Second
+	DefaultPVCRecreateTimeout           = 3 * time.Minute
+	DefaultPodDeletePeriodWaitingForPVC = 10 * time.Second
 
 	KindDaemonSet   = "DaemonSet"
 	KindStatefulSet = "StatefulSet"
@@ -47,6 +48,9 @@ const (
 
 	PVCStorageClassCleanupAnnotationKey   = "draino/delete-pvc-and-pv"
 	PVCStorageClassCleanupAnnotationValue = "true"
+
+	CompletedStr = "Completed"
+	FailedStr    = "Failed"
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -82,6 +86,7 @@ type Drainer interface {
 	// Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 	Drain(n *core.Node) error
 	MarkDrain(n *core.Node, when, finish time.Time, failed bool) error
+	GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error)
 }
 
 // A CordonDrainer both cordons and drains nodes!
@@ -93,17 +98,21 @@ type CordonDrainer interface {
 // A NoopCordonDrainer does nothing.
 type NoopCordonDrainer struct{}
 
+func (d *NoopCordonDrainer) GetPodsToDrain(_ string, _ PodStore) ([]*core.Pod, error) {
+	return nil, nil
+}
+
 // Cordon does nothing.
-func (d *NoopCordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error { return nil }
+func (d *NoopCordonDrainer) Cordon(_ *core.Node, _ ...nodeMutatorFn) error { return nil }
 
 // Uncordon does nothing.
-func (d *NoopCordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) error { return nil }
+func (d *NoopCordonDrainer) Uncordon(_ *core.Node, _ ...nodeMutatorFn) error { return nil }
 
 // Drain does nothing.
-func (d *NoopCordonDrainer) Drain(n *core.Node) error { return nil }
+func (d *NoopCordonDrainer) Drain(_ *core.Node) error { return nil }
 
 // MarkDrain does nothing.
-func (d *NoopCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool) error {
+func (d *NoopCordonDrainer) MarkDrain(_ *core.Node, _, _ time.Time, _ bool) error {
 	return nil
 }
 
@@ -276,9 +285,9 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 	conditionStatus := core.ConditionTrue
 	if !finish.IsZero() {
 		if failed {
-			msgSuffix = fmt.Sprintf(" | Failed: %s", finish.Format(time.RFC3339))
+			msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
 		} else {
-			msgSuffix = fmt.Sprintf(" | Completed: %s", finish.Format(time.RFC3339))
+			msgSuffix = fmt.Sprintf(" | %s: %s", CompletedStr, finish.Format(time.RFC3339))
 		}
 		conditionStatus = core.ConditionFalse
 	}
@@ -298,7 +307,7 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 	if !conditionUpdated { // There was no condition found, let's create one
 		freshNode.Status.Conditions = append(freshNode.Status.Conditions,
 			core.NodeCondition{
-				Type:               core.NodeConditionType(ConditionDrainedScheduled),
+				Type:               ConditionDrainedScheduled,
 				Status:             conditionStatus,
 				LastHeartbeatTime:  now,
 				LastTransitionTime: now,
@@ -313,24 +322,45 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 	return nil
 }
 
-func IsMarkedForDrain(n *core.Node) bool {
+type DrainConditionStatus struct {
+	Marked bool
+	Completed bool
+	Failed bool
+}
+
+func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
+	var drainStatus DrainConditionStatus
 	for _, condition := range n.Status.Conditions {
-		if string(condition.Type) == ConditionDrainedScheduled && condition.Status == core.ConditionTrue {
-			return true
+		if string(condition.Type) != ConditionDrainedScheduled {
+			continue
 		}
+		drainStatus.Marked = true
+		if condition.Status == core.ConditionFalse {
+			if strings.Contains(condition.Message, CompletedStr) {
+				drainStatus.Completed = true
+				return drainStatus, nil
+			}
+			if strings.Contains(condition.Message, FailedStr) {
+				drainStatus.Failed = true
+				return drainStatus, nil
+			}
+		} else if condition.Status == core.ConditionTrue {
+			return drainStatus, nil
+		}
+		return drainStatus, errors.New("failed to read " + ConditionDrainedScheduled + " condition")
 	}
-	return false
+	return drainStatus, nil
 }
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 func (d *APICordonDrainer) Drain(n *core.Node) error {
 	// Do nothing if draining is not enabled.
 	if d.skipDrain {
-		d.l.Debug("Skipping drain because draining is disabled")
+		LoggerForNode(n, d.l).Debug("Skipping drain because draining is disabled")
 		return nil
 	}
 
-	pods, err := d.getPodsToDrain(n.GetName())
+	pods, err := d.GetPodsToDrain(n.GetName(), nil)
 	if err != nil {
 		return errors.Wrapf(err, "cannot get pods for node %s", n.GetName())
 	}
@@ -338,7 +368,8 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	abort := make(chan struct{})
 	errs := make(chan error, 1)
 	for i := range pods {
-		go d.evict(&pods[i], abort, errs)
+		pod := pods[i]
+		go d.evict(pod, abort, errs)
 	}
 	// This will _eventually_ abort evictions. Evictions may spend up to
 	// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
@@ -359,17 +390,28 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	return nil
 }
 
-func (d *APICordonDrainer) getPodsToDrain(node string) ([]core.Pod, error) {
-	l, err := d.c.CoreV1().Pods(meta.NamespaceAll).List(meta.ListOptions{
-		FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": node}).String(),
-	})
-	if err != nil {
-		return nil, errors.Wrapf(err, "cannot get pods for node %s", node)
+func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error) {
+	var err error
+	var pods []*core.Pod
+	if podStore != nil {
+		if pods, err = podStore.ListPodsForNode(node); err != nil {
+			return nil, err
+		}
+	} else {
+		l, err := d.c.CoreV1().Pods(meta.NamespaceAll).List(meta.ListOptions{
+			FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": node}).String(),
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "cannot get pods for node %s", node)
+		}
+		for i := range l.Items {
+			pods = append(pods, &l.Items[i])
+		}
 	}
 
-	include := make([]core.Pod, 0, len(l.Items))
-	for _, p := range l.Items {
-		passes, err := d.filter(p)
+	include := make([]*core.Pod, 0, len(pods))
+	for _, p := range pods {
+		passes, _, err := d.filter(*p)
 		if err != nil {
 			return nil, errors.Wrap(err, "cannot filter pods")
 		}

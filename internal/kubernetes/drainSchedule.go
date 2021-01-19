@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.opencensus.io/stats"
+	"github.com/pkg/errors"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
@@ -45,12 +45,13 @@ type DrainSchedules struct {
 	scheduleGroups     map[string]*SchedulesGroup
 	period             time.Duration
 
-	logger        *zap.Logger
-	drainer       Drainer
-	eventRecorder record.EventRecorder
+	logger             *zap.Logger
+	drainer            Drainer
+	eventRecorder      record.EventRecorder
+	suppliedConditions []SuppliedCondition
 }
 
-func NewDrainSchedules(drainer Drainer, eventRecorder record.EventRecorder, period time.Duration, labelKeysForGroups []string, logger *zap.Logger) DrainScheduler {
+func NewDrainSchedules(drainer Drainer, eventRecorder record.EventRecorder, period time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, logger *zap.Logger) DrainScheduler {
 	sort.Strings(labelKeysForGroups)
 	return &DrainSchedules{
 		labelKeysForGroups: labelKeysForGroups,
@@ -59,6 +60,7 @@ func NewDrainSchedules(drainer Drainer, eventRecorder record.EventRecorder, peri
 		logger:             logger,
 		drainer:            drainer,
 		eventRecorder:      eventRecorder,
+		suppliedConditions: suppliedConditions,
 	}
 }
 
@@ -213,7 +215,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 	}
 
 	sched.timer = time.AfterFunc(time.Until(when), func() {
-		log := d.logger.With(zap.String("node", node.GetName()))
+		log := LoggerForNode(node, d.logger)
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainStarting, "Draining node")
 		if err := d.drainer.Drain(node); err != nil {
@@ -221,7 +223,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 			sched.setFailed()
 			log.Info("Failed to drain", zap.Error(err))
 			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
-			stats.Record(tags, MeasureNodesDrained.M(1))
+			StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
 			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", err)
 			if err := RetryWithTimeout(
 				func() error {
@@ -237,7 +239,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		sched.finish = time.Now()
 		log.Info("Drained")
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
-		stats.Record(tags, MeasureNodesDrained.M(1))
+		StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
 		if err := RetryWithTimeout(
 			func() error {
@@ -259,7 +261,7 @@ type AlreadyScheduledError struct {
 
 func NewAlreadyScheduledError() error {
 	return &AlreadyScheduledError{
-		fmt.Errorf("drain schedule is already planned for that node"),
+		errors.New("drain schedule is already planned for that node"),
 	}
 }
 func IsAlreadyScheduledError(err error) bool {

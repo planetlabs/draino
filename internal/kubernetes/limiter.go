@@ -17,11 +17,11 @@ and limitations under the License.
 package kubernetes
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -127,7 +127,7 @@ func ParseCordonMax(param string) (max int, isPercent bool, err error) {
 	percent := strings.HasSuffix(param, "%")
 	max, err = strconv.Atoi(strings.TrimSuffix(param, "%"))
 	if err != nil {
-		return -1, percent, fmt.Errorf("can't Parse argument for cordon limiter value")
+		return -1, percent, errors.New("can't Parse argument for cordon limiter value")
 	}
 	return max, percent, nil
 }
@@ -135,7 +135,7 @@ func ParseCordonMax(param string) (max int, isPercent bool, err error) {
 func ParseCordonMaxForKeys(param string) (max int, isPercent bool, splittedKeys []string, err error) {
 	tokens := strings.SplitN(param, ",", 2)
 	if len(tokens) < 2 {
-		return -1, false, nil, fmt.Errorf("can't Parse argument for cordon limiter, at least 2 tokens are expected in field max-simultaneous-cordon-for-labels")
+		return -1, false, nil, errors.New("can't Parse argument for cordon limiter, at least 2 tokens are expected in field max-simultaneous-cordon-for-labels")
 	}
 	max, percent, err := ParseCordonMax(tokens[0])
 	if err != nil {
@@ -147,7 +147,7 @@ func ParseCordonMaxForKeys(param string) (max int, isPercent bool, splittedKeys 
 func MaxSimultaneousCordonLimiterFunc(max int, percent bool) LimiterFunc {
 	return func(n *core.Node, cordonNodes, allNodes []*core.Node) (bool, error) {
 		if len(allNodes) == 0 {
-			return false, fmt.Errorf("no node discovered")
+			return false, errors.New("no node discovered")
 		}
 
 		if len(cordonNodes) == 0 { // always allow at least one node to be cordon
@@ -184,7 +184,7 @@ func MaxSimultaneousCordonLimiterForLabelsFunc(max int, percent bool, labelKeys 
 
 		if percent {
 			if totalMatchCount == 0 {
-				return false, fmt.Errorf("the proposed node is not yet known by the store")
+				return false, errors.New("the proposed node is not yet known by the store")
 			}
 			percentCordon := int(math.Ceil(100 * float64(cordonCount+1) / float64(totalMatchCount)))
 			return percentCordon <= max, nil
@@ -233,7 +233,7 @@ func MaxSimultaneousCordonLimiterForTaintsFunc(max int, percent bool, taintKeys 
 
 		if percent {
 			if totalMatchCount == 0 {
-				return false, fmt.Errorf("the proposed node is not yet known by the store")
+				return false, errors.New("the proposed node is not yet known by the store")
 			}
 			percentCordon := int(math.Ceil(100 * float64(cordonCount+1) / float64(totalMatchCount)))
 			return percentCordon <= max, nil

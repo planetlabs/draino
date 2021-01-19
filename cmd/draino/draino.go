@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
@@ -30,7 +31,6 @@ import (
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	"gopkg.in/alecthomas/kingpin.v2"
-	"k8s.io/client-go/dynamic"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
@@ -42,9 +42,9 @@ import (
 
 // Default leader election settings.
 const (
-	DefaultLeaderElectionLeaseDuration time.Duration = 15 * time.Second
-	DefaultLeaderElectionRenewDeadline time.Duration = 10 * time.Second
-	DefaultLeaderElectionRetryPeriod   time.Duration = 2 * time.Second
+	DefaultLeaderElectionLeaseDuration = 15 * time.Second
+	DefaultLeaderElectionRenewDeadline = 10 * time.Second
+	DefaultLeaderElectionRetryPeriod   = 2 * time.Second
 )
 
 func main() {
@@ -102,7 +102,7 @@ func main() {
 			Measure:     kubernetes.MeasureNodesCordoned,
 			Description: "Number of nodes cordoned.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesUncordoned = &view.View{
 			Name:        "uncordoned_nodes_total",
@@ -116,25 +116,32 @@ func main() {
 			Measure:     kubernetes.MeasureNodesDrained,
 			Description: "Number of nodes drained.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesDrainScheduled = &view.View{
 			Name:        "drain_scheduled_nodes_total",
 			Measure:     kubernetes.MeasureNodesDrainScheduled,
 			Description: "Number of nodes scheduled for drain.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		limitedCordon = &view.View{
 			Name:        "limited_cordon_total",
 			Measure:     kubernetes.MeasureLimitedCordon,
 			Description: "Number of limited cordon encountered.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagReason},
+			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+		}
+		skippedCordon = &view.View{
+			Name:        "skipped_cordon_total",
+			Measure:     kubernetes.MeasureSkippedCordon,
+			Description: "Number of skipped cordon encountered.",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 	)
 
-	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon), "cannot create metrics")
+	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon, skippedCordon), "cannot create metrics")
 
 	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
@@ -166,6 +173,9 @@ func main() {
 
 	pods := kubernetes.NewPodWatch(cs)
 
+	// Sanitize user input
+	sort.Strings(*conditions)
+
 	// Eviction Filtering
 	pf := []kubernetes.PodFilterFunc{kubernetes.MirrorPodFilter}
 	if !*evictLocalStoragePods {
@@ -183,7 +193,7 @@ func main() {
 				log.Info("Filtering pods controlled by apiresource for eviction", zap.Any("apiresource", *apiResource))
 			}
 		}
-		pf = append(pf, kubernetes.NewPodControlledByFilter(dynamic.NewForConfigOrDie(c), apiResources))
+		pf = append(pf, kubernetes.NewPodControlledByFilter(apiResources))
 	}
 	systemKnownAnnotations := []string{
 		// https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
@@ -192,9 +202,9 @@ func main() {
 	pf = append(pf, kubernetes.UnprotectedPodFilter(append(systemKnownAnnotations, *protectedPodAnnotations...)...))
 
 	// Cordon Filtering
-	pf_cordon := []kubernetes.PodFilterFunc{}
+	podFilterCordon := []kubernetes.PodFilterFunc{}
 	if !*cordonLocalStoragePods {
-		pf_cordon = append(pf_cordon, kubernetes.LocalStoragePodFilter)
+		podFilterCordon = append(podFilterCordon, kubernetes.LocalStoragePodFilter)
 	}
 	apiResourcesCordon, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotCordonPodControlledBy)
 	if err != nil {
@@ -208,9 +218,9 @@ func main() {
 				log.Info("Filtering pods controlled by apiresource for cordon", zap.Any("apiresource", *apiResource))
 			}
 		}
-		pf_cordon = append(pf_cordon, kubernetes.NewPodControlledByFilter(dynamic.NewForConfigOrDie(c), apiResourcesCordon))
+		podFilterCordon = append(podFilterCordon, kubernetes.NewPodControlledByFilter(apiResourcesCordon))
 	}
-	pf_cordon = append(pf_cordon, kubernetes.UnprotectedPodFilter(*cordonProtectedPodAnnotations...))
+	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(*cordonProtectedPodAnnotations...))
 
 	// Cordon limiter
 	cordonLimiter := kubernetes.NewCordonLimiter(log)
@@ -252,7 +262,7 @@ func main() {
 		kubernetes.WithDrainBuffer(*drainBuffer),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(pf_cordon...), pods))
+		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(podFilterCordon...), pods))
 
 	if *dryRun {
 		h = cache.FilteringResourceEventHandler{

@@ -67,10 +67,15 @@ var (
 	MeasureNodesDrained        = stats.Int64("draino/nodes_drained", "Number of nodes drained.", stats.UnitDimensionless)
 	MeasureNodesDrainScheduled = stats.Int64("draino/nodes_drainScheduled", "Number of nodes drain scheduled.", stats.UnitDimensionless)
 	MeasureLimitedCordon       = stats.Int64("draino/cordon_limited", "Number of cordon activities that have been blocked due to limits.", stats.UnitDimensionless)
+	MeasureSkippedCordon       = stats.Int64("draino/cordon_skipped", "Number of cordon activities that have been skipped due filtering.", stats.UnitDimensionless)
 
-	TagNodeName, _ = tag.NewKey("node_name")
-	TagResult, _   = tag.NewKey("result")
-	TagReason, _   = tag.NewKey("reason")
+	TagNodeName, _           = tag.NewKey("node_name")
+	TagConditions, _         = tag.NewKey("conditions")
+	TagTeam, _               = tag.NewKey("team")
+	TagNodegroupName, _      = tag.NewKey("nodegroup_name")
+	TagNodegroupNamespace, _ = tag.NewKey("nodegroup_namespace")
+	TagResult, _             = tag.NewKey("result")
+	TagReason, _             = tag.NewKey("reason")
 )
 
 // A DrainingResourceEventHandler cordons and drains any added or updated nodes.
@@ -147,7 +152,7 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 	for _, o := range ho {
 		o(h)
 	}
-	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.logger)
+	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.conditions, h.logger)
 	return h
 }
 
@@ -181,8 +186,14 @@ func (h *DrainingResourceEventHandler) OnDelete(obj interface{}) {
 }
 
 func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
-	logger := h.logger.With(zap.String("node", n.Name))
-	badConditions := h.offendingConditions(n)
+	// Let proceed only if the informers have synced to avoid error logs at start up.
+	if h.podStore != nil && !h.podStore.HasSynced() {
+		h.logger.Debug("Waiting for pod informer to sync")
+		return
+	}
+
+	logger := LoggerForNode(n, h.logger)
+	badConditions := GetNodeOffendingConditions(n, h.conditions)
 	if len(badConditions) == 0 {
 		if shouldUncordon(n) {
 			h.drainScheduler.DeleteSchedule(n)
@@ -195,7 +206,6 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	if !n.Spec.Unschedulable {
 		// check if the node passes filters
 		if !h.checkCordonFilters(n) {
-			logger.Info("checkCordonFilter rejected the node")
 			return
 		}
 		done, err := h.cordon(n, badConditions)
@@ -208,16 +218,36 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		}
 	}
 
-	// Let's ensure that a drain is scheduled
-	hasSChedule, failedDrain := h.drainScheduler.HasSchedule(n)
-	if !hasSChedule {
-		h.scheduleDrain(n)
+	pods, err := h.cordonDrainer.GetPodsToDrain(n.GetName(), h.podStore)
+	if err != nil {
+		logger.Error(err.Error())
 		return
 	}
 
-	// Is there a request to retry a failed drain activity. If yes reschedule drain
-	if failedDrain && HasDrainRetryAnnotation(n) {
-		h.drainScheduler.DeleteSchedule(n)
+	drainStatus, err := IsMarkedForDrain(n)
+	if err != nil {
+		logger.Error(err.Error())
+		return
+	}
+
+	if len(pods) == 0 && drainStatus.Completed {
+		return // we are waiting for that node to be removed from the cluster by the CA
+	}
+
+	if drainStatus.Failed {
+		// Is there a request to retry a failed drain activity. If yes reschedule drain
+		if HasDrainRetryAnnotation(n) {
+			h.drainScheduler.DeleteSchedule(n)
+			h.scheduleDrain(n)
+			return
+		}
+		// Else we leave it like this
+		return
+	}
+
+	// Let's ensure that a drain is scheduled
+	hasSchedule, _ := h.drainScheduler.HasSchedule(n)
+	if !hasSchedule {
 		h.scheduleDrain(n)
 		return
 	}
@@ -231,18 +261,22 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(n *core.Node) bool {
 			h.logger.Error("cannot retrieve pods for node", zap.Error(err), zap.String("node", n.Name))
 			return false
 		}
-
+		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 		for _, pod := range pods {
-			ok, err := h.cordonFilter(*pod)
+			ok, reason, err := h.cordonFilter(*pod)
 			if err != nil {
+				tags, _ := tag.New(tags, tag.Upsert(TagReason, "error"))
+				StatRecordForEachCondition(tags, n, GetConditionsTypes(h.conditions), MeasureSkippedCordon.M(1))
 				h.logger.Error("filtering issue", zap.Error(err), zap.String("node", n.Name), zap.String("pod", pod.Name), zap.String("namespace", n.Name))
 				return false
 			}
 			if !ok {
 				nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
+				tags, _ := tag.New(tags, tag.Upsert(TagReason, reason))
+				StatRecordForEachCondition(tags, n, GetConditionsTypes(h.conditions), MeasureSkippedCordon.M(1))
 				h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonCordonSkip, "Pod %s/%s is not in eviction scope", pod.Namespace, pod.Name)
 				h.eventRecorder.Eventf(pod, core.EventTypeWarning, eventReasonCordonSkip, "Pod is blocking cordon/drain for node %s", n.Name)
-				h.logger.Info("Cordon filter triggered", zap.String("node", n.Name), zap.String("pod", pod.Name))
+				h.logger.Debug("Cordon filter triggered", zap.String("node", n.Name), zap.String("pod", pod.Name))
 				return false
 			}
 		}
@@ -250,9 +284,9 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(n *core.Node) bool {
 	return true
 }
 
-func (h *DrainingResourceEventHandler) offendingConditions(n *core.Node) []SuppliedCondition {
+func GetNodeOffendingConditions(n *core.Node, suppliedConditions []SuppliedCondition) []SuppliedCondition {
 	var conditions []SuppliedCondition
-	for _, suppliedCondition := range h.conditions {
+	for _, suppliedCondition := range suppliedConditions {
 		for _, nodeCondition := range n.Status.Conditions {
 			if suppliedCondition.Type == nodeCondition.Type &&
 				suppliedCondition.Status == nodeCondition.Status &&
@@ -262,6 +296,13 @@ func (h *DrainingResourceEventHandler) offendingConditions(n *core.Node) []Suppl
 		}
 	}
 	return conditions
+}
+func GetConditionsTypes(conditions []SuppliedCondition) []string {
+	result := make([]string, len(conditions))
+	for i := range conditions {
+		result[i] = string(conditions[i].Type)
+	}
+	return result
 }
 
 func shouldUncordon(n *core.Node) bool {
@@ -296,7 +337,7 @@ func parseConditionsFromAnnotation(n *core.Node) []SuppliedCondition {
 }
 
 func (h *DrainingResourceEventHandler) uncordon(n *core.Node) {
-	log := h.logger.With(zap.String("node", n.GetName()))
+	log := LoggerForNode(n, h.logger)
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 	nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 
@@ -320,7 +361,7 @@ func removeAnnotationMutator(n *core.Node) {
 }
 
 func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []SuppliedCondition) (cordon bool, err error) {
-	log := h.logger.With(zap.String("node", n.GetName()))
+	log := LoggerForNode(n, h.logger)
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 	// Events must be associated with this object reference, rather than the
 	// node itself, in order to appear under `kubectl describe node` due to the
@@ -332,21 +373,21 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 		if IsLimiterError(err) {
 			reason := err.Error()
 			tags, _ = tag.New(context.Background(), tag.Upsert(TagReason, reason))
-			stats.Record(tags, MeasureLimitedCordon.M(1))
+			StatRecordForEachCondition(tags, n, GetConditionsTypes(badConditions), MeasureLimitedCordon.M(1))
 			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonBlockedByLimit, reason)
-			h.logger.Info("cordon limiter", zap.String("node", n.Name), zap.String("reason", reason))
+			log.Debug("cordon limiter", zap.String("node", n.Name), zap.String("reason", reason))
 			return false, nil
 		}
 
 		log.Info("Failed to cordon", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
-		stats.Record(tags, MeasureNodesCordoned.M(1))
+		StatRecordForEachCondition(tags, n, GetConditionsTypes(badConditions), MeasureNodesCordoned.M(1))
 		h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonCordonFailed, "Cordoning failed: %v", err)
 		return false, err
 	}
 	log.Info("Cordoned")
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
-	stats.Record(tags, MeasureNodesCordoned.M(1))
+	StatRecordForEachCondition(tags, n, GetConditionsTypes(badConditions), MeasureNodesCordoned.M(1))
 	h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
 	return true, nil
 }
@@ -367,7 +408,7 @@ func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node)
 
 // drain schedule the draining activity
 func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node) {
-	log := h.logger.With(zap.String("node", n.GetName()))
+	log := LoggerForNode(n, h.logger)
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 	nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 	log.Debug("Scheduling drain")
@@ -378,13 +419,13 @@ func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node) {
 		}
 		log.Info("Failed to schedule the drain activity", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
-		stats.Record(tags, MeasureNodesDrainScheduled.M(1))
+		StatRecordForEachCondition(tags, n, GetConditionsTypes(GetNodeOffendingConditions(n, h.conditions)), MeasureNodesDrainScheduled.M(1))
 		h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainSchedulingFailed, "Drain scheduling failed: %v", err)
 		return
 	}
 	log.Info("Drain scheduled ", zap.Time("after", when))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
-	stats.Record(tags, MeasureNodesDrainScheduled.M(1))
+	StatRecordForEachCondition(tags, n, GetConditionsTypes(GetNodeOffendingConditions(n, h.conditions)), MeasureNodesDrainScheduled.M(1))
 	h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", when.Format(time.RFC3339Nano))
 }
 

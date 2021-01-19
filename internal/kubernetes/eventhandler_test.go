@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -70,6 +71,14 @@ func (d *mockCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, fail
 		node: n.Name,
 	})
 	return nil
+}
+
+func (d *mockCordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error) {
+	d.calls = append(d.calls, mockCall{
+		name: "GetPodsToDrain",
+		node: node,
+	})
+	return nil, nil
 }
 
 func (d *mockCordonDrainer) HasSchedule(node *core.Node) (has, failed bool) {
@@ -144,6 +153,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			},
 			expected: []mockCall{
 				{name: "Cordon", node: nodeName},
+				{name: "GetPodsToDrain", node: nodeName},
 				{name: "HasSchedule", node: nodeName},
 				{name: "Schedule", node: nodeName},
 			},
@@ -158,12 +168,39 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 					Conditions: []core.NodeCondition{{
 						Type:   "KernelPanic",
 						Status: core.ConditionTrue,
-					}},
+					},
+						{
+							Type:   ConditionDrainedScheduled,
+							Status: core.ConditionTrue,
+						}},
 				},
 			},
 			expected: []mockCall{
+				{name: "GetPodsToDrain", node: nodeName},
 				{name: "HasSchedule", node: nodeName},
 				{name: "Schedule", node: nodeName},
+			},
+		},
+		{
+			name:       "WithBadConditionsAlreadyCordonedAndDrained",
+			conditions: []string{"KernelPanic"},
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{{
+						Type:   "KernelPanic",
+						Status: core.ConditionTrue,
+					},
+						{
+							Type:    ConditionDrainedScheduled,
+							Status:  core.ConditionFalse,
+							Message: fmt.Sprintf(" ... | %s: %s", CompletedStr, time.Now().Format(time.RFC3339)),
+						}},
+				},
+			},
+			expected: []mockCall{
+				{name: "GetPodsToDrain", node: nodeName},
 			},
 		},
 		{
@@ -218,6 +255,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 			},
 			expected: []mockCall{
+				{name: "GetPodsToDrain", node: nodeName},
 				{name: "HasSchedule", node: nodeName},
 				{name: "Schedule", node: nodeName},
 			},
@@ -367,7 +405,7 @@ func TestOffendingConditions(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := NewDrainingResourceEventHandler(&NoopCordonDrainer{}, &record.FakeRecorder{}, WithConditionsFilter(tc.conditions))
-			badConditions := h.offendingConditions(tc.obj)
+			badConditions := GetNodeOffendingConditions(tc.obj, h.conditions)
 			if !reflect.DeepEqual(badConditions, tc.expected) {
 				t.Errorf("offendingConditions(tc.obj): want %#v, got %#v", tc.expected, badConditions)
 			}
@@ -401,30 +439,30 @@ func TestDrainingResourceEventHandler_checkCordonFilters(t *testing.T) {
 		},
 		{
 			name:         "no Pods, Filter true",
-			cordonFilter: func(p core.Pod) (bool, error) { return true, nil },
+			cordonFilter: func(p core.Pod) (bool, string, error) { return true, "", nil },
 			want:         true,
 		},
 		{
 			name:         "no Pods, Filter false",
-			cordonFilter: func(p core.Pod) (bool, error) { return false, nil },
+			cordonFilter: func(p core.Pod) (bool, string, error) { return false, "", nil },
 			want:         true,
 		},
 		{
 			name:         "Pods, Filter true",
 			pods:         []runtime.Object{pod, otherPod},
-			cordonFilter: func(p core.Pod) (bool, error) { return true, nil },
+			cordonFilter: func(p core.Pod) (bool, string, error) { return true, "", nil },
 			want:         true,
 		},
 		{
 			name:         "Pods, Filter false",
 			pods:         []runtime.Object{pod, otherPod},
-			cordonFilter: func(p core.Pod) (bool, error) { return false, nil },
+			cordonFilter: func(p core.Pod) (bool, string, error) { return false, "", nil },
 			want:         false,
 		},
 		{
 			name:         "Pods on other node, Filter false",
 			pods:         []runtime.Object{otherPod},
-			cordonFilter: func(p core.Pod) (bool, error) { return false, nil },
+			cordonFilter: func(p core.Pod) (bool, string, error) { return false, "", nil },
 			want:         true,
 		},
 	}
