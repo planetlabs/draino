@@ -17,12 +17,12 @@ and limitations under the License.
 package kubernetes
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/pkg/errors"
+
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,8 +31,13 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type SyncedStore interface {
+	HasSynced() bool
+}
+
 // An NodeStore is a cache of node resources.
 type NodeStore interface {
+	SyncedStore
 	// Get an node by name. Returns an error if the node does not exist.
 	Get(name string) (*core.Node, error)
 }
@@ -42,6 +47,8 @@ type NodeStore interface {
 type NodeWatch struct {
 	cache.SharedInformer
 }
+
+var _ NodeStore = &NodeWatch{}
 
 // NewNodeWatch creates a watch on node resources. Nodes are cached and the
 // provided ResourceEventHandlers are called when the cache changes.
@@ -80,6 +87,7 @@ func (w *NodeWatch) ListNodes() []*core.Node {
 }
 
 type PodStore interface {
+	SyncedStore
 	// List all the pods of a given node
 	ListPodsForNode(nodeName string) ([]*core.Pod, error)
 }
@@ -90,6 +98,10 @@ type PodWatch struct {
 	cache.SharedIndexInformer
 }
 
+var _ PodStore = &PodWatch{}
+
+const podNodeNameIndexField = ".spec.nodeName"
+
 // NewNodeWatch creates a watch on node resources. Nodes are cached and the
 // provided ResourceEventHandlers are called when the cache changes.
 func NewPodWatch(c kubernetes.Interface) *PodWatch {
@@ -98,7 +110,7 @@ func NewPodWatch(c kubernetes.Interface) *PodWatch {
 		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Pods("").Watch(o) },
 	}
 
-	i := cache.NewSharedIndexInformer(lw, &core.Pod{}, 30*time.Minute, cache.Indexers{".spec.nodeName": func(obj interface{}) ([]string, error) {
+	i := cache.NewSharedIndexInformer(lw, &core.Pod{}, 30*time.Minute, cache.Indexers{podNodeNameIndexField: func(obj interface{}) ([]string, error) {
 		p, ok := obj.(*core.Pod)
 		if !ok {
 			return []string{""}, nil
@@ -110,9 +122,9 @@ func NewPodWatch(c kubernetes.Interface) *PodWatch {
 
 func (w *PodWatch) ListPodsForNode(nodeName string) ([]*core.Pod, error) {
 	if !w.HasSynced() {
-		return nil, fmt.Errorf("pod informer not yet synced")
+		return nil, errors.New("pod informer not yet synced")
 	}
-	objs, err := w.GetIndexer().ByIndex(".spec.nodeName", nodeName)
+	objs, err := w.GetIndexer().ByIndex(podNodeNameIndexField, nodeName)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +132,7 @@ func (w *PodWatch) ListPodsForNode(nodeName string) ([]*core.Pod, error) {
 	for i, obj := range objs {
 		p, ok := obj.(*core.Pod)
 		if !ok {
-			return nil, fmt.Errorf("unexpected object type in Pod store")
+			return nil, errors.New("unexpected object type in Pod store")
 		}
 		pods[i] = p
 	}

@@ -430,12 +430,12 @@ func TestDrain(t *testing.T) {
 		{
 			name: "PodDoesNotPassFilter",
 			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, error) {
+			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
 				if p.GetName() == "lamePod" {
 					// This pod does not pass the filter.
-					return false, nil
+					return false, "lame", nil
 				}
-				return true, nil
+				return true, "", nil
 			})},
 			reactions: []reactor{
 				reactor{
@@ -461,11 +461,11 @@ func TestDrain(t *testing.T) {
 		{
 			name: "PodFilterErrors",
 			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, error) {
+			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
 				if p.GetName() == "explodeyPod" {
-					return false, errExploded
+					return false, "explodey", errExploded
 				}
-				return true, nil
+				return true, "", nil
 			})},
 			reactions: []reactor{
 				reactor{
@@ -529,14 +529,15 @@ func TestDrain(t *testing.T) {
 func TestMarkDrain(t *testing.T) {
 	now := meta.Time{Time: time.Now()}
 	cases := []struct {
-		name     string
-		node     *core.Node
-		isMarked bool
+		name        string
+		node        *core.Node
+		drainStatus DrainConditionStatus
+		isErr       bool
 	}{
 		{
-			name:     "markDrain",
-			node:     &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			isMarked: false,
+			name:        "markDrain",
+			node:        &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			isErr:       false,
 		},
 		{
 			name: "markDrain again",
@@ -555,7 +556,8 @@ func TestMarkDrain(t *testing.T) {
 					},
 				},
 			},
-			isMarked: true,
+			drainStatus: DrainConditionStatus{Marked: true},
+			isErr:       false,
 		},
 	}
 
@@ -568,20 +570,23 @@ func TestMarkDrain(t *testing.T) {
 				if err != nil {
 					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 				}
-				if IsMarkedForDrain(n) != tc.isMarked {
-					t.Errorf("node %v initial mark is not correct", tc.node.Name)
+				drainStatus, err := IsMarkedForDrain(n)
+				if drainStatus != tc.drainStatus {
+					t.Errorf("node %v initial drainStatus is not correct", tc.node.Name)
 				}
-			}
-			if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false); err != nil {
-				t.Errorf("d.MarkDrain(%v): %v", tc.node.Name, err)
-			}
-			{
-				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
-				if err != nil {
-					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
-				}
-				if !IsMarkedForDrain(n) {
-					t.Errorf("node %v is not marked for drain", tc.node.Name)
+				if !drainStatus.Marked {
+					if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false); err != nil {
+						t.Errorf("d.MarkDrain(%v): %v", tc.node.Name, err)
+					}
+					{
+						n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+						if err != nil {
+							t.Errorf("node.Get(%v): %v", tc.node.Name, err)
+						}
+						if drainStatus, err = IsMarkedForDrain(n); !drainStatus.Marked {
+							t.Errorf("node %v is not marked for drain", tc.node.Name)
+						}
+					}
 				}
 			}
 		})

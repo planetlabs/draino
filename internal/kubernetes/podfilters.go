@@ -21,42 +21,42 @@ import (
 
 	"github.com/pkg/errors"
 	core "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 )
 
 // A PodFilterFunc returns true if the supplied pod passes the filter.
-type PodFilterFunc func(p core.Pod) (bool, error)
+type PodFilterFunc func(p core.Pod) (pass bool, reason string, err error)
 
 // MirrorPodFilter returns true if the supplied pod is not a mirror pod, i.e. a
 // pod created by a manifest on the node rather than the API server.
-func MirrorPodFilter(p core.Pod) (bool, error) {
+func MirrorPodFilter(p core.Pod) (bool, string, error) {
 	_, mirrorPod := p.GetAnnotations()[core.MirrorPodAnnotationKey]
-	return !mirrorPod, nil
+	if !mirrorPod {
+		return true, "", nil
+	}
+	return false, "pod-mirror", nil
 }
 
 // LocalStoragePodFilter returns true if the supplied pod does not have local
 // storage, i.e. does not use any 'empty dir' volumes.
-func LocalStoragePodFilter(p core.Pod) (bool, error) {
+func LocalStoragePodFilter(p core.Pod) (bool, string, error) {
 	for _, v := range p.Spec.Volumes {
 		if v.EmptyDir != nil {
-			return false, nil
+			return false, "pod-local-storage-emptydir", nil
 		}
 	}
-	return true, nil
+	return true, "", nil
 }
 
-func NewPodControlledByFilter(client dynamic.Interface, controlledByAPIResources []*meta.APIResource) PodFilterFunc {
-	return func(p core.Pod) (bool, error) {
+func NewPodControlledByFilter(controlledByAPIResources []*meta.APIResource) PodFilterFunc {
+	return func(p core.Pod) (bool, string, error) {
 		for _, controlledBy := range controlledByAPIResources {
 			if controlledBy == nil { //means uncontrolled pod
 				if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
 					continue
 				}
 				if meta.GetControllerOf(&p) == nil {
-					return false, nil
+					return false, "pod-uncontrolled", nil
 				}
 				continue
 			}
@@ -65,18 +65,9 @@ func NewPodControlledByFilter(client dynamic.Interface, controlledByAPIResources
 			if c == nil || c.Kind != controlledBy.Kind || c.APIVersion != controlledBy.Group+"/"+controlledBy.Version {
 				continue
 			}
-
-			if _, err := client.Resource(schema.GroupVersionResource{Group: controlledBy.Group, Version: controlledBy.Version, Resource: controlledBy.Name}).Namespace(p.Namespace).Get(c.Name, meta.GetOptions{}); err != nil {
-				if apierrors.IsNotFound(err) {
-					// the controller was deleted, so the pod can be deleted/evicted also.
-					continue
-				}
-				return false, errors.Wrapf(err, "cannot get pod %s/%s controlled by %s", p.GetNamespace(), c.Name, controlledBy)
-			}
-			// the pod is still under control, so we protect the pod from eviction
-			return false, nil
+			return false, "pod-controlledby-" + strings.ToLower(controlledBy.Kind), nil
 		}
-		return true, nil
+		return true, "", nil
 	}
 }
 
@@ -84,7 +75,7 @@ func NewPodControlledByFilter(client dynamic.Interface, controlledByAPIResources
 // supplied pod does not have any of the user-specified annotations for
 // protection from eviction
 func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
-	return func(p core.Pod) (bool, error) {
+	return func(p core.Pod) (bool, string, error) {
 		var filter bool
 		for _, annot := range annotations {
 			// Try to split the annotation into key-value pairs
@@ -101,26 +92,26 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 				filter = ok && v == kv[1]
 			}
 			if filter {
-				return false, nil
+				return false, "pod-annotation", nil
 			}
 		}
-		return true, nil
+		return true, "", nil
 	}
 }
 
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied
 // FilterFuncs return true.
 func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
-	return func(p core.Pod) (bool, error) {
+	return func(p core.Pod) (bool, string, error) {
 		for _, fn := range filters {
-			passes, err := fn(p)
+			passes, reason, err := fn(p)
 			if err != nil {
-				return false, errors.Wrap(err, "cannot apply filters")
+				return false, "error", errors.Wrap(err, "cannot apply filters")
 			}
 			if !passes {
-				return false, nil
+				return false, reason, nil
 			}
 		}
-		return true, nil
+		return true, "", nil
 	}
 }

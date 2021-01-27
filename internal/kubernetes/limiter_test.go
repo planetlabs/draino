@@ -1,10 +1,10 @@
 package kubernetes
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -392,7 +392,7 @@ func TestIsLimiterError(t *testing.T) {
 	}{
 		{
 			name: "No",
-			err:  fmt.Errorf("No"),
+			err:  errors.New("No"),
 			want: false,
 		},
 		{
