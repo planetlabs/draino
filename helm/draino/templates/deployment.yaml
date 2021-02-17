@@ -41,6 +41,11 @@ spec:
           {{- range .Values.conditions }}
             - {{ . }}
           {{- end }}
+          {{- if .Values.serviceMonitor.enabled }}
+          ports:
+            - name: metrics
+              containerPort: 10002
+          {{- end }}
           livenessProbe:
             initialDelaySeconds: 30
             httpGet:
