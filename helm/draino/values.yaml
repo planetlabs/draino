@@ -10,7 +10,7 @@ image:
   repository: planetlabs/draino
   tag: 450a853
   pullPolicy: IfNotPresent
-
+  
 resources:
   limits:
     cpu: 100m
@@ -32,6 +32,12 @@ podLabels: {}
 rbac:
   create: true
   serviceAccountName:
+
+serviceMonitor:
+  enabled: false
+  additionalLabels: {}
+  interval: 30s
+  scrapeTimeout: 30s
 
 nodeSelector: {}
 

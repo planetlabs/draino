@@ -1,0 +1,17 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "draino.name" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "draino.name" . }}
+    helm.sh/chart: {{ include "draino.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ template "draino.name" . }}
+  ports:
+  - port: 10002
+    targetPort: 10002
+{{- end }}
