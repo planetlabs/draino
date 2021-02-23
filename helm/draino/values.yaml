@@ -19,6 +19,7 @@ resources:
     cpu: 100m
     memory: 128Mi
 
+
 # Add these annotations to all pods
 podAnnotations: {}
   # name: value
