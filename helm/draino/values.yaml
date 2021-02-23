@@ -2,7 +2,7 @@ dryRun: false
 
 extraArgs: {}
 
-conditions: {}
+conditions: []
 
 replicaCount: 1
 
