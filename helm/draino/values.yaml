@@ -6,6 +6,8 @@ conditions: []
 
 replicaCount: 1
 
+priorityClassName:
+
 image:
   repository: planetlabs/draino
   tag: 450a853
