@@ -51,6 +51,11 @@ const (
 
 	CompletedStr = "Completed"
 	FailedStr    = "Failed"
+
+	NodeLabelKeyReplaceRequest      = "node.datadoghq.com/replace"
+	NodeLabelValueReplaceRequested  = "requested"
+	NodeLabelValueReplaceProcessing = "processing"
+	NodeLabelValueReplaceDone       = "done"
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -89,10 +94,24 @@ type Drainer interface {
 	GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error)
 }
 
+type NodeReplacementStatus string
+
+const (
+	NodeReplacementStatusRequested NodeReplacementStatus = "requested"
+	NodeReplacementStatusDone      NodeReplacementStatus = "done"
+	NodeReplacementStatusNone      NodeReplacementStatus = "none"
+)
+
+// A NodeReplacer helps to request for node replacement
+type NodeReplacer interface {
+	ReplaceNode(n *core.Node) (NodeReplacementStatus, error)
+}
+
 // A CordonDrainer both cordons and drains nodes!
 type CordonDrainer interface {
 	Cordoner
 	Drainer
+	NodeReplacer
 }
 
 // A NoopCordonDrainer does nothing.
@@ -115,6 +134,13 @@ func (d *NoopCordonDrainer) Drain(_ *core.Node) error { return nil }
 func (d *NoopCordonDrainer) MarkDrain(_ *core.Node, _, _ time.Time, _ bool) error {
 	return nil
 }
+
+// ReplaceNode return none
+func (d *NoopCordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
+	return NodeReplacementStatusNone, nil
+}
+
+var _ CordonDrainer = &APICordonDrainer{}
 
 // APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
 type APICordonDrainer struct {
@@ -323,9 +349,10 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 }
 
 type DrainConditionStatus struct {
-	Marked bool
-	Completed bool
-	Failed bool
+	Marked         bool
+	Completed      bool
+	Failed         bool
+	LastTransition time.Time
 }
 
 func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
@@ -335,6 +362,7 @@ func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
 			continue
 		}
 		drainStatus.Marked = true
+		drainStatus.LastTransition = condition.LastTransitionTime.Time
 		if condition.Status == core.ConditionFalse {
 			if strings.Contains(condition.Message, CompletedStr) {
 				drainStatus.Completed = true
@@ -646,4 +674,28 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 		d.l.Info("pvc still present", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
 		return false, nil
 	})
+}
+
+func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
+	replacementValue, ok := n.Labels[NodeLabelKeyReplaceRequest]
+	if !ok {
+		fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
+		if err != nil {
+			return NodeReplacementStatusNone, errors.Wrapf(err, "cannot get node %s", n.GetName())
+		}
+		fresh.Labels[NodeLabelKeyReplaceRequest] = NodeLabelValueReplaceRequested
+		if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
+			return NodeReplacementStatusNone, errors.Wrapf(err, "cannot request replacement node %s", fresh.GetName())
+		}
+		return NodeReplacementStatusRequested, nil
+	}
+
+	switch replacementValue {
+	case NodeLabelValueReplaceRequested, NodeLabelValueReplaceProcessing:
+		return NodeReplacementStatusRequested, nil
+	case NodeLabelValueReplaceDone:
+		return NodeReplacementStatusDone, nil
+	default:
+		return NodeReplacementStatusNone, nil
+	}
 }

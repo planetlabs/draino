@@ -52,17 +52,18 @@ func main() {
 	var (
 		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()
 
-		debug            = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
-		listen           = app.Flag("listen", "Address at which to expose /metrics and /healthz.").Default(":10002").String()
-		kubecfg          = app.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
-		apiserver        = app.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
-		dryRun           = app.Flag("dry-run", "Emit an event without cordoning or draining matching nodes.").Bool()
-		maxGracePeriod   = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
-		evictionHeadroom = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
-		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
-		nodeLabels       = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").Strings()
-		nodeLabelsExpr   = app.Flag("node-label-expr", "Nodes that match this expression will be eligible for cordoning and draining.").String()
-		namespace        = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
+		debug                     = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
+		listen                    = app.Flag("listen", "Address at which to expose /metrics and /healthz.").Default(":10002").String()
+		kubecfg                   = app.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
+		apiserver                 = app.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
+		dryRun                    = app.Flag("dry-run", "Emit an event without cordoning or draining matching nodes.").Bool()
+		maxGracePeriod            = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
+		evictionHeadroom          = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
+		drainBuffer               = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
+		durationBeforeReplacement = app.Flag("duration-before-replacement", "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.").Default(kubernetes.DefaultDurationBeforeReplacement.String()).Duration()
+		nodeLabels                = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").Strings()
+		nodeLabelsExpr            = app.Flag("node-label-expr", "Nodes that match this expression will be eligible for cordoning and draining.").String()
+		namespace                 = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
 
 		leaderElectionLeaseDuration = app.Flag("leader-election-lease-duration", "Lease duration for leader election.").Default(DefaultLeaderElectionLeaseDuration.String()).Duration()
 		leaderElectionRenewDeadline = app.Flag("leader-election-renew-deadline", "Leader election renew deadline.").Default(DefaultLeaderElectionRenewDeadline.String()).Duration()
@@ -260,6 +261,7 @@ func main() {
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
+		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
 		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(podFilterCordon...), pods))
@@ -272,6 +274,7 @@ func main() {
 				kubernetes.NewEventRecorder(cs),
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer),
+				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 				kubernetes.WithDrainGroups(*drainGroupLabelKey),
 				kubernetes.WithConditionsFilter(*conditions)),
 		}

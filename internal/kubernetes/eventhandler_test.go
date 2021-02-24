@@ -36,6 +36,8 @@ type mockCordonDrainer struct {
 	calls []mockCall
 }
 
+var _ CordonDrainer = &mockCordonDrainer{}
+
 type mockCall struct {
 	name string
 	node string
@@ -109,6 +111,14 @@ func (d *mockCordonDrainer) DeleteScheduleByName(name string) {
 		name: "DeleteSchedule",
 		node: name,
 	})
+}
+
+func (d *mockCordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
+	d.calls = append(d.calls, mockCall{
+		name: "ReplaceNode",
+		node: n.Name,
+	})
+	return NodeReplacementStatusNone, nil
 }
 
 func TestDrainingResourceEventHandler(t *testing.T) {
@@ -201,6 +211,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			},
 			expected: []mockCall{
 				{name: "GetPodsToDrain", node: nodeName},
+				{name: "ReplaceNode", node: nodeName},
 			},
 		},
 		{
