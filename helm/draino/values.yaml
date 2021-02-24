@@ -2,9 +2,11 @@ dryRun: false
 
 extraArgs: {}
 
-conditions: {}
+conditions: []
 
 replicaCount: 1
+
+priorityClassName:
 
 image:
   repository: planetlabs/draino

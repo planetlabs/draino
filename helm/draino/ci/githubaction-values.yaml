@@ -1,0 +1,6 @@
+conditions:
+  - KernelDeadlock
+  - ReadonlyFilesystem
+  - FrequentKubeletRestart
+  - FrequentDockerRestart
+  - FrequentContainerdRestart

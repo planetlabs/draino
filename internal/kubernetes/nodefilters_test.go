@@ -348,7 +348,7 @@ func TestOldNodeLabelFilter(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			labelExpr, err := ConvertLabelsToFilterExpr(tc.labels)
+			labelExpr, _ := ConvertLabelsToFilterExpr(tc.labels)
 
 			filter, err := NewNodeLabelFilter(labelExpr, log)
 			if err != nil {
