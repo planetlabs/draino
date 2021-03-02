@@ -33,7 +33,8 @@ import (
 
 const (
 	// DefaultDrainBuffer is the default minimum time between node drains.
-	DefaultDrainBuffer = 10 * time.Minute
+	DefaultDrainBuffer               = 10 * time.Minute
+	DefaultDurationBeforeReplacement = 1 * time.Hour
 
 	eventReasonCordonBlockedByLimit = "CordonBlockedByLimit"
 	eventReasonCordonSucceeded      = "CordonSucceeded"
@@ -93,6 +94,8 @@ type DrainingResourceEventHandler struct {
 	labelsKeyForDrainGroups []string
 
 	conditions []SuppliedCondition
+
+	durationWithCompletedStatusBeforeReplacement time.Duration
 }
 
 // DrainingResourceEventHandlerOption configures an DrainingResourceEventHandler.
@@ -110,6 +113,13 @@ func WithLogger(l *zap.Logger) DrainingResourceEventHandlerOption {
 func WithDrainBuffer(d time.Duration) DrainingResourceEventHandlerOption {
 	return func(h *DrainingResourceEventHandler) {
 		h.buffer = d
+	}
+}
+
+// WithDurationWithCompletedStatusBeforeReplacement configures the time we wait with Completed drain status before asking for node replacement
+func WithDurationWithCompletedStatusBeforeReplacement(d time.Duration) DrainingResourceEventHandlerOption {
+	return func(h *DrainingResourceEventHandler) {
+		h.durationWithCompletedStatusBeforeReplacement = d
 	}
 }
 
@@ -231,6 +241,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	}
 
 	if len(pods) == 0 && drainStatus.Completed {
+		elapseSinceCompleted := time.Since(drainStatus.LastTransition)
+		if elapseSinceCompleted > h.durationWithCompletedStatusBeforeReplacement {
+			// This node probably blocked due to minSize set on the nodegroup
+			h.cordonDrainer.ReplaceNode(n)
+		}
 		return // we are waiting for that node to be removed from the cluster by the CA
 	}
 

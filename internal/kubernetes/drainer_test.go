@@ -535,9 +535,9 @@ func TestMarkDrain(t *testing.T) {
 		isErr       bool
 	}{
 		{
-			name:        "markDrain",
-			node:        &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			isErr:       false,
+			name:  "markDrain",
+			node:  &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			isErr: false,
 		},
 		{
 			name: "markDrain again",
@@ -556,7 +556,7 @@ func TestMarkDrain(t *testing.T) {
 					},
 				},
 			},
-			drainStatus: DrainConditionStatus{Marked: true},
+			drainStatus: DrainConditionStatus{Marked: true, LastTransition: now.Time},
 			isErr:       false,
 		},
 	}

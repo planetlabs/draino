@@ -203,5 +203,5 @@ func LoggerForNode(n *core.Node, logger *zap.Logger) *zap.Logger {
 	if team == "" {
 		team = n.Labels["team"]
 	}
-	return logger.With(zap.String("node", n.Name), zap.String("ng_name", n.Labels[LabelKeyNodeGroupName]), zap.String("ng_namespace", n.Labels[LabelKeyNodeGroupNamespace]),zap.String("node_team", n.Labels[LabelKeyNodeGroupNamespace]))
+	return logger.With(zap.String("node", n.Name), zap.String("ng_name", n.Labels[LabelKeyNodeGroupName]), zap.String("ng_namespace", n.Labels[LabelKeyNodeGroupNamespace]), zap.String("node_team", n.Labels[LabelKeyNodeGroupNamespace]))
 }
