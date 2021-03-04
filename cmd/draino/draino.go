@@ -87,6 +87,9 @@ func main() {
 		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
 
+		// NodeReplacement limiter flags
+		maxNodeReplacementPerHour = app.Flag("max-node-replacement-per-hour", "Maximum number of nodes per hour for which draino can ask replacement.").Default("2").Int()
+
 		// PV/PVC management
 		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
 
@@ -245,8 +248,9 @@ func main() {
 			kingpin.FatalIfError(parseErr, "cannot parse 'max-simultaneous-cordon-for-taints' argument")
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
-
 	}
+
+	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour)
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		kubernetes.NewAPICordonDrainer(cs,
@@ -255,6 +259,7 @@ func main() {
 			kubernetes.WithSkipDrain(*skipDrain),
 			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
 			kubernetes.WithCordonLimiter(cordonLimiter),
+			kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 			kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
 			kubernetes.WithAPICordonDrainerLogger(log),
 		),
