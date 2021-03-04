@@ -20,6 +20,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -27,6 +28,35 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/util/flowcontrol"
 )
+
+type NodeReplacementLimiter interface {
+	// Can ask for a new node replacement
+	CanAskForNodeReplacement() bool
+}
+
+type limiterForNodeReplacement struct {
+	noReplacementBefore time.Time // We want to skip the first period to avoid abusive NoReplacement in case of controller frequent restarts (OOM, Deployment...)
+	rateLimiter         flowcontrol.RateLimiter
+}
+
+func (l *limiterForNodeReplacement) CanAskForNodeReplacement() bool {
+	if !time.Now().After(l.noReplacementBefore) {
+		return false
+	}
+	if l.rateLimiter != nil && !l.rateLimiter.TryAccept() {
+		return false
+	}
+	return true
+}
+
+func NewNodeReplacementLimiter(numberOfNodesPerHours int) NodeReplacementLimiter {
+	qps := float32(numberOfNodesPerHours) / 3600
+	minutePeriod := 60 / numberOfNodesPerHours
+	return &limiterForNodeReplacement{
+		noReplacementBefore: time.Now().Add(time.Duration(minutePeriod) * time.Minute),
+		rateLimiter:         flowcontrol.NewTokenBucketRateLimiter(qps, 0),
+	}
+}
 
 type CordonLimiter interface {
 	// Check if the node can be cordoned. If not, the name of the limiter is returned

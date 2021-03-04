@@ -28,6 +28,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -97,9 +98,10 @@ type Drainer interface {
 type NodeReplacementStatus string
 
 const (
-	NodeReplacementStatusRequested NodeReplacementStatus = "requested"
-	NodeReplacementStatusDone      NodeReplacementStatus = "done"
-	NodeReplacementStatusNone      NodeReplacementStatus = "none"
+	NodeReplacementStatusRequested        NodeReplacementStatus = "requested"
+	NodeReplacementStatusDone             NodeReplacementStatus = "done"
+	NodeReplacementStatusNone             NodeReplacementStatus = "none"
+	NodeReplacementStatusBlockedByLimiter NodeReplacementStatus = "blockedByLimiter"
 )
 
 // A NodeReplacer helps to request for node replacement
@@ -148,8 +150,9 @@ type APICordonDrainer struct {
 	l             *zap.Logger
 	eventRecorder record.EventRecorder
 
-	filter        PodFilterFunc
-	cordonLimiter CordonLimiter
+	filter                 PodFilterFunc
+	cordonLimiter          CordonLimiter
+	nodeReplacementLimiter NodeReplacementLimiter
 
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
@@ -212,6 +215,13 @@ func WithAPICordonDrainerLogger(l *zap.Logger) APICordonDrainerOption {
 func WithCordonLimiter(limiter CordonLimiter) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.cordonLimiter = limiter
+	}
+}
+
+// WithNodeReplacementLimiter configures an APICordonDrainer to limit node replacement activity
+func WithNodeReplacementLimiter(limiter NodeReplacementLimiter) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.nodeReplacementLimiter = limiter
 	}
 }
 
@@ -679,6 +689,12 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
 	replacementValue, ok := n.Labels[NodeLabelKeyReplaceRequest]
 	if !ok {
+		if !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
+			nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
+			d.eventRecorder.Event(nr, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is blocked by rate limited for the moment.")
+			return NodeReplacementStatusBlockedByLimiter, nil
+		}
+
 		fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 		if err != nil {
 			return NodeReplacementStatusNone, errors.Wrapf(err, "cannot get node %s", n.GetName())
