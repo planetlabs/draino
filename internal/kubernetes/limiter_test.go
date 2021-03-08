@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -417,5 +418,18 @@ func TestIsLimiterError(t *testing.T) {
 				t.Errorf("IsLimiterError() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNodeReplacementLimiter(t *testing.T) {
+	limiter:= NewNodeReplacementLimiter(2,time.Now().Add(-2*time.Hour))
+	if !limiter.CanAskForNodeReplacement() {
+		t.FailNow()
+	}
+	if limiter.CanAskForNodeReplacement() {
+		t.FailNow()
+	}
+	if limiter.CanAskForNodeReplacement() {
+		t.FailNow()
 	}
 }

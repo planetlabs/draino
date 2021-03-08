@@ -250,7 +250,7 @@ func main() {
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
 	}
 
-	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour)
+	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour,time.Now())
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		kubernetes.NewAPICordonDrainer(cs,

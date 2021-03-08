@@ -49,12 +49,12 @@ func (l *limiterForNodeReplacement) CanAskForNodeReplacement() bool {
 	return true
 }
 
-func NewNodeReplacementLimiter(numberOfNodesPerHours int) NodeReplacementLimiter {
+func NewNodeReplacementLimiter(numberOfNodesPerHours int, currentTime time.Time) NodeReplacementLimiter {
 	qps := float32(numberOfNodesPerHours) / 3600
 	minutePeriod := 60 / numberOfNodesPerHours
 	return &limiterForNodeReplacement{
-		noReplacementBefore: time.Now().Add(time.Duration(minutePeriod) * time.Minute),
-		rateLimiter:         flowcontrol.NewTokenBucketRateLimiter(qps, 0),
+		noReplacementBefore: currentTime.Add(time.Duration(minutePeriod) * time.Minute),
+		rateLimiter:         flowcontrol.NewTokenBucketRateLimiter(qps, 1),
 	}
 }
 
