@@ -19,7 +19,7 @@ package kubernetes
 import (
 	"testing"
 
-	"github.com/pkg/errors"
+	"errors"
 	v1 "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -458,7 +458,7 @@ func TestPodFilters(t *testing.T) {
 					func(_ core.Pod) (bool, string, error) { return false, "", errExploded },
 				)
 			},
-			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
+			errFn: func(err error) bool { return errors.Is(err, errExploded) },
 		},
 		{
 			name: "ControlledBySomething",

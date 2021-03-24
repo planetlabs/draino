@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	"errors"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -422,7 +422,7 @@ func TestIsLimiterError(t *testing.T) {
 }
 
 func TestNodeReplacementLimiter(t *testing.T) {
-	limiter:= NewNodeReplacementLimiter(2,time.Now().Add(-2*time.Hour))
+	limiter := NewNodeReplacementLimiter(2, time.Now().Add(-2*time.Hour))
 	if !limiter.CanAskForNodeReplacement() {
 		t.FailNow()
 	}

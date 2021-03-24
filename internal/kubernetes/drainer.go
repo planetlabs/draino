@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"errors"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1beta1"
@@ -61,21 +61,11 @@ const (
 
 type nodeMutatorFn func(*core.Node)
 
-type errTimeout struct{}
-
-func (e errTimeout) Error() string {
-	return "timed out"
+type PodEvictionTimeoutError struct {
 }
 
-func (e errTimeout) Timeout() {}
-
-// IsTimeout returns true if the supplied error was caused by a timeout.
-func IsTimeout(err error) bool {
-	err = errors.Cause(err)
-	_, ok := err.(interface {
-		Timeout()
-	})
-	return ok
+func (e PodEvictionTimeoutError) Error() string {
+	return "timed out waiting for pod disruption to be allowed"
 }
 
 // A Cordoner cordons nodes.
@@ -271,7 +261,7 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 
 	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 	if err != nil {
-		return errors.Wrapf(err, "cannot get node %s", n.GetName())
+		return fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
 	}
 	if fresh.Spec.Unschedulable {
 		return nil
@@ -281,7 +271,7 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 		m(fresh)
 	}
 	if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
-		return errors.Wrapf(err, "cannot cordon node %s", fresh.GetName())
+		return fmt.Errorf("cannot cordon node %s: %w", fresh.GetName(), err)
 	}
 	return nil
 }
@@ -290,7 +280,7 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) error {
 	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 	if err != nil {
-		return errors.Wrapf(err, "cannot get node %s", n.GetName())
+		return fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
 	}
 	if !fresh.Spec.Unschedulable {
 		return nil
@@ -300,7 +290,7 @@ func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) err
 		m(fresh)
 	}
 	if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
-		return errors.Wrapf(err, "cannot uncordon node %s", fresh.GetName())
+		return fmt.Errorf("cannot uncordon node %s: %w", fresh.GetName(), err)
 	}
 	return nil
 }
@@ -400,7 +390,7 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 
 	pods, err := d.GetPodsToDrain(n.GetName(), nil)
 	if err != nil {
-		return errors.Wrapf(err, "cannot get pods for node %s", n.GetName())
+		return fmt.Errorf("cannot get pods for node %s: %w", n.GetName(), err)
 	}
 
 	abort := make(chan struct{})
@@ -419,10 +409,10 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 		select {
 		case err := <-errs:
 			if err != nil {
-				return errors.Wrap(err, "cannot evict all pods")
+				return fmt.Errorf("cannot evict all pods: %w", err)
 			}
 		case <-deadline:
-			return errors.Wrap(errTimeout{}, "timed out waiting for evictions to complete")
+			return PodEvictionTimeoutError{}
 		}
 	}
 	return nil
@@ -440,7 +430,7 @@ func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*co
 			FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": node}).String(),
 		})
 		if err != nil {
-			return nil, errors.Wrapf(err, "cannot get pods for node %s", node)
+			return nil, fmt.Errorf("cannot get pods for node %s: %w", node, err)
 		}
 		for i := range l.Items {
 			pods = append(pods, &l.Items[i])
@@ -451,7 +441,7 @@ func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*co
 	for _, p := range pods {
 		passes, _, err := d.filter(*p)
 		if err != nil {
-			return nil, errors.Wrap(err, "cannot filter pods")
+			return nil, fmt.Errorf("cannot filter pods: %w", err)
 		}
 		if passes {
 			include = append(include, p)
@@ -485,10 +475,14 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}, e chan<- 
 				e <- nil
 				return
 			case err != nil:
-				e <- errors.Wrapf(err, "cannot evict pod %s/%s", pod.GetNamespace(), pod.GetName())
+				e <- fmt.Errorf("cannot evict pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
 				return
 			default:
-				e <- errors.Wrapf(d.awaitDeletion(pod, d.deleteTimeout()), "cannot confirm pod %s/%s was deleted", pod.GetNamespace(), pod.GetName())
+				err := d.awaitDeletion(pod, d.deleteTimeout())
+				if err != nil {
+					err = fmt.Errorf("cannot confirm pod %s/%s was deleted: %w", pod.GetNamespace(), pod.GetName(), err)
+				}
+				e <- err
 				return
 			}
 		}
@@ -502,7 +496,7 @@ func (d *APICordonDrainer) awaitDeletion(pod *core.Pod, timeout time.Duration) e
 			return true, nil
 		}
 		if err != nil {
-			return false, errors.Wrapf(err, "cannot get pod %s/%s", pod.GetNamespace(), pod.GetName())
+			return false, fmt.Errorf("cannot get pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
 		}
 		if got.GetUID() != pod.GetUID() {
 			return true, nil
@@ -510,7 +504,7 @@ func (d *APICordonDrainer) awaitDeletion(pod *core.Pod, timeout time.Duration) e
 		return false, nil
 	})
 	if err != nil {
-		return errors.Wrapf(err, "at least one PVC associated to that pod was deleted before failure/timeout")
+		return fmt.Errorf("at least one PVC associated to that pod was deleted before failure/timeout: %w", err)
 	}
 
 	pvcDeleted, err := d.deletePVCAssociatedWithStorageClass(pod)
@@ -550,7 +544,7 @@ func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(pod *core.Pod, pvc *core.
 		d.l.Info("deleting pod to force pvc recreate", zap.String("pod", pod.GetName()), zap.String("namespace", pod.GetNamespace()))
 		err = d.c.CoreV1().Pods(pod.GetNamespace()).Delete(pod.GetName(), &meta.DeleteOptions{})
 		if err != nil {
-			return false, errors.Wrapf(err, "cannot delete pod %s/%s to regenerated PVC", pod.GetNamespace(), pod.GetName())
+			return false, fmt.Errorf("cannot delete pod %s/%s to regenerated PVC: %w", pod.GetNamespace(), pod.GetName(), err)
 		}
 		return false, nil
 	}
@@ -579,13 +573,13 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(pod *core.Pod, pvcDe
 		if err != nil {
 			d.eventRecorder.Event(pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV"))
 			d.eventRecorder.Event(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV %s", pv.Name))
-			return errors.Wrapf(err, "cannot delete pv %s", pv.Name)
+			return fmt.Errorf("cannot delete pv %s: %w", pv.Name, err)
 		}
 		d.l.Info("deleting pv", zap.String("pv", pv.Name))
 
 		// wait for PVC complete deletion
 		if err := d.awaitPVDeletion(pv, time.Minute); err != nil {
-			return errors.Wrapf(err, "pv deletion timeout %s", pv.Name)
+			return fmt.Errorf("pv deletion timeout %s: %w", pv.Name, err)
 		}
 	}
 	return nil
@@ -598,7 +592,7 @@ func (d *APICordonDrainer) awaitPVDeletion(pv *core.PersistentVolume, timeout ti
 			return true, nil
 		}
 		if err != nil {
-			return false, errors.Wrapf(err, "cannot get pv %s", pv.GetName())
+			return false, fmt.Errorf("cannot get pv %s: %w", pv.GetName(), err)
 		}
 		if string(got.GetUID()) != string(pv.GetUID()) {
 			return true, nil
@@ -632,7 +626,7 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 			continue // This PVC was already deleted
 		}
 		if err != nil {
-			return deletedPVCs, errors.Wrapf(err, "cannot get pvc %s/%s", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName)
+			return deletedPVCs, fmt.Errorf("cannot get pvc %s/%s: %w", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName, err)
 		}
 		if pvc.Spec.StorageClassName == nil {
 			d.l.Info("PVC with no StorageClassName", zap.String("claim", v.PersistentVolumeClaim.ClaimName))
@@ -653,13 +647,13 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 		}
 		if err != nil {
 			d.eventRecorder.Event(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PVC %s/%s", pvc.Namespace, pvc.Name))
-			return deletedPVCs, errors.Wrapf(err, "cannot delete pvc %s/%s", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName)
+			return deletedPVCs, fmt.Errorf("cannot delete pvc %s/%s: %w", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName, err)
 		}
 		d.l.Info("deleting pvc", zap.String("pvc", v.PersistentVolumeClaim.ClaimName), zap.String("namespace", pod.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
 
 		// wait for PVC complete deletion
 		if err := d.awaitPVCDeletion(pvc, time.Minute); err != nil {
-			return deletedPVCs, errors.Wrapf(err, "pvc deletion timeout %s/%s", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName)
+			return deletedPVCs, fmt.Errorf("pvc deletion timeout %s/%s: %w", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName, err)
 		}
 		deletedPVCs = append(deletedPVCs, pvc)
 	}
@@ -675,7 +669,7 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 			return true, nil
 		}
 		if err != nil {
-			return false, errors.Wrapf(err, "cannot get pvc %s/%s", pvc.GetNamespace(), pvc.GetName())
+			return false, fmt.Errorf("cannot get pvc %s/%s: %w", pvc.GetNamespace(), pvc.GetName(), err)
 		}
 		if string(got.GetUID()) != string(pvc.GetUID()) {
 			d.l.Info("pvc found but with different UID. It is deleted.", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())), zap.String("pvc-new-uid", string(got.GetUID())))
@@ -697,11 +691,11 @@ func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, err
 
 		fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 		if err != nil {
-			return NodeReplacementStatusNone, errors.Wrapf(err, "cannot get node %s", n.GetName())
+			return NodeReplacementStatusNone, fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
 		}
 		fresh.Labels[NodeLabelKeyReplaceRequest] = NodeLabelValueReplaceRequested
 		if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
-			return NodeReplacementStatusNone, errors.Wrapf(err, "cannot request replacement node %s", fresh.GetName())
+			return NodeReplacementStatusNone, fmt.Errorf("cannot request replacement node %s: %w", fresh.GetName(), err)
 		}
 		return NodeReplacementStatusRequested, nil
 	}

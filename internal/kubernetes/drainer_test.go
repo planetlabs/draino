@@ -17,11 +17,12 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
+	"errors"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -67,7 +68,7 @@ type reactor struct {
 func (r reactor) Fn() clienttesting.ReactionFunc {
 	return func(a clienttesting.Action) (bool, runtime.Object, error) {
 		if r.subresource != "" && a.GetSubresource() != r.subresource {
-			return true, nil, errors.Errorf("incorrect subresource: %v", a.GetSubresource())
+			return true, nil, fmt.Errorf("incorrect subresource: %v", a.GetSubresource())
 		}
 		return true, r.ret, r.err
 	}
@@ -175,7 +176,7 @@ func TestCordon(t *testing.T) {
 			d := NewAPICordonDrainer(c, WithCordonLimiter(&fakeLimiter{}))
 			if err := d.Cordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
-					if errors.Cause(err) == r.err {
+					if errors.Is(err, r.err) {
 						return
 					}
 				}
@@ -262,7 +263,7 @@ func TestUncordon(t *testing.T) {
 			d := NewAPICordonDrainer(c)
 			if err := d.Uncordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
-					if errors.Cause(err) == r.err {
+					if errors.Is(err, r.err) {
 						return
 					}
 				}
@@ -379,7 +380,7 @@ func TestDrain(t *testing.T) {
 					err:         apierrors.NewTooManyRequests("nope", 5),
 				},
 			},
-			errFn: IsTimeout,
+			errFn: func(err error) bool { return errors.As(err, &PodEvictionTimeoutError{}) },
 		},
 		{
 			name: "EvictedPodReplacedWithDifferentUID",
@@ -487,7 +488,7 @@ func TestDrain(t *testing.T) {
 					err:      apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, podName),
 				},
 			},
-			errFn: func(err error) bool { return errors.Cause(err) == errExploded },
+			errFn: func(err error) bool { return errors.Is(err, errExploded) },
 		},
 		{
 			name:    "SkipDrain",
@@ -513,7 +514,7 @@ func TestDrain(t *testing.T) {
 			d := NewAPICordonDrainer(c, tc.options...)
 			if err := d.Drain(tc.node); err != nil {
 				for _, r := range tc.reactions {
-					if errors.Cause(err) == r.err {
+					if errors.Is(err, r.err) {
 						return
 					}
 				}

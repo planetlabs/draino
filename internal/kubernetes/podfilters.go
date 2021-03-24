@@ -17,9 +17,9 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
 	"strings"
 
-	"github.com/pkg/errors"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -106,7 +106,7 @@ func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
 		for _, fn := range filters {
 			passes, reason, err := fn(p)
 			if err != nil {
-				return false, "error", errors.Wrap(err, "cannot apply filters")
+				return false, "error", fmt.Errorf("cannot apply filters: %w", err)
 			}
 			if !passes {
 				return false, reason, nil
