@@ -68,6 +68,13 @@ func (e PodEvictionTimeoutError) Error() string {
 	return "timed out waiting for pod disruption to be allowed"
 }
 
+type MoreThanOnePodDisruptionBudgetError struct {
+}
+
+func (e MoreThanOnePodDisruptionBudgetError) Error() string {
+	return "more than one pod disruption budget"
+}
+
 // A Cordoner cordons nodes.
 type Cordoner interface {
 	// Cordon the supplied node. Marks it unschedulable for new pods.
@@ -478,7 +485,13 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 			case apierrors.IsNotFound(err):
 				return nil
 			case err != nil:
-				return fmt.Errorf("cannot evict pod: %w", err)
+				// The eviction API returns 500 if a pod
+				// matches more than one pod disruption budgets.
+				// We cannot use apierrors.IsInternalError because Reason is not set, just Code and Message.
+				if statErr, ok := err.(apierrors.APIStatus); ok && statErr.Status().Code == 500 {
+					return MoreThanOnePodDisruptionBudgetError{} // this one is typed because we match it to a failure mode
+				}
+				return err // unexpected (we're already catching 429 and 500), may be a client side error
 			default:
 				err := d.awaitDeletion(pod, d.deleteTimeout())
 				if err != nil {
