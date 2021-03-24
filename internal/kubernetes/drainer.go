@@ -397,22 +397,24 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	errs := make(chan error, 1)
 	for i := range pods {
 		pod := pods[i]
-		go d.evict(pod, abort, errs)
+		go func() {
+			if err := d.evict(pod, abort); err != nil {
+				errs <- fmt.Errorf("cannot evict pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
+				return
+			}
+			errs <- nil // the for range pods below expects to receive one value per pod from the errs channel
+		}()
 	}
 	// This will _eventually_ abort evictions. Evictions may spend up to
 	// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
 	// noticing they've been aborted.
 	defer close(abort)
 
-	deadline := time.After(d.deleteTimeout())
 	for range pods {
-		select {
-		case err := <-errs:
-			if err != nil {
-				return fmt.Errorf("cannot evict all pods: %w", err)
-			}
-		case <-deadline:
-			return PodEvictionTimeoutError{}
+		if err := <-errs; err != nil {
+			return fmt.Errorf("cannot evict all pods: %w", err)
+			// all remaining evictions are aborted and their errors ignored (aborted or otherwise)
+			// TODO(adrienjt): capture missing errors?
 		}
 	}
 	return nil
@@ -450,16 +452,18 @@ func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*co
 	return include, nil
 }
 
-func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}, e chan<- error) {
+func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 	gracePeriod := int64(d.maxGracePeriod.Seconds())
 	if pod.Spec.TerminationGracePeriodSeconds != nil && *pod.Spec.TerminationGracePeriodSeconds < gracePeriod {
 		gracePeriod = *pod.Spec.TerminationGracePeriodSeconds
 	}
+	deadline := time.After(d.deleteTimeout())
 	for {
 		select {
 		case <-abort:
-			e <- errors.New("pod eviction aborted")
-			return
+			return errors.New("pod eviction aborted")
+		case <-deadline:
+			return PodEvictionTimeoutError{} // this one is typed because we match it to a failure mode
 		default:
 			err := d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
 				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
@@ -472,18 +476,15 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}, e chan<- 
 			case apierrors.IsTooManyRequests(err):
 				time.Sleep(5 * time.Second)
 			case apierrors.IsNotFound(err):
-				e <- nil
-				return
+				return nil
 			case err != nil:
-				e <- fmt.Errorf("cannot evict pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
-				return
+				return fmt.Errorf("cannot evict pod: %w", err)
 			default:
 				err := d.awaitDeletion(pod, d.deleteTimeout())
 				if err != nil {
-					err = fmt.Errorf("cannot confirm pod %s/%s was deleted: %w", pod.GetNamespace(), pod.GetName(), err)
+					return fmt.Errorf("cannot confirm pod was deleted: %w", err)
 				}
-				e <- err
-				return
+				return nil
 			}
 		}
 	}
