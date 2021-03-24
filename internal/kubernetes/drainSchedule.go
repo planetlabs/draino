@@ -222,7 +222,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 			sched.finish = time.Now()
 			sched.setFailed()
 			log.Info("Failed to drain", zap.Error(err))
-			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
+			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureMode, string(getFailureMode(err)))) // nolint:gosec
 			StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
 			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", err)
 			if err := RetryWithTimeout(
@@ -267,4 +267,21 @@ func NewAlreadyScheduledError() error {
 func IsAlreadyScheduledError(err error) bool {
 	_, ok := err.(*AlreadyScheduledError)
 	return ok
+}
+
+type FailureMode string
+
+const (
+	MoreThanOnePodDisruptionBudget FailureMode = "more_than_one_pod_disruption_budget"
+	PodEvictionTimeout             FailureMode = "pod_eviction_timeout"
+)
+
+func getFailureMode(err error) FailureMode {
+	if errors.As(err, &MoreThanOnePodDisruptionBudgetError{}) {
+		return MoreThanOnePodDisruptionBudget
+	}
+	if errors.As(err, &PodEvictionTimeoutError{}) {
+		return PodEvictionTimeout
+	}
+	return ""
 }
