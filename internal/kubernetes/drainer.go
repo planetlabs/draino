@@ -75,6 +75,25 @@ func (e MoreThanOnePodDisruptionBudgetError) Error() string {
 	return "more than one pod disruption budget"
 }
 
+type PodDeletionTimeoutError struct {
+}
+
+func (e PodDeletionTimeoutError) Error() string {
+	return "timed out waiting for pod to be deleted (stuck terminating, check finalizers)"
+}
+
+type ErrVolumeCleanup struct {
+	Err error
+}
+
+func (e ErrVolumeCleanup) Error() string {
+	return "error while cleaning up volumes: " + e.Err.Error()
+}
+
+func (e ErrVolumeCleanup) Unwrap() error {
+	return e.Err
+}
+
 // A Cordoner cordons nodes.
 type Cordoner interface {
 	// Cordon the supplied node. Marks it unschedulable for new pods.
@@ -415,6 +434,11 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	// This will _eventually_ abort evictions. Evictions may spend up to
 	// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
 	// noticing they've been aborted.
+	//
+	// Note(adrienjt): In addition, they may also spend up to:
+	// - 1min/PVC awaiting PVC deletions,
+	// - 1min/PV awaiting PV deletions,
+	// - and DefaultPVCRecreateTimeout per PVC
 	defer close(abort)
 
 	for range pods {
@@ -497,6 +521,11 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 				if err != nil {
 					return fmt.Errorf("cannot confirm pod was deleted: %w", err)
 				}
+				err = d.deletePVCAndPV(pod)
+				if err != nil {
+					return ErrVolumeCleanup{Err: err} // this one is typed because we match it to a failure mode
+					// TODO?(adrienjt): more detailed volume-related failure modes?
+				}
 				return nil
 			}
 		}
@@ -518,9 +547,15 @@ func (d *APICordonDrainer) awaitDeletion(pod *core.Pod, timeout time.Duration) e
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("at least one PVC associated to that pod was deleted before failure/timeout: %w", err)
+		if errors.Is(err, wait.ErrWaitTimeout) {
+			return PodDeletionTimeoutError{} // this one is typed because we match it to a failure mode
+		}
+		return err // unexpected Get error above
 	}
+	return nil
+}
 
+func (d *APICordonDrainer) deletePVCAndPV(pod *core.Pod) error {
 	pvcDeleted, err := d.deletePVCAssociatedWithStorageClass(pod)
 	if err != nil {
 		return err

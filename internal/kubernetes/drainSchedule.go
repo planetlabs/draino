@@ -274,6 +274,8 @@ type FailureMode string
 const (
 	MoreThanOnePodDisruptionBudget FailureMode = "more_than_one_pod_disruption_budget"
 	PodEvictionTimeout             FailureMode = "pod_eviction_timeout"
+	PodDeletionTimeout             FailureMode = "pod_deletion_timeout"
+	VolumeCleanup                  FailureMode = "volume_cleanup"
 )
 
 func getFailureMode(err error) FailureMode {
@@ -282,6 +284,12 @@ func getFailureMode(err error) FailureMode {
 	}
 	if errors.As(err, &PodEvictionTimeoutError{}) {
 		return PodEvictionTimeout
+	}
+	if errors.As(err, &PodDeletionTimeoutError{}) {
+		return PodDeletionTimeout
+	}
+	if errors.As(err, &ErrVolumeCleanup{}) {
+		return VolumeCleanup
 	}
 	return ""
 }
