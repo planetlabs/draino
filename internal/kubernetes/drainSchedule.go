@@ -222,7 +222,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 			sched.finish = time.Now()
 			sched.setFailed()
 			log.Info("Failed to drain", zap.Error(err))
-			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureMode, string(getFailureMode(err)))) // nolint:gosec
+			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(err)))) // nolint:gosec
 			StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
 			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", err)
 			if err := RetryWithTimeout(
@@ -269,18 +269,18 @@ func IsAlreadyScheduledError(err error) bool {
 	return ok
 }
 
-type FailureMode string
+type FailureCause string
 
 const (
-	MoreThanOnePodDisruptionBudget FailureMode = "more_than_one_pod_disruption_budget"
-	PodEvictionTimeout             FailureMode = "pod_eviction_timeout"
-	PodDeletionTimeout             FailureMode = "pod_deletion_timeout"
-	VolumeCleanup                  FailureMode = "volume_cleanup"
+	OverlappingPodDisruptionBudgets FailureCause = "overlapping_pod_disruption_budgets"
+	PodEvictionTimeout              FailureCause = "pod_eviction_timeout"
+	PodDeletionTimeout              FailureCause = "pod_deletion_timeout"
+	VolumeCleanup                   FailureCause = "volume_cleanup"
 )
 
-func getFailureMode(err error) FailureMode {
-	if errors.As(err, &MoreThanOnePodDisruptionBudgetError{}) {
-		return MoreThanOnePodDisruptionBudget
+func getFailureCause(err error) FailureCause {
+	if errors.As(err, &OverlappingDisruptionBudgetsError{}) {
+		return OverlappingPodDisruptionBudgets
 	}
 	if errors.As(err, &PodEvictionTimeoutError{}) {
 		return PodEvictionTimeout
@@ -288,7 +288,7 @@ func getFailureMode(err error) FailureMode {
 	if errors.As(err, &PodDeletionTimeoutError{}) {
 		return PodDeletionTimeout
 	}
-	if errors.As(err, &ErrVolumeCleanup{}) {
+	if errors.As(err, &VolumeCleanupError{}) {
 		return VolumeCleanup
 	}
 	return ""

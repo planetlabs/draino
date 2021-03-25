@@ -68,11 +68,11 @@ func (e PodEvictionTimeoutError) Error() string {
 	return "timed out waiting for pod disruption to be allowed"
 }
 
-type MoreThanOnePodDisruptionBudgetError struct {
+type OverlappingDisruptionBudgetsError struct {
 }
 
-func (e MoreThanOnePodDisruptionBudgetError) Error() string {
-	return "more than one pod disruption budget"
+func (e OverlappingDisruptionBudgetsError) Error() string {
+	return "overlapping pod disruption budgets"
 }
 
 type PodDeletionTimeoutError struct {
@@ -82,15 +82,15 @@ func (e PodDeletionTimeoutError) Error() string {
 	return "timed out waiting for pod to be deleted (stuck terminating, check finalizers)"
 }
 
-type ErrVolumeCleanup struct {
+type VolumeCleanupError struct {
 	Err error
 }
 
-func (e ErrVolumeCleanup) Error() string {
+func (e VolumeCleanupError) Error() string {
 	return "error while cleaning up volumes: " + e.Err.Error()
 }
 
-func (e ErrVolumeCleanup) Unwrap() error {
+func (e VolumeCleanupError) Unwrap() error {
 	return e.Err
 }
 
@@ -494,7 +494,7 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 		case <-abort:
 			return errors.New("pod eviction aborted")
 		case <-deadline:
-			return PodEvictionTimeoutError{} // this one is typed because we match it to a failure mode
+			return PodEvictionTimeoutError{} // this one is typed because we match it to a failure cause
 		default:
 			err := d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
 				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
@@ -513,7 +513,7 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 				// matches more than one pod disruption budgets.
 				// We cannot use apierrors.IsInternalError because Reason is not set, just Code and Message.
 				if statErr, ok := err.(apierrors.APIStatus); ok && statErr.Status().Code == 500 {
-					return MoreThanOnePodDisruptionBudgetError{} // this one is typed because we match it to a failure mode
+					return OverlappingDisruptionBudgetsError{} // this one is typed because we match it to a failure cause
 				}
 				return err // unexpected (we're already catching 429 and 500), may be a client side error
 			default:
@@ -523,8 +523,8 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 				}
 				err = d.deletePVCAndPV(pod)
 				if err != nil {
-					return ErrVolumeCleanup{Err: err} // this one is typed because we match it to a failure mode
-					// TODO?(adrienjt): more detailed volume-related failure modes?
+					return VolumeCleanupError{Err: err} // this one is typed because we match it to a failure cause
+					// TODO?(adrienjt): more detailed volume-related failure causes?
 				}
 				return nil
 			}
@@ -548,7 +548,7 @@ func (d *APICordonDrainer) awaitDeletion(pod *core.Pod, timeout time.Duration) e
 	})
 	if err != nil {
 		if errors.Is(err, wait.ErrWaitTimeout) {
-			return PodDeletionTimeoutError{} // this one is typed because we match it to a failure mode
+			return PodDeletionTimeoutError{} // this one is typed because we match it to a failure cause
 		}
 		return err // unexpected Get error above
 	}
