@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	"github.com/go-test/deep"
-	"github.com/pkg/errors"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"

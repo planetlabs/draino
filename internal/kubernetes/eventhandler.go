@@ -77,6 +77,7 @@ var (
 	TagNodegroupNamespace, _ = tag.NewKey("nodegroup_namespace")
 	TagResult, _             = tag.NewKey("result")
 	TagReason, _             = tag.NewKey("reason")
+	TagFailureCause, _       = tag.NewKey("failure_cause")
 )
 
 // A DrainingResourceEventHandler cordons and drains any added or updated nodes.

@@ -120,7 +120,7 @@ func main() {
 			Measure:     kubernetes.MeasureNodesDrained,
 			Description: "Number of nodes drained.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagFailureCause, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesDrainScheduled = &view.View{
 			Name:        "drain_scheduled_nodes_total",

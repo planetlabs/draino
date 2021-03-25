@@ -17,11 +17,12 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
+	"errors"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -68,10 +69,10 @@ func NewNodeWatch(c kubernetes.Interface, rs ...cache.ResourceEventHandler) *Nod
 func (w *NodeWatch) Get(name string) (*core.Node, error) {
 	o, exists, err := w.GetStore().GetByKey(name)
 	if err != nil {
-		return nil, errors.Wrapf(err, "cannot get node %s", name)
+		return nil, fmt.Errorf("cannot get node %s: %w", name, err)
 	}
 	if !exists {
-		return nil, errors.Errorf("node %s does not exist", name)
+		return nil, fmt.Errorf("node %s does not exist", name)
 	}
 	return o.(*core.Node), nil
 }
