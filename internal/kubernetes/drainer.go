@@ -57,6 +57,10 @@ const (
 	NodeLabelValueReplaceRequested  = "requested"
 	NodeLabelValueReplaceProcessing = "processing"
 	NodeLabelValueReplaceDone       = "done"
+
+	eventReasonEvictionStarting  = "EvictionStarting"
+	eventReasonEvictionSucceeded = "EvictionSucceeded"
+	eventReasonEvictionFailed    = "EvictionFailed"
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -424,10 +428,13 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	for i := range pods {
 		pod := pods[i]
 		go func() {
+			d.eventRecorder.Eventf(pod, core.EventTypeWarning, eventReasonEvictionStarting, "Evicting pod to drain node %s", n.GetName())
 			if err := d.evict(pod, abort); err != nil {
+				d.eventRecorder.Eventf(pod, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed: %v", err)
 				errs <- fmt.Errorf("cannot evict pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
 				return
 			}
+			d.eventRecorder.Event(pod, core.EventTypeWarning, eventReasonEvictionSucceeded, "Pod evicted")
 			errs <- nil // the for range pods below expects to receive one value per pod from the errs channel
 		}()
 	}
@@ -446,6 +453,7 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 			return fmt.Errorf("cannot evict all pods: %w", err)
 			// all remaining evictions are aborted and their errors ignored (aborted or otherwise)
 			// TODO(adrienjt): capture missing errors?
+			// They are registered as events on pods.
 		}
 	}
 	return nil
