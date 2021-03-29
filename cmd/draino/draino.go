@@ -38,6 +38,8 @@ import (
 	"k8s.io/klog"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
+
+    _ "net/http/pprof"
 )
 
 // Default leader election settings.
@@ -48,22 +50,22 @@ const (
 )
 
 func main() {
+	go http.ListenAndServe("localhost:8085", nil) // for go profiler
 	//nolint:lll // accept long lines in option declarations
 	var (
 		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()
 
-		debug                     = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
-		listen                    = app.Flag("listen", "Address at which to expose /metrics and /healthz.").Default(":10002").String()
-		kubecfg                   = app.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
-		apiserver                 = app.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
-		dryRun                    = app.Flag("dry-run", "Emit an event without cordoning or draining matching nodes.").Bool()
-		maxGracePeriod            = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
-		evictionHeadroom          = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
-		drainBuffer               = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
-		durationBeforeReplacement = app.Flag("duration-before-replacement", "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.").Default(kubernetes.DefaultDurationBeforeReplacement.String()).Duration()
-		nodeLabels                = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").Strings()
-		nodeLabelsExpr            = app.Flag("node-label-expr", "Nodes that match this expression will be eligible for cordoning and draining.").String()
-		namespace                 = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
+		debug            = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
+		listen           = app.Flag("listen", "Address at which to expose /metrics and /healthz.").Default(":10002").String()
+		kubecfg          = app.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
+		apiserver        = app.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
+		dryRun           = app.Flag("dry-run", "Emit an event without cordoning or draining matching nodes.").Bool()
+		maxGracePeriod   = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
+		evictionHeadroom = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
+		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
+		nodeLabels       = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").Strings()
+		nodeLabelsExpr   = app.Flag("node-label-expr", "Nodes that match this expression will be eligible for cordoning and draining.").String()
+		namespace        = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
 
 		leaderElectionLeaseDuration = app.Flag("leader-election-lease-duration", "Lease duration for leader election.").Default(DefaultLeaderElectionLeaseDuration.String()).Duration()
 		leaderElectionRenewDeadline = app.Flag("leader-election-renew-deadline", "Leader election renew deadline.").Default(DefaultLeaderElectionRenewDeadline.String()).Duration()
@@ -89,6 +91,11 @@ func main() {
 
 		// NodeReplacement limiter flags
 		maxNodeReplacementPerHour = app.Flag("max-node-replacement-per-hour", "Maximum number of nodes per hour for which draino can ask replacement.").Default("2").Int()
+		durationBeforeReplacement = app.Flag("duration-before-replacement", "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.").Default(kubernetes.DefaultDurationBeforeReplacement.String()).Duration()
+
+		// Preprovisioning flags
+		preprovisioningTimeout     = app.Flag("preprovisioning-timeout", "Timeout for a node to be preprovisioned before draining").Default(kubernetes.DefaultPreprovisioningTimeout.String()).Duration()
+		preprovisioningCheckPeriod = app.Flag("preprovisioning-check-period", "Period to check if a node has been preprovisioned").Default(kubernetes.DefaultPreprovisioningCheckPeriod.String()).Duration()
 
 		// PV/PVC management
 		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
@@ -143,9 +150,23 @@ func main() {
 			Aggregation: view.Count(),
 			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
+		nodesReplacement = &view.View{
+			Name:        "node_replacement_request_total",
+			Measure:     kubernetes.MeasureNodesReplacementRequest,
+			Description: "Number of nodes replacement requested.",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagReason, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+		}
+		nodesPreprovisioningLatency = &view.View{
+			Name:        "node_preprovisioning_latency",
+			Measure:     kubernetes.MeasurePreprovisioningLatency,
+			Description: "Latency to get preprovisioned node",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagReason, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+		}
 	)
 
-	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon, skippedCordon), "cannot create metrics")
+	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon, skippedCordon, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
 
 	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
 	kingpin.FatalIfError(err, "cannot export metrics")
@@ -254,25 +275,28 @@ func main() {
 
 	eventRecorder := kubernetes.NewEventRecorder(cs)
 
+	cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
+		eventRecorder,
+		kubernetes.MaxGracePeriod(*maxGracePeriod),
+		kubernetes.EvictionHeadroom(*evictionHeadroom),
+		kubernetes.WithSkipDrain(*skipDrain),
+		kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
+		kubernetes.WithCordonLimiter(cordonLimiter),
+		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
+		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
+		kubernetes.WithAPICordonDrainerLogger(log),
+	)
+
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
-		kubernetes.NewAPICordonDrainer(cs,
-			eventRecorder,
-			kubernetes.MaxGracePeriod(*maxGracePeriod),
-			kubernetes.EvictionHeadroom(*evictionHeadroom),
-			kubernetes.WithSkipDrain(*skipDrain),
-			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
-			kubernetes.WithCordonLimiter(cordonLimiter),
-			kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
-			kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
-			kubernetes.WithAPICordonDrainerLogger(log),
-		),
+		cordonDrainer,
 		eventRecorder,
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(podFilterCordon...), pods))
+		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(podFilterCordon...), pods),
+		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {
 		h = cache.FilteringResourceEventHandler{
@@ -310,6 +334,7 @@ func main() {
 	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
 
 	cordonLimiter.SetNodeLister(nodes)
+	cordonDrainer.SetNodeStore(nodes)
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")

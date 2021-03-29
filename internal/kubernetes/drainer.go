@@ -17,11 +17,13 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"errors"
+	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1beta1"
@@ -64,6 +66,13 @@ const (
 )
 
 type nodeMutatorFn func(*core.Node)
+
+type NodePreprovisioningTimeoutError struct {
+}
+
+func (e NodePreprovisioningTimeoutError) Error() string {
+	return "timed out waiting for node pre-provisioning"
+}
 
 type PodEvictionTimeoutError struct {
 }
@@ -127,11 +136,17 @@ const (
 // A NodeReplacer helps to request for node replacement
 type NodeReplacer interface {
 	ReplaceNode(n *core.Node) (NodeReplacementStatus, error)
+	PreprovisionNode(n *core.Node) (NodeReplacementStatus, error)
 }
 
 // A CordonDrainer both cordons and drains nodes!
 type CordonDrainer interface {
 	Cordoner
+	Drainer
+	NodeReplacer
+}
+
+type DrainerNodeReplacer interface {
 	Drainer
 	NodeReplacer
 }
@@ -162,6 +177,11 @@ func (d *NoopCordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, er
 	return NodeReplacementStatusNone, nil
 }
 
+// PreprovisionNode return none
+func (d *NoopCordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatus, error) {
+	return NodeReplacementStatusNone, nil
+}
+
 var _ CordonDrainer = &APICordonDrainer{}
 
 // APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
@@ -169,6 +189,7 @@ type APICordonDrainer struct {
 	c             kubernetes.Interface
 	l             *zap.Logger
 	eventRecorder record.EventRecorder
+	nodeStore     NodeStore
 
 	filter                 PodFilterFunc
 	cordonLimiter          CordonLimiter
@@ -271,6 +292,10 @@ func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecor
 		o(d)
 	}
 	return d
+}
+
+func (d *APICordonDrainer) SetNodeStore(store NodeStore) {
+	d.nodeStore = store
 }
 
 func (d *APICordonDrainer) deleteTimeout() time.Duration {
@@ -737,10 +762,15 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 	})
 }
 
-func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
-	replacementValue, ok := n.Labels[NodeLabelKeyReplaceRequest]
+func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, withRateLimiting bool) (NodeReplacementStatus, error) {
+	nodeFromStore, err := d.nodeStore.Get(n.Name)
+	if err != nil {
+		return NodeReplacementStatusNone, err
+	}
+
+	replacementValue, ok := nodeFromStore.Labels[NodeLabelKeyReplaceRequest]
 	if !ok {
-		if !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
+		if withRateLimiting && !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
 			nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 			d.eventRecorder.Event(nr, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is blocked by rate limited for the moment.")
 			return NodeReplacementStatusBlockedByLimiter, nil
@@ -754,6 +784,8 @@ func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, err
 		if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
 			return NodeReplacementStatusNone, fmt.Errorf("cannot request replacement node %s: %w", fresh.GetName(), err)
 		}
+		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName()), tag.Upsert(TagReason, reason)) // nolint:gosec
+		StatRecordForNode(tags, n, MeasureNodesReplacementRequest.M(1))
 		return NodeReplacementStatusRequested, nil
 	}
 
@@ -765,4 +797,12 @@ func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, err
 	default:
 		return NodeReplacementStatusNone, nil
 	}
+}
+
+func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
+	return d.performNodeReplacement(n, newNodeRequestReasonReplacement, true)
+}
+
+func (d *APICordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatus, error) {
+	return d.performNodeReplacement(n, newNodeRequestReasonPreprovisioning, false)
 }

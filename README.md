@@ -35,6 +35,8 @@ Flags:
       --max-grace-period=8m0s    Maximum time evicted pods will be given to terminate gracefully.
       --eviction-headroom=30s    Additional time to wait after a pod's termination grace period for it to have been deleted.
       --drain-buffer=10m0s       Minimum time between starting each drain. Nodes are always cordoned immediately.
+      --duration-before-replacement=1h0m0s  
+                                 Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.
       --node-label=NODE-LABEL ...  
                                  (Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times
       --node-label-expr=NODE-LABEL-EXPR  
@@ -54,6 +56,8 @@ Flags:
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --protected-pod-annotation=KEY[=VALUE] ...  
                                  Protect pods with this annotation from eviction. May be specified multiple times.
+      --drain-group-labels=KEY1,KEY2,...  
+                                 Comma separated list of label keys to be used to form draining groups.
       --do-not-cordon-pod-controlled-by=kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1 ...  
                                  Do not cordon nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.
       --cordon-emptydir-pods     Evict pods with local storage, i.e. with emptyDir volumes.
@@ -65,8 +69,11 @@ Flags:
                                  Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'
       --max-simultaneous-cordon-for-taints=(Value|Value%),keys... ...  
                                  Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'
+      --max-node-replacement-per-hour=2  
+                                 Maximum number of nodes per hour for which draino can ask replacement.
       --storage-class-allows-pv-deletion=storageClassName ...  
                                  Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.
+
 
 Args:
   <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.
@@ -227,6 +234,13 @@ is marked as `Failed`. If you want to reschedule a drain tentative on that node,
 ```
 kubectl annotate node {node-name} draino/drain-retry=true
 ```
+
+## Node replacement
+
+A node replacement is automatically requested by `draino` if a node is marked with drain completed for a duration longer than `--duration-before-replacement=1h0m0s`. This behavior allows us to unlock situation where the CA cannot collect the drained node due to minSize=1 on the Nodegroup. This node replacement feature is throttle thanks to parameter `--max-node-replacement-per-hour=2`
+
+The user can proactively ask for pre-provisioning a replacement node before drain is actually started by putting the following annotation on the node: `node-lifecycle.datadoghq.com/provision-new-node-before-drain=true`
+
 ## Modes
 
 ### Dry Run

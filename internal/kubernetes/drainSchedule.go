@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,12 +10,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"errors"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -22,8 +23,14 @@ const (
 	SetConditionTimeout     = 10 * time.Second
 	SetConditionRetryPeriod = 50 * time.Millisecond
 
+	DefaultPreprovisioningTimeout     = 1 * time.Hour
+	DefaultPreprovisioningCheckPeriod = 30 * time.Second
+
 	CustomDrainBufferAnnotation = "draino/drain-buffer"
 	DrainGroupAnnotation        = "draino/drain-group"
+
+	preprovisioningAnnotationKey   = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
+	preprovisioningAnnotationValue = "true"
 )
 
 type DrainScheduler interface {
@@ -39,28 +46,35 @@ type SchedulesGroup struct {
 	period         time.Duration
 }
 
+type NodePreprovisioningConfiguration struct {
+	Timeout     time.Duration
+	CheckPeriod time.Duration
+}
+
 type DrainSchedules struct {
 	sync.Mutex
 	labelKeysForGroups []string
 	scheduleGroups     map[string]*SchedulesGroup
-	period             time.Duration
+	schedulingPeriod   time.Duration
 
-	logger             *zap.Logger
-	drainer            Drainer
-	eventRecorder      record.EventRecorder
-	suppliedConditions []SuppliedCondition
+	logger                       *zap.Logger
+	drainer                      DrainerNodeReplacer
+	preprovisioningConfiguration NodePreprovisioningConfiguration
+	eventRecorder                record.EventRecorder
+	suppliedConditions           []SuppliedCondition
 }
 
-func NewDrainSchedules(drainer Drainer, eventRecorder record.EventRecorder, period time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, logger *zap.Logger) DrainScheduler {
+func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger) DrainScheduler {
 	sort.Strings(labelKeysForGroups)
 	return &DrainSchedules{
-		labelKeysForGroups: labelKeysForGroups,
-		scheduleGroups:     map[string]*SchedulesGroup{},
-		period:             period,
-		logger:             logger,
-		drainer:            drainer,
-		eventRecorder:      eventRecorder,
-		suppliedConditions: suppliedConditions,
+		labelKeysForGroups:           labelKeysForGroups,
+		scheduleGroups:               map[string]*SchedulesGroup{},
+		schedulingPeriod:             schedulingPeriod,
+		logger:                       logger,
+		drainer:                      drainer,
+		preprovisioningConfiguration: preprovisioningCfg,
+		eventRecorder:                eventRecorder,
+		suppliedConditions:           suppliedConditions,
 	}
 }
 
@@ -83,7 +97,7 @@ func (d *DrainSchedules) getScheduleGroup(node *v1.Node) *SchedulesGroup {
 	}
 	newGroup := SchedulesGroup{
 		schedules: map[string]*schedule{},
-		period:    d.period,
+		period:    d.schedulingPeriod,
 	}
 	d.scheduleGroups[groupKey] = &newGroup
 	return &newGroup
@@ -217,23 +231,48 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 	sched.timer = time.AfterFunc(time.Until(when), func() {
 		log := LoggerForNode(node, d.logger)
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
+
+		// Node preprovisioning
+		if d.hasPreprovisioningAnnotation(node) {
+			log.Info("Start pre-provisioning before drain")
+			replacementRequestEventDone := false // Flag to be sure that we produce the event only once.
+			preprovisionStartTime := time.Now()
+			tags, _ := tag.New(context.Background(), tag.Upsert(TagReason, newNodeRequestReasonPreprovisioning)) // nolint:gosec
+			if err := wait.PollImmediate(
+				d.preprovisioningConfiguration.CheckPeriod,
+				d.preprovisioningConfiguration.Timeout,
+				func() (bool,error) {
+					replacementStatus, err := d.drainer.PreprovisionNode(node)
+					if err != nil {
+						log.Error("Failed to validate node-replacement status", zap.Error(err))
+						return false,nil
+					}
+					if !replacementRequestEventDone {
+						d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done.")
+						replacementRequestEventDone = true
+					}
+					if replacementStatus == NodeReplacementStatusDone {
+						d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonNodePreprovisioningCompleted, "Node pre-provisioning before drain: completed.")
+						return true,nil
+					}
+					return false,nil
+				},
+			); err != nil {
+				log.Info("Pre-provisioning failed")
+				d.handleDrainFailure(sched, log, &NodePreprovisioningTimeoutError{}, tags, node)
+				tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
+				StatRecordForNode(tags, node, MeasurePreprovisioningLatency.M(sinceInMilliseconds(preprovisionStartTime)))
+				return
+			}
+			log.Info("Pre-provisioning completed")
+			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
+			StatRecordForNode(tags, node, MeasurePreprovisioningLatency.M(sinceInMilliseconds(preprovisionStartTime)))
+		}
+
+		// Node drain
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainStarting, "Draining node")
 		if err := d.drainer.Drain(node); err != nil {
-			sched.finish = time.Now()
-			sched.setFailed()
-			log.Info("Failed to drain", zap.Error(err))
-			tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(err)))) // nolint:gosec
-			StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
-			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", err)
-			if err := RetryWithTimeout(
-				func() error {
-					return d.drainer.MarkDrain(node, when, sched.finish, true)
-				},
-				SetConditionRetryPeriod,
-				SetConditionTimeout,
-			); err != nil {
-				log.Error("Failed to place condition following drain failure")
-			}
+			d.handleDrainFailure(sched, log, err, tags, node)
 			return
 		}
 		sched.finish = time.Now()
@@ -253,6 +292,30 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		}
 	})
 	return sched
+}
+
+func (d *DrainSchedules) handleDrainFailure(sched *schedule, log *zap.Logger, drainError error, tags context.Context, node *v1.Node) context.Context {
+	nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
+	sched.finish = time.Now()
+	sched.setFailed()
+	log.Info("Failed to drain", zap.Error(drainError))
+	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
+	StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
+	d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", drainError)
+	if err := RetryWithTimeout(
+		func() error {
+			return d.drainer.MarkDrain(node, sched.when, sched.finish, true)
+		},
+		SetConditionRetryPeriod,
+		SetConditionTimeout,
+	); err != nil {
+		log.Error("Failed to place condition following drain failure")
+	}
+	return tags
+}
+
+func (d *DrainSchedules) hasPreprovisioningAnnotation(node *v1.Node) bool {
+	return node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue
 }
 
 type AlreadyScheduledError struct {
@@ -276,9 +339,13 @@ const (
 	PodEvictionTimeout              FailureCause = "pod_eviction_timeout"
 	PodDeletionTimeout              FailureCause = "pod_deletion_timeout"
 	VolumeCleanup                   FailureCause = "volume_cleanup"
+	NodePreprovisioning             FailureCause = "node_preprovisioning_timeout"
 )
 
 func getFailureCause(err error) FailureCause {
+	if errors.As(err, &NodePreprovisioningTimeoutError{}) {
+		return NodePreprovisioning
+	}
 	if errors.As(err, &OverlappingDisruptionBudgetsError{}) {
 		return OverlappingPodDisruptionBudgets
 	}
@@ -292,4 +359,8 @@ func getFailureCause(err error) FailureCause {
 		return VolumeCleanup
 	}
 	return ""
+}
+
+func sinceInMilliseconds(startTime time.Time) float64 {
+	return float64(time.Since(startTime).Nanoseconds()) / 1e6
 }

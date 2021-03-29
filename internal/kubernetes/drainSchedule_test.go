@@ -15,7 +15,7 @@ import (
 func TestDrainSchedules_Schedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
-	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, []string{}, []SuppliedCondition{}, zap.NewNop())
+	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop())
 	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}})
 	whenFirstSchedSpecificGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeGrp", Annotations: map[string]string{DrainGroupAnnotation: "grp1"}}})
 
@@ -105,7 +105,7 @@ func (d *failDrainer) Drain(n *v1.Node) error { return errors.New("myerr") }
 // Test to ensure there are no races when calling HasSchedule while the
 // scheduler is draining a node.
 func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
-	scheduler := NewDrainSchedules(&failDrainer{}, &record.FakeRecorder{}, 0, []string{}, []SuppliedCondition{}, zap.NewNop())
+	scheduler := NewDrainSchedules(&failDrainer{}, &record.FakeRecorder{}, 0, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop())
 	node := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}
 
 	when, err := scheduler.Schedule(node)
@@ -141,7 +141,7 @@ func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
 func TestDrainSchedules_DeleteSchedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
-	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, []string{}, []SuppliedCondition{}, zap.NewNop())
+	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop())
 	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}})
 
 	type timeWindow struct {
