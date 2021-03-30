@@ -250,10 +250,13 @@ func main() {
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
 	}
 
-	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour,time.Now())
+	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
+
+	eventRecorder := kubernetes.NewEventRecorder(cs)
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		kubernetes.NewAPICordonDrainer(cs,
+			eventRecorder,
 			kubernetes.MaxGracePeriod(*maxGracePeriod),
 			kubernetes.EvictionHeadroom(*evictionHeadroom),
 			kubernetes.WithSkipDrain(*skipDrain),
@@ -263,7 +266,7 @@ func main() {
 			kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
 			kubernetes.WithAPICordonDrainerLogger(log),
 		),
-		kubernetes.NewEventRecorder(cs),
+		eventRecorder,
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
@@ -276,7 +279,7 @@ func main() {
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
 				&kubernetes.NoopCordonDrainer{},
-				kubernetes.NewEventRecorder(cs),
+				eventRecorder,
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer),
 				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
@@ -324,7 +327,7 @@ func main() {
 		cs.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      id,
-			EventRecorder: kubernetes.NewEventRecorder(cs),
+			EventRecorder: eventRecorder,
 		},
 	)
 	kingpin.FatalIfError(err, "cannot create lock")

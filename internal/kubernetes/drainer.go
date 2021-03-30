@@ -257,7 +257,7 @@ func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDraine
 
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
-func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *APICordonDrainer {
+func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecorder, ao ...APICordonDrainerOption) *APICordonDrainer {
 	d := &APICordonDrainer{
 		c:                c,
 		l:                zap.NewNop(),
@@ -265,7 +265,7 @@ func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *
 		maxGracePeriod:   DefaultMaxGracePeriod,
 		evictionHeadroom: DefaultEvictionOverhead,
 		skipDrain:        DefaultSkipDrain,
-		eventRecorder:    NewEventRecorder(c),
+		eventRecorder:    eventRecorder,
 	}
 	for _, o := range ao {
 		o(d)
