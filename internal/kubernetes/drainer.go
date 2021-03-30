@@ -18,11 +18,11 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"errors"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
@@ -529,10 +529,25 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 		case <-deadline:
 			return PodEvictionTimeoutError{} // this one is typed because we match it to a failure cause
 		default:
-			err := d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
-				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
-				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
-			})
+			var err error
+			// If you try to evict a terminating pod (e.g., retry to evict a pod that's
+			// already been evicted but is still terminating because of a finalizer), and
+			// the pod disruption budget is currently exhausted (e.g., because said pod is
+			// terminating and its replacement is still pending), the eviction API naively
+			// responds with a 429: "Cannot evict pod as it would violate the pod's
+			// disruption budget," instead of something less misleading (it actually
+			// wouldn't violate the disruption budget, because it wouldn't change the number
+			// of available pods). Later, when the replacement pod is running, if you try to
+			// re-evict the terminating pod, the eviction API responds with a 201. To avoid
+			// the confusion, let's not even try to evict terminating pods, because that
+			// doesn't make much sense anyway. However, we still want to wait for their
+			// deletion, which is why we filter here and not in GetPodsToDrain.
+			if pod.DeletionTimestamp == nil {
+				err = d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
+					ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
+					DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
+				})
+			}
 			switch {
 			// The eviction API returns 429 Too Many Requests if a pod
 			// cannot currently be evicted, for example due to a pod
