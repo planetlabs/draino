@@ -121,6 +121,14 @@ func (d *mockCordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, er
 	return NodeReplacementStatusNone, nil
 }
 
+func (d *mockCordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatus, error) {
+	d.calls = append(d.calls, mockCall{
+		name: "PreprovisionNode",
+		node: n.Name,
+	})
+	return NodeReplacementStatusNone, nil
+}
+
 func TestDrainingResourceEventHandler(t *testing.T) {
 	cases := []struct {
 		name       string

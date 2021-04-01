@@ -64,6 +64,8 @@ func NewEventRecorder(c kubernetes.Interface) record.EventRecorder {
 	return b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
 }
 
+// RetryWithTimeout this function retries till the function f return a nil error or timeout expire
+// Note the intermediate error trigger the retry and are dropped.
 func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error {
 	return wait.PollImmediate(retryPeriod, timeout,
 		func() (bool, error) {
@@ -73,6 +75,8 @@ func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error 
 			return true, nil
 		})
 }
+
+var DummyErrorForRetry = errors.New("retry on error")
 
 func GetAPIResources(discoveryClient discovery.DiscoveryInterface) ([]metav1.APIResource, error) {
 	groupList, err := discoveryClient.ServerGroups()
@@ -183,19 +187,27 @@ func GetAPIResourcesForGVK(discoveryInterface discovery.DiscoveryInterface, gvks
 	return output, nil
 }
 
-func StatRecordForEachCondition(ctx context.Context, node *core.Node, conditions []string, m stats.Measurement) {
+func nodeTags(ctx context.Context, node *core.Node) (context.Context, error) {
 	team := node.Labels["managed_by_team"]
 	if team == "" {
 		team = node.Labels["team"]
 	}
 	ngName := node.Labels[LabelKeyNodeGroupName]
 	ngNamespace := node.Labels[LabelKeyNodeGroupNamespace]
-	tagsWithNg, _ := tag.New(ctx, tag.Upsert(TagNodegroupNamespace, ngNamespace), tag.Upsert(TagNodegroupName, ngName), tag.Upsert(TagTeam, team))
+	return tag.New(ctx, tag.Upsert(TagNodegroupNamespace, ngNamespace), tag.Upsert(TagNodegroupName, ngName), tag.Upsert(TagTeam, team))
+}
 
+func StatRecordForEachCondition(ctx context.Context, node *core.Node, conditions []string, m stats.Measurement) {
+	tagsWithNg, _ := nodeTags(ctx, node)
 	for _, c := range conditions {
 		tags, _ := tag.New(tagsWithNg, tag.Upsert(TagConditions, c))
 		stats.Record(tags, m)
 	}
+}
+
+func StatRecordForNode(ctx context.Context, node *core.Node, m stats.Measurement) {
+	tagsWithNg, _ := nodeTags(ctx, node)
+	stats.Record(tagsWithNg, m)
 }
 
 func LoggerForNode(n *core.Node, logger *zap.Logger) *zap.Logger {

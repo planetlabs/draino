@@ -52,8 +52,14 @@ const (
 	eventReasonDrainFailed           = "DrainFailed"
 	eventReasonDrainConfig           = "DrainConfig"
 
+	eventReasonNodePreprovisioning          = "NodePreprovisioning"
+	eventReasonNodePreprovisioningCompleted = "NodePreprovisioningCompleted"
+
 	tagResultSucceeded = "succeeded"
 	tagResultFailed    = "failed"
+
+	newNodeRequestReasonPreprovisioning = "preprovisioning"
+	newNodeRequestReasonReplacement     = "replacement"
 
 	drainRetryAnnotationKey   = "draino/drain-retry"
 	drainRetryAnnotationValue = "true"
@@ -63,12 +69,14 @@ const (
 
 // Opencensus measurements.
 var (
-	MeasureNodesCordoned       = stats.Int64("draino/nodes_cordoned", "Number of nodes cordoned.", stats.UnitDimensionless)
-	MeasureNodesUncordoned     = stats.Int64("draino/nodes_uncordoned", "Number of nodes uncordoned.", stats.UnitDimensionless)
-	MeasureNodesDrained        = stats.Int64("draino/nodes_drained", "Number of nodes drained.", stats.UnitDimensionless)
-	MeasureNodesDrainScheduled = stats.Int64("draino/nodes_drainScheduled", "Number of nodes drain scheduled.", stats.UnitDimensionless)
-	MeasureLimitedCordon       = stats.Int64("draino/cordon_limited", "Number of cordon activities that have been blocked due to limits.", stats.UnitDimensionless)
-	MeasureSkippedCordon       = stats.Int64("draino/cordon_skipped", "Number of cordon activities that have been skipped due filtering.", stats.UnitDimensionless)
+	MeasureNodesCordoned           = stats.Int64("draino/nodes_cordoned", "Number of nodes cordoned.", stats.UnitDimensionless)
+	MeasureNodesUncordoned         = stats.Int64("draino/nodes_uncordoned", "Number of nodes uncordoned.", stats.UnitDimensionless)
+	MeasureNodesDrained            = stats.Int64("draino/nodes_drained", "Number of nodes drained.", stats.UnitDimensionless)
+	MeasureNodesDrainScheduled     = stats.Int64("draino/nodes_drainScheduled", "Number of nodes drain scheduled.", stats.UnitDimensionless)
+	MeasureLimitedCordon           = stats.Int64("draino/cordon_limited", "Number of cordon activities that have been blocked due to limits.", stats.UnitDimensionless)
+	MeasureSkippedCordon           = stats.Int64("draino/cordon_skipped", "Number of cordon activities that have been skipped due filtering.", stats.UnitDimensionless)
+	MeasureNodesReplacementRequest = stats.Int64("draino/nodes_replacement_request", "Number of nodes replacement requested.", stats.UnitDimensionless)
+	MeasurePreprovisioningLatency  = stats.Float64("draino/nodes_preprovisioning_latency", "Latency to get a node preprovisioned", stats.UnitMilliseconds)
 
 	TagNodeName, _           = tag.NewKey("node_name")
 	TagConditions, _         = tag.NewKey("conditions")
@@ -90,9 +98,10 @@ type DrainingResourceEventHandler struct {
 	podStore     PodStore
 	cordonFilter PodFilterFunc
 
-	lastDrainScheduledFor   time.Time
-	buffer                  time.Duration
-	labelsKeyForDrainGroups []string
+	lastDrainScheduledFor        time.Time
+	buffer                       time.Duration
+	labelsKeyForDrainGroups      []string
+	preprovisioningConfiguration NodePreprovisioningConfiguration
 
 	conditions []SuppliedCondition
 
@@ -151,6 +160,13 @@ func WithDrainGroups(labelKeysForDrainGroup string) DrainingResourceEventHandler
 	}
 }
 
+// WithPreprovisioningConfiguration configures the preprovisioning (timeout, retries)
+func WithPreprovisioningConfiguration(config NodePreprovisioningConfiguration) DrainingResourceEventHandlerOption {
+	return func(d *DrainingResourceEventHandler) {
+		d.preprovisioningConfiguration = config
+	}
+}
+
 // NewDrainingResourceEventHandler returns a new DrainingResourceEventHandler.
 func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
 	h := &DrainingResourceEventHandler{
@@ -163,7 +179,7 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 	for _, o := range ho {
 		o(h)
 	}
-	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.conditions, h.logger)
+	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.conditions, h.preprovisioningConfiguration, h.logger)
 	return h
 }
 
