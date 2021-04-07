@@ -202,13 +202,6 @@ type APICordonDrainer struct {
 	storageClassesAllowingPVDeletion map[string]struct{}
 }
 
-// SuppliedCondition defines the condition will be watched.
-type SuppliedCondition struct {
-	Type            core.NodeConditionType
-	Status          core.ConditionStatus
-	MinimumDuration time.Duration
-}
-
 // APICordonDrainerOption configures an APICordonDrainer.
 type APICordonDrainerOption func(d *APICordonDrainer)
 

@@ -78,14 +78,19 @@ var (
 	MeasureNodesReplacementRequest = stats.Int64("draino/nodes_replacement_request", "Number of nodes replacement requested.", stats.UnitDimensionless)
 	MeasurePreprovisioningLatency  = stats.Float64("draino/nodes_preprovisioning_latency", "Latency to get a node preprovisioned", stats.UnitMilliseconds)
 
-	TagNodeName, _           = tag.NewKey("node_name")
-	TagConditions, _         = tag.NewKey("conditions")
-	TagTeam, _               = tag.NewKey("team")
-	TagNodegroupName, _      = tag.NewKey("nodegroup_name")
-	TagNodegroupNamespace, _ = tag.NewKey("nodegroup_namespace")
-	TagResult, _             = tag.NewKey("result")
-	TagReason, _             = tag.NewKey("reason")
-	TagFailureCause, _       = tag.NewKey("failure_cause")
+	TagNodeName, _                   = tag.NewKey("node_name")
+	TagConditions, _                 = tag.NewKey("conditions")
+	TagTeam, _                       = tag.NewKey("team")
+	TagNodegroupName, _              = tag.NewKey("nodegroup_name")
+	TagNodegroupNamespace, _         = tag.NewKey("nodegroup_namespace")
+	TagResult, _                     = tag.NewKey("result")
+	TagReason, _                     = tag.NewKey("reason")
+	TagFailureCause, _               = tag.NewKey("failure_cause")
+	TagInScope, _                    = tag.NewKey("in_scope")
+	TagPreprovisioning, _            = tag.NewKey("preprovisioning")
+	TagPVCManagement, _              = tag.NewKey("pvc_management")
+	TagDrainRetry, _                 = tag.NewKey("drain_retry")
+	TagUserOptOutViaPodAnnotation, _ = tag.NewKey("user_opt_out_via_pod_annotation")
 )
 
 // A DrainingResourceEventHandler cordons and drains any added or updated nodes.
@@ -298,14 +303,14 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(n *core.Node) bool {
 			ok, reason, err := h.cordonFilter(*pod)
 			if err != nil {
 				tags, _ := tag.New(tags, tag.Upsert(TagReason, "error"))
-				StatRecordForEachCondition(tags, n, GetConditionsTypes(h.conditions), MeasureSkippedCordon.M(1))
+				StatRecordForEachCondition(tags, n, h.conditions, MeasureSkippedCordon.M(1))
 				h.logger.Error("filtering issue", zap.Error(err), zap.String("node", n.Name), zap.String("pod", pod.Name), zap.String("namespace", n.Name))
 				return false
 			}
 			if !ok {
 				nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
 				tags, _ := tag.New(tags, tag.Upsert(TagReason, reason))
-				StatRecordForEachCondition(tags, n, GetConditionsTypes(h.conditions), MeasureSkippedCordon.M(1))
+				StatRecordForEachCondition(tags, n, h.conditions, MeasureSkippedCordon.M(1))
 				h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonCordonSkip, "Pod %s/%s is not in eviction scope", pod.Namespace, pod.Name)
 				h.eventRecorder.Eventf(pod, core.EventTypeWarning, eventReasonCordonSkip, "Pod is blocking cordon/drain for node %s", n.Name)
 				h.logger.Debug("Cordon filter triggered", zap.String("node", n.Name), zap.String("pod", pod.Name))
@@ -314,27 +319,6 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(n *core.Node) bool {
 		}
 	}
 	return true
-}
-
-func GetNodeOffendingConditions(n *core.Node, suppliedConditions []SuppliedCondition) []SuppliedCondition {
-	var conditions []SuppliedCondition
-	for _, suppliedCondition := range suppliedConditions {
-		for _, nodeCondition := range n.Status.Conditions {
-			if suppliedCondition.Type == nodeCondition.Type &&
-				suppliedCondition.Status == nodeCondition.Status &&
-				time.Since(nodeCondition.LastTransitionTime.Time) >= suppliedCondition.MinimumDuration {
-				conditions = append(conditions, suppliedCondition)
-			}
-		}
-	}
-	return conditions
-}
-func GetConditionsTypes(conditions []SuppliedCondition) []string {
-	result := make([]string, len(conditions))
-	for i := range conditions {
-		result[i] = string(conditions[i].Type)
-	}
-	return result
 }
 
 func shouldUncordon(n *core.Node) bool {
@@ -405,7 +389,7 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 		if IsLimiterError(err) {
 			reason := err.Error()
 			tags, _ = tag.New(context.Background(), tag.Upsert(TagReason, reason))
-			StatRecordForEachCondition(tags, n, GetConditionsTypes(badConditions), MeasureLimitedCordon.M(1))
+			StatRecordForEachCondition(tags, n, badConditions, MeasureLimitedCordon.M(1))
 			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonBlockedByLimit, reason)
 			log.Debug("cordon limiter", zap.String("node", n.Name), zap.String("reason", reason))
 			return false, nil
@@ -413,13 +397,13 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 
 		log.Info("Failed to cordon", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
-		StatRecordForEachCondition(tags, n, GetConditionsTypes(badConditions), MeasureNodesCordoned.M(1))
+		StatRecordForEachCondition(tags, n, badConditions, MeasureNodesCordoned.M(1))
 		h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonCordonFailed, "Cordoning failed: %v", err)
 		return false, err
 	}
 	log.Info("Cordoned")
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
-	StatRecordForEachCondition(tags, n, GetConditionsTypes(badConditions), MeasureNodesCordoned.M(1))
+	StatRecordForEachCondition(tags, n, badConditions, MeasureNodesCordoned.M(1))
 	h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
 	return true, nil
 }
@@ -451,13 +435,13 @@ func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node) {
 		}
 		log.Info("Failed to schedule the drain activity", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
-		StatRecordForEachCondition(tags, n, GetConditionsTypes(GetNodeOffendingConditions(n, h.conditions)), MeasureNodesDrainScheduled.M(1))
+		StatRecordForEachCondition(tags, n, GetNodeOffendingConditions(n, h.conditions), MeasureNodesDrainScheduled.M(1))
 		h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainSchedulingFailed, "Drain scheduling failed: %v", err)
 		return
 	}
 	log.Info("Drain scheduled ", zap.Time("after", when))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
-	StatRecordForEachCondition(tags, n, GetConditionsTypes(GetNodeOffendingConditions(n, h.conditions)), MeasureNodesDrainScheduled.M(1))
+	StatRecordForEachCondition(tags, n, GetNodeOffendingConditions(n, h.conditions), MeasureNodesDrainScheduled.M(1))
 	h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", when.Format(time.RFC3339Nano))
 }
 

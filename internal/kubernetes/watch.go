@@ -41,6 +41,7 @@ type NodeStore interface {
 	SyncedStore
 	// Get an node by name. Returns an error if the node does not exist.
 	Get(name string) (*core.Node, error)
+	ListNodes() []*core.Node
 }
 
 // An NodeWatch is a cache of node resources that notifies registered
@@ -77,7 +78,7 @@ func (w *NodeWatch) Get(name string) (*core.Node, error) {
 	return o.(*core.Node), nil
 }
 
-// Get an node by name. Returns an error if the node does not exist.
+// ListNodes List the nodes of the store
 func (w *NodeWatch) ListNodes() []*core.Node {
 	list := w.GetStore().List()
 	nodes := make([]*core.Node, len(list))

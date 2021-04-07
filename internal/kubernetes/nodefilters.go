@@ -49,9 +49,6 @@ func NewNodeLabelFilter(expressionStr *string, log *zap.Logger) (func(o interfac
 
 		nodeLabels := n.GetLabels()
 
-		//_, ok = nodeLabels["node-role.kubernetes.io/demo-eviction"]
-		//return ok
-
 		parameters := map[string]interface{}{
 			"metadata": map[string]map[string]string{
 				"labels": nodeLabels,
