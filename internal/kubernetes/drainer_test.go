@@ -284,6 +284,7 @@ func TestUncordon(t *testing.T) {
 }
 
 func TestDrain(t *testing.T) {
+	now := meta.Now()
 	cases := []struct {
 		name      string
 		options   []APICordonDrainerOption
@@ -506,6 +507,27 @@ func TestDrain(t *testing.T) {
 					err:      errors.New("nope"),
 				},
 			},
+		},
+		{
+			name: "DoNotEvictTerminatingPodButWaitForDeletion",
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			reactions: []reactor{{
+				verb:     "list",
+				resource: "pods",
+				ret: &core.PodList{Items: []core.Pod{{ObjectMeta: meta.ObjectMeta{
+					Name:              podName,
+					DeletionTimestamp: &now}}}},
+			}, {
+				verb:        "create",
+				resource:    "pods",
+				subresource: "eviction",
+				err:         apierrors.NewTooManyRequestsError("some pdb name"),
+			},
+				{
+					verb:     "get",
+					resource: "pods",
+					err:      apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, podName),
+				}},
 		},
 	}
 
