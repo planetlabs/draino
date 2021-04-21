@@ -88,7 +88,7 @@ func main() {
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
 
 		// Pod Opt-in flags
-		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one off these annotations. In way this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
 		// NodeReplacement limiter flags
 		maxNodeReplacementPerHour = app.Flag("max-node-replacement-per-hour", "Maximum number of nodes per hour for which draino can ask replacement.").Default("2").Int()
