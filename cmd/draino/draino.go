@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,7 +27,6 @@ import (
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/julienschmidt/httprouter"
-	"github.com/oklog/run"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
@@ -38,8 +38,6 @@ import (
 	"k8s.io/klog"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
-
-    _ "net/http/pprof"
 )
 
 // Default leader election settings.
@@ -99,6 +97,10 @@ func main() {
 
 		// PV/PVC management
 		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
+
+		configName           = app.Flag("config-name", "Name of the draino configuratio").Required().String()
+		resetScopeAnnotation = app.Flag("reset-config-annotations", "Reset the scope annotation on the nodes").Bool()
+		scopeAnalysisPeriod  = app.Flag("scope-analysis-period", "Period to run the scope analysis and generate metric").Default((5 * time.Minute).String()).Duration()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
@@ -187,7 +189,7 @@ func main() {
 
 	go func() {
 		log.Info("web server is running", zap.String("listen", *listen))
-		kingpin.FatalIfError(await(web), "error serving")
+		kingpin.FatalIfError(kubernetes.Await(web), "error serving")
 	}()
 
 	c, err := kubernetes.BuildConfigFromFlags(*apiserver, *kubecfg)
@@ -344,6 +346,12 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), nodes, pods, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.UserOptOutViaPodAnnotation(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	go scopeObserver.Run(ctx.Done())
+	if *resetScopeAnnotation == true {
+		go scopeObserver.Reset()
+	}
+
 	lock, err := resourcelock.New(
 		resourcelock.EndpointsResourceLock,
 		*namespace,
@@ -365,27 +373,13 @@ func main() {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Info("watchers are running")
-				kingpin.FatalIfError(await(nodes, pods), "error watching")
+				kingpin.FatalIfError(kubernetes.Await(nodes, pods), "error watching")
 			},
 			OnStoppedLeading: func() {
 				kingpin.Fatalf("lost leader election")
 			},
 		},
 	})
-}
-
-type runner interface {
-	Run(stop <-chan struct{})
-}
-
-func await(rs ...runner) error {
-	stop := make(chan struct{})
-	g := &run.Group{}
-	for i := range rs {
-		r := rs[i] // https://golang.org/doc/faq#closures_and_goroutines
-		g.Add(func() error { r.Run(stop); return nil }, func(err error) { close(stop) })
-	}
-	return g.Run()
 }
 
 type httpRunner struct {

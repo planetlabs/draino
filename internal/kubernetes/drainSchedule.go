@@ -241,11 +241,11 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 			if err := wait.PollImmediate(
 				d.preprovisioningConfiguration.CheckPeriod,
 				d.preprovisioningConfiguration.Timeout,
-				func() (bool,error) {
+				func() (bool, error) {
 					replacementStatus, err := d.drainer.PreprovisionNode(node)
 					if err != nil {
 						log.Error("Failed to validate node-replacement status", zap.Error(err))
-						return false,nil
+						return false, nil
 					}
 					if !replacementRequestEventDone {
 						d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done.")
@@ -253,9 +253,9 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 					}
 					if replacementStatus == NodeReplacementStatusDone {
 						d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonNodePreprovisioningCompleted, "Node pre-provisioning before drain: completed.")
-						return true,nil
+						return true, nil
 					}
-					return false,nil
+					return false, nil
 				},
 			); err != nil {
 				log.Info("Pre-provisioning failed")
@@ -278,7 +278,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		sched.finish = time.Now()
 		log.Info("Drained")
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
-		StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
+		StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
 		if err := RetryWithTimeout(
 			func() error {
@@ -300,7 +300,7 @@ func (d *DrainSchedules) handleDrainFailure(sched *schedule, log *zap.Logger, dr
 	sched.setFailed()
 	log.Info("Failed to drain", zap.Error(drainError))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
-	StatRecordForEachCondition(tags, node, GetConditionsTypes(GetNodeOffendingConditions(node, d.suppliedConditions)), MeasureNodesDrained.M(1))
+	StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
 	d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", drainError)
 	if err := RetryWithTimeout(
 		func() error {

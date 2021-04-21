@@ -99,6 +99,16 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	}
 }
 
+// UserOptOutViaPodAnnotation returns a FilterFunc that returns true if the
+// supplied pod has any of the user-specified annotations for out-opt (aka protection)
+func UserOptOutViaPodAnnotation(annotations ...string) PodFilterFunc {
+	f := UnprotectedPodFilter(annotations...)
+	return func(p core.Pod) (bool, string, error) {
+		b, s, e := f(p)
+		return !b, s, e
+	}
+}
+
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied
 // FilterFuncs return true.
 func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
