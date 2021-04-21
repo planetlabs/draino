@@ -22,6 +22,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // A PodFilterFunc returns true if the supplied pod passes the filter.
@@ -76,22 +77,12 @@ func NewPodControlledByFilter(controlledByAPIResources []*meta.APIResource) PodF
 // protection from eviction
 func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
-		var filter bool
 		for _, annot := range annotations {
-			// Try to split the annotation into key-value pairs
-			kv := strings.SplitN(annot, "=", 2)
-			if len(kv) < 2 {
-				// If the annotation is a single string, then simply check for
-				// the existence of the annotation key
-				_, filter = p.GetAnnotations()[kv[0]]
-			} else {
-				// If the annotation is a key-value pair, then check if the
-				// value for the pod annotation matches that of the
-				// user-specified value
-				v, ok := p.GetAnnotations()[kv[0]]
-				filter = ok && v == kv[1]
+			selector,err:=labels.Parse(annot)
+			if err!=nil {
+				return false,"",err
 			}
-			if filter {
+			if selector.Matches(labels.Set(p.GetAnnotations())){
 				return false, "pod-annotation", nil
 			}
 		}
@@ -99,44 +90,19 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	}
 }
 
-func podHasAnyOfTheAnnotations(annotations ...string) PodFilterFunc {
+func PodHasAnyOfTheAnnotations(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
-		var filter bool
 		for _, annot := range annotations {
-			// Try to split the annotation into key-value pairs
-			kv := strings.SplitN(annot, "=", 2)
-			if len(kv) < 2 {
-				value, ok := p.GetAnnotations()[kv[0]]
-				if !ok {
-					filter = false
-				} else {
-					filter = value == ""
-				}
-			} else {
-				// If the annotation is a key-value pair, then check if the
-				// value for the pod annotation matches that of the
-				// user-specified value
-				v, ok := p.GetAnnotations()[kv[0]]
-				filter = ok && v == kv[1]
+			selector,err:=labels.Parse(annot)
+			if err!=nil {
+				return false,"",err
 			}
-			if filter {
+			if selector.Matches(labels.Set(p.GetAnnotations())){
 				return true, "pod-annotation", nil
 			}
 		}
 		return false, "", nil
 	}
-}
-
-// UserOptOutViaPodAnnotation returns a FilterFunc that returns true if the
-// supplied pod has any of the user-specified annotations for out-opt
-func UserOptOutViaPodAnnotation(annotations ...string) PodFilterFunc {
-	return podHasAnyOfTheAnnotations(annotations...)
-}
-
-// UserOptInViaPodAnnotation returns a FilterFunc that returns true if the
-// supplied pod has any of the user-specified annotations for out-in
-func UserOptInViaPodAnnotation(annotations ...string) PodFilterFunc {
-	return podHasAnyOfTheAnnotations(annotations...)
 }
 
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied

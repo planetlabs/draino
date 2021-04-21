@@ -285,7 +285,7 @@ func main() {
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
-		kubernetes.WithPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.UserOptInViaPodAnnotation(*optInPodAnnotations...), kubernetes.NewPodFilters(pf...))),
+		kubernetes.WithPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(pf...))),
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
@@ -300,7 +300,7 @@ func main() {
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.UserOptInViaPodAnnotation(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)), pods),
+		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)), pods),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {
@@ -349,7 +349,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), nodes, pods, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.UserOptOutViaPodAnnotation(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), nodes, pods, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
 	if *resetScopeAnnotation == true {
 		go scopeObserver.Reset()

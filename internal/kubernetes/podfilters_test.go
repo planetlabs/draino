@@ -495,74 +495,74 @@ func TestPodFilters(t *testing.T) {
 			passesFilter: false,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - empty list",
+			name: "PodHasAnyOfTheAnnotations - empty list",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{}...)
+				return PodHasAnyOfTheAnnotations([]string{}...)
 			},
 			passesFilter: false,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - non empty list - no annotation",
+			name: "PodHasAnyOfTheAnnotations - non empty list - no annotation",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{"test=1"}...)
+				return PodHasAnyOfTheAnnotations([]string{"test=1"}...)
 			},
 			passesFilter: false,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - match",
+			name: "PodHasAnyOfTheAnnotations - match",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1"}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{"test=1"}...)
+				return PodHasAnyOfTheAnnotations([]string{"test=1"}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - match key not value",
+			name: "PodHasAnyOfTheAnnotations - match key not value",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1"}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{"test=2"}...)
+				return PodHasAnyOfTheAnnotations([]string{"test=2"}...)
 			},
 			passesFilter: false,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - match key empty value",
+			name: "PodHasAnyOfTheAnnotations - match key empty value",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": ""}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{"test="}...)
+				return PodHasAnyOfTheAnnotations([]string{"test="}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - match key empty value no equal sign",
+			name: "PodHasAnyOfTheAnnotations - match key empty value no equal sign",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": ""}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{"test"}...)
+				return PodHasAnyOfTheAnnotations([]string{"test"}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - match one in list",
+			name: "PodHasAnyOfTheAnnotations - match one in list",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{"aaa=bbb", "test=1"}...)
+				return PodHasAnyOfTheAnnotations([]string{"aaa=bbb", "test=1"}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "podHasAnyOfTheAnnotations - no match in list",
+			name: "PodHasAnyOfTheAnnotations - match key in list",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return podHasAnyOfTheAnnotations([]string{"test", "whatever"}...)
+				return PodHasAnyOfTheAnnotations([]string{"test", "whatever"}...)
 			},
-			passesFilter: false,
+			passesFilter: true,
 		},
 		{
 			name: "NewPodFiltersWithOptInFirst - no opt-in and filter true",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return NewPodFiltersWithOptInFirst(UserOptInViaPodAnnotation(nil...),
+				return NewPodFiltersWithOptInFirst(PodHasAnyOfTheAnnotations(nil...),
 					func(p core.Pod) (pass bool, reason string, err error) { return true, "", nil })
 			},
 			passesFilter: true,
@@ -571,7 +571,7 @@ func TestPodFilters(t *testing.T) {
 			name: "NewPodFiltersWithOptInFirst - no opt-in and filter false",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return NewPodFiltersWithOptInFirst(UserOptInViaPodAnnotation(nil...),
+				return NewPodFiltersWithOptInFirst(PodHasAnyOfTheAnnotations(nil...),
 					func(p core.Pod) (pass bool, reason string, err error) { return false, "", nil })
 			},
 			passesFilter: false,
@@ -580,7 +580,7 @@ func TestPodFilters(t *testing.T) {
 			name: "NewPodFiltersWithOptInFirst - opt-in and filter false",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
 			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return NewPodFiltersWithOptInFirst(UserOptInViaPodAnnotation([]string{"foo=bar"}...),
+				return NewPodFiltersWithOptInFirst(PodHasAnyOfTheAnnotations([]string{"foo=bar"}...),
 					func(p core.Pod) (pass bool, reason string, err error) { return false, "", nil })
 			},
 			passesFilter: true,
