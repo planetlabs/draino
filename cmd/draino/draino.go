@@ -87,6 +87,9 @@ func main() {
 		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
 
+		// Pod Opt-in flags
+		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one off these annotations. In way this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+
 		// NodeReplacement limiter flags
 		maxNodeReplacementPerHour = app.Flag("max-node-replacement-per-hour", "Maximum number of nodes per hour for which draino can ask replacement.").Default("2").Int()
 		durationBeforeReplacement = app.Flag("duration-before-replacement", "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.").Default(kubernetes.DefaultDurationBeforeReplacement.String()).Duration()
@@ -282,7 +285,7 @@ func main() {
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
-		kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
+		kubernetes.WithPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.UserOptInViaPodAnnotation(*optInPodAnnotations...), kubernetes.NewPodFilters(pf...))),
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
@@ -297,7 +300,7 @@ func main() {
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(kubernetes.NewPodFilters(podFilterCordon...), pods),
+		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.UserOptInViaPodAnnotation(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)), pods),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {

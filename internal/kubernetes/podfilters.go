@@ -99,14 +99,44 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	}
 }
 
-// UserOptOutViaPodAnnotation returns a FilterFunc that returns true if the
-// supplied pod has any of the user-specified annotations for out-opt (aka protection)
-func UserOptOutViaPodAnnotation(annotations ...string) PodFilterFunc {
-	f := UnprotectedPodFilter(annotations...)
+func podHasAnyOfTheAnnotations(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
-		b, s, e := f(p)
-		return !b, s, e
+		var filter bool
+		for _, annot := range annotations {
+			// Try to split the annotation into key-value pairs
+			kv := strings.SplitN(annot, "=", 2)
+			if len(kv) < 2 {
+				value, ok := p.GetAnnotations()[kv[0]]
+				if !ok {
+					filter = false
+				} else {
+					filter = value == ""
+				}
+			} else {
+				// If the annotation is a key-value pair, then check if the
+				// value for the pod annotation matches that of the
+				// user-specified value
+				v, ok := p.GetAnnotations()[kv[0]]
+				filter = ok && v == kv[1]
+			}
+			if filter {
+				return true, "pod-annotation", nil
+			}
+		}
+		return false, "", nil
 	}
+}
+
+// UserOptOutViaPodAnnotation returns a FilterFunc that returns true if the
+// supplied pod has any of the user-specified annotations for out-opt
+func UserOptOutViaPodAnnotation(annotations ...string) PodFilterFunc {
+	return podHasAnyOfTheAnnotations(annotations...)
+}
+
+// UserOptInViaPodAnnotation returns a FilterFunc that returns true if the
+// supplied pod has any of the user-specified annotations for out-in
+func UserOptInViaPodAnnotation(annotations ...string) PodFilterFunc {
+	return podHasAnyOfTheAnnotations(annotations...)
 }
 
 // NewPodFilters returns a FilterFunc that returns true if all of the supplied
@@ -123,5 +153,18 @@ func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
 			}
 		}
 		return true, "", nil
+	}
+}
+
+func NewPodFiltersWithOptInFirst(optInFilter, filter PodFilterFunc) PodFilterFunc {
+	return func(p core.Pod) (bool, string, error) {
+		optIn, r, err := optInFilter(p)
+		if err != nil {
+			return false, r, err
+		}
+		if optIn {
+			return true, r, err
+		}
+		return filter(p)
 	}
 }
