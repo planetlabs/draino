@@ -22,6 +22,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // A PodFilterFunc returns true if the supplied pod passes the filter.
@@ -76,22 +77,12 @@ func NewPodControlledByFilter(controlledByAPIResources []*meta.APIResource) PodF
 // protection from eviction
 func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
-		var filter bool
 		for _, annot := range annotations {
-			// Try to split the annotation into key-value pairs
-			kv := strings.SplitN(annot, "=", 2)
-			if len(kv) < 2 {
-				// If the annotation is a single string, then simply check for
-				// the existence of the annotation key
-				_, filter = p.GetAnnotations()[kv[0]]
-			} else {
-				// If the annotation is a key-value pair, then check if the
-				// value for the pod annotation matches that of the
-				// user-specified value
-				v, ok := p.GetAnnotations()[kv[0]]
-				filter = ok && v == kv[1]
+			selector,err:=labels.Parse(annot)
+			if err!=nil {
+				return false,"",err
 			}
-			if filter {
+			if selector.Matches(labels.Set(p.GetAnnotations())){
 				return false, "pod-annotation", nil
 			}
 		}
@@ -99,13 +90,18 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	}
 }
 
-// UserOptOutViaPodAnnotation returns a FilterFunc that returns true if the
-// supplied pod has any of the user-specified annotations for out-opt (aka protection)
-func UserOptOutViaPodAnnotation(annotations ...string) PodFilterFunc {
-	f := UnprotectedPodFilter(annotations...)
+func PodHasAnyOfTheAnnotations(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
-		b, s, e := f(p)
-		return !b, s, e
+		for _, annot := range annotations {
+			selector,err:=labels.Parse(annot)
+			if err!=nil {
+				return false,"",err
+			}
+			if selector.Matches(labels.Set(p.GetAnnotations())){
+				return true, "pod-annotation", nil
+			}
+		}
+		return false, "", nil
 	}
 }
 
@@ -123,5 +119,18 @@ func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
 			}
 		}
 		return true, "", nil
+	}
+}
+
+func NewPodFiltersWithOptInFirst(optInFilter, filter PodFilterFunc) PodFilterFunc {
+	return func(p core.Pod) (bool, string, error) {
+		optIn, r, err := optInFilter(p)
+		if err != nil {
+			return false, r, err
+		}
+		if optIn {
+			return true, r, err
+		}
+		return filter(p)
 	}
 }
