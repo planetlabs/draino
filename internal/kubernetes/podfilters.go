@@ -78,11 +78,11 @@ func NewPodControlledByFilter(controlledByAPIResources []*meta.APIResource) PodF
 func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
 		for _, annot := range annotations {
-			selector,err:=labels.Parse(annot)
-			if err!=nil {
-				return false,"",err
+			selector, err := labels.Parse(annot)
+			if err != nil {
+				return false, "", err
 			}
-			if selector.Matches(labels.Set(p.GetAnnotations())){
+			if selector.Matches(labels.Set(p.GetAnnotations())) {
 				return false, "pod-annotation", nil
 			}
 		}
@@ -93,11 +93,11 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 func PodHasAnyOfTheAnnotations(annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
 		for _, annot := range annotations {
-			selector,err:=labels.Parse(annot)
-			if err!=nil {
-				return false,"",err
+			selector, err := labels.Parse(annot)
+			if err != nil {
+				return false, "", err
 			}
-			if selector.Matches(labels.Set(p.GetAnnotations())){
+			if selector.Matches(labels.Set(p.GetAnnotations())) {
 				return true, "pod-annotation", nil
 			}
 		}

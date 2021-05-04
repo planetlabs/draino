@@ -62,10 +62,9 @@ func (g *metricsObjectsForObserver) reset() error {
 // DrainoConfigurationObserverImpl is responsible for annotating the nodes with the draino configuration that cover the node (if any)
 // It also expose a metrics 'draino_in_scope_nodes_total' that count the nodes of a nodegroup that are in scope of a given configuration. The metric is available per condition. A condition named 'any' is virtually defined to groups all the nodes (with or without conditions).
 type DrainoConfigurationObserverImpl struct {
-	kclient        client.Interface
-	nodeStore      NodeStore
-	podStore       PodStore
-	analysisPeriod time.Duration
+	kclient            client.Interface
+	runtimeObjectStore RuntimeObjectStore
+	analysisPeriod     time.Duration
 	// queueNodeToBeUpdated: To avoid burst in node updates the work to be done is queued. This way we can pace the node updates.
 	// The consequence is that the metric is not 100% accurate when the controller starts. It converges after couple ou cycles.
 	queueNodeToBeUpdated workqueue.RateLimitingInterface
@@ -82,11 +81,10 @@ type DrainoConfigurationObserverImpl struct {
 
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
-func NewScopeObserver(client client.Interface, configName string, conditions []SuppliedCondition, nodeStore NodeStore, podStore PodStore, analysisPeriod time.Duration, podFilterFunc PodFilterFunc, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
+func NewScopeObserver(client client.Interface, configName string, conditions []SuppliedCondition, runtimeObjectStore RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc PodFilterFunc, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
 	scopeObserver := &DrainoConfigurationObserverImpl{
 		kclient:             client,
-		nodeStore:           nodeStore,
-		podStore:            podStore,
+		runtimeObjectStore:  runtimeObjectStore,
 		nodeFilterFunc:      nodeFilterFunc,
 		podFilterFunc:       podFilterFunc,
 		userOptOutPodFilter: userOptOutPodFilter,
@@ -118,7 +116,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 	ticker := time.NewTicker(s.analysisPeriod)
 	// Wait for the informer to sync before starting
 	wait.PollImmediateInfinite(10*time.Second, func() (done bool, err error) {
-		return s.podStore.HasSynced(), nil
+		return s.runtimeObjectStore.Pods().HasSynced(), nil
 	})
 
 	go s.processQueueForNodeUpdates()
@@ -130,14 +128,14 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			return
 		case <-ticker.C:
 			// Let's update the nodes metadata
-			for _, node := range s.nodeStore.ListNodes() {
+			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 				if s.IsAnnotationUpdateNeeded(node) {
 					s.addNodeToQueue(node)
 				}
 			}
 			newMetricsValue := inScopeMetrics{}
 			// Let's update the metrics
-			for _, node := range s.nodeStore.ListNodes() {
+			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 				nodeTags := GetNodeTagsValues(node)
 				conditions := GetNodeOffendingConditions(node, s.conditions)
 				if node.Annotations == nil {
@@ -225,7 +223,7 @@ func (s *DrainoConfigurationObserverImpl) IsInScope(node *v1.Node) (inScope bool
 		return false, "labelSelection", nil
 	}
 	var pods []*v1.Pod
-	if pods, err = s.podStore.ListPodsForNode(node.Name); err != nil {
+	if pods, err = s.runtimeObjectStore.Pods().ListPodsForNode(node.Name); err != nil {
 		return false, "", err
 	}
 	for _, p := range pods {
@@ -278,7 +276,7 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 
 func (s *DrainoConfigurationObserverImpl) updateNodeAnnotations(nodeName string) error {
 	s.logger.Info("Update node annotations", zap.String("node", nodeName))
-	node, err := s.nodeStore.Get(nodeName)
+	node, err := s.runtimeObjectStore.Nodes().Get(nodeName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -335,7 +333,7 @@ func (s *DrainoConfigurationObserverImpl) updateNodeAnnotations(nodeName string)
 // This can be useful if ever the name of the draino configuration changes
 func (s *DrainoConfigurationObserverImpl) Reset() {
 	if err := wait.PollImmediateInfinite(2*time.Second, func() (done bool, err error) {
-		synced := s.nodeStore.HasSynced()
+		synced := s.runtimeObjectStore.Nodes().HasSynced()
 		s.logger.Info("Wait for node informer to sync", zap.Bool("synced", synced))
 		return synced, nil
 	}); err != nil {
@@ -344,7 +342,7 @@ func (s *DrainoConfigurationObserverImpl) Reset() {
 
 	s.logger.Info("Resetting annotations for configuration names")
 	// Reset the annotations that are set by the observer
-	for _, node := range s.nodeStore.ListNodes() {
+	for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 		s.logger.Info("Resetting annotations for node", zap.String("node", node.Name))
 		if node.Annotations[ConfigurationAnnotationKey] != "" {
 			if err := RetryWithTimeout(func() error {
@@ -368,13 +366,14 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithPVCManagementEnabled(node *v
 	if node == nil {
 		return false
 	}
-	pods, err := s.podStore.ListPodsForNode(node.Name)
+	pods, err := s.runtimeObjectStore.Pods().ListPodsForNode(node.Name)
 	if err != nil {
 		s.logger.Error("Failed to list pod for node in DrainoConfigurationObserverImpl.HasPodWithPVCManagementEnabled", zap.String("node", node.Name), zap.Error(err))
 		return false
 	}
 	for _, p := range pods {
-		if p.Annotations[PVCStorageClassCleanupAnnotationKey] == PVCStorageClassCleanupAnnotationValue {
+		valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, p, s.runtimeObjectStore)
+		if valAnnotation == PVCStorageClassCleanupAnnotationValue {
 			return true
 		}
 	}
@@ -385,7 +384,7 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithUserOptOutAnnotation(node *v
 	if node == nil {
 		return false
 	}
-	pods, err := s.podStore.ListPodsForNode(node.Name)
+	pods, err := s.runtimeObjectStore.Pods().ListPodsForNode(node.Name)
 	if err != nil {
 		s.logger.Error("Failed to list pods for node in DrainoConfigurationObserverImpl.HasPodWithUserOptOutAnnotation", zap.String("node", node.Name), zap.Error(err))
 		return false

@@ -186,10 +186,10 @@ var _ CordonDrainer = &APICordonDrainer{}
 
 // APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
 type APICordonDrainer struct {
-	c             kubernetes.Interface
-	l             *zap.Logger
-	eventRecorder record.EventRecorder
-	nodeStore     NodeStore
+	c                  kubernetes.Interface
+	l                  *zap.Logger
+	eventRecorder      record.EventRecorder
+	runtimeObjectStore RuntimeObjectStore
 
 	filter                 PodFilterFunc
 	cordonLimiter          CordonLimiter
@@ -287,8 +287,8 @@ func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecor
 	return d
 }
 
-func (d *APICordonDrainer) SetNodeStore(store NodeStore) {
-	d.nodeStore = store
+func (d *APICordonDrainer) SetRuntimeObjectStore(store RuntimeObjectStore) {
+	d.runtimeObjectStore = store
 }
 
 func (d *APICordonDrainer) deleteTimeout() time.Duration {
@@ -698,7 +698,7 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 		return nil, nil
 	}
 
-	valAnnotation := pod.Annotations[PVCStorageClassCleanupAnnotationKey]
+	valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, pod, d.runtimeObjectStore)
 	if valAnnotation != PVCStorageClassCleanupAnnotationValue {
 		return nil, nil
 	}
@@ -771,7 +771,7 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 }
 
 func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, withRateLimiting bool) (NodeReplacementStatus, error) {
-	nodeFromStore, err := d.nodeStore.Get(n.Name)
+	nodeFromStore, err := d.runtimeObjectStore.Nodes().Get(n.Name)
 	if err != nil {
 		return NodeReplacementStatusNone, err
 	}

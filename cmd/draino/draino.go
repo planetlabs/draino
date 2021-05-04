@@ -202,6 +202,11 @@ func main() {
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
 
 	pods := kubernetes.NewPodWatch(cs)
+	statefulSets := kubernetes.NewStatefulsetWatch(cs)
+	runtimeObjectStoreImpl := &kubernetes.RuntimeObjectStoreImpl{
+		StatefulSetsStore: statefulSets,
+		PodsStore:         pods,
+	}
 
 	// Sanitize user input
 	sort.Strings(*conditions)
@@ -337,9 +342,9 @@ func main() {
 
 	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
 	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
-
+	runtimeObjectStoreImpl.NodesStore = nodes
 	cordonLimiter.SetNodeLister(nodes)
-	cordonDrainer.SetNodeStore(nodes)
+	cordonDrainer.SetRuntimeObjectStore(runtimeObjectStoreImpl)
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")
@@ -349,7 +354,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), nodes, pods, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
 	if *resetScopeAnnotation == true {
 		go scopeObserver.Reset()
