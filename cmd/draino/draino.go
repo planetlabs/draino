@@ -381,7 +381,7 @@ func main() {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Info("watchers are running")
-				kingpin.FatalIfError(kubernetes.Await(nodes, pods), "error watching")
+				kingpin.FatalIfError(kubernetes.Await(nodes, pods, statefulSets), "error watching")
 			},
 			OnStoppedLeading: func() {
 				kingpin.Fatalf("lost leader election")
