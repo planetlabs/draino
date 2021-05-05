@@ -24,7 +24,9 @@ import (
 
 	"errors"
 
+	v1 "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -34,6 +36,35 @@ import (
 
 type SyncedStore interface {
 	HasSynced() bool
+}
+
+type RuntimeObjectStore interface {
+	SyncedStore
+	Nodes() NodeStore
+	Pods() PodStore
+	StatefulSets() StatefulSetStore
+}
+
+type RuntimeObjectStoreImpl struct {
+	NodesStore        NodeStore
+	PodsStore         PodStore
+	StatefulSetsStore StatefulSetStore
+}
+
+func (r *RuntimeObjectStoreImpl) Nodes() NodeStore {
+	return r.NodesStore
+}
+
+func (r *RuntimeObjectStoreImpl) Pods() PodStore {
+	return r.PodsStore
+}
+
+func (r *RuntimeObjectStoreImpl) StatefulSets() StatefulSetStore {
+	return r.StatefulSetsStore
+}
+
+func (r *RuntimeObjectStoreImpl) HasSynced() bool {
+	return r.NodesStore.HasSynced() && r.StatefulSetsStore.HasSynced() && r.PodsStore.HasSynced()
 }
 
 // An NodeStore is a cache of node resources.
@@ -147,3 +178,45 @@ type PodsSortedByName []*core.Pod
 func (a PodsSortedByName) Len() int           { return len(a) }
 func (a PodsSortedByName) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a PodsSortedByName) Less(i, j int) bool { return strings.Compare(a[i].Name, a[j].Name) > 0 }
+
+type StatefulSetStore interface {
+	SyncedStore
+	// List all the pods of a given node
+	Get(namespace, name string) (*v1.StatefulSet, error)
+}
+
+// A PodWatch is a cache of node resources that notifies registered
+// handlers when its contents change.
+type StatefulSetWatch struct {
+	cache.SharedInformer
+}
+
+var _ StatefulSetStore = &StatefulSetWatch{}
+
+// NewStatefulsetWatch creates a watch on sts resources.
+func NewStatefulsetWatch(c kubernetes.Interface) *StatefulSetWatch {
+	lw := &cache.ListWatch{
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.AppsV1().StatefulSets("").List(o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.AppsV1().StatefulSets("").Watch(o) },
+	}
+
+	i := cache.NewSharedInformer(lw, &core.Pod{}, 30*time.Minute)
+	return &StatefulSetWatch{i}
+}
+
+func (s StatefulSetWatch) Get(namespace, name string) (*v1.StatefulSet, error) {
+	obj, _, err := s.GetStore().GetByKey(namespace + "/" + name)
+	if err != nil {
+		return nil, err
+	}
+	if obj != nil {
+		sts, ok := obj.(*v1.StatefulSet)
+		if ok {
+			return sts, nil
+		}
+		if !ok {
+			return nil, errors.New("Failed to cast object from store to Statefulset.")
+		}
+	}
+	return nil, apierrors.NewNotFound(v1.Resource("statefulset"), name)
+}

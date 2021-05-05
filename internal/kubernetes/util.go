@@ -273,3 +273,29 @@ func PatchDeleteNodeAnnotationKey(kclient kubernetes.Interface, nodeName string,
 		Patch(nodeName, types.MergePatchType, payloadBytes)
 	return err
 }
+
+// GetAnnotationFromPodOrController check if an annotation is present on the pod or the associated controller object
+// Supported controller object:
+// - statefulset
+//
+// Method made generic to be able to extend to deployments and other controllers later
+func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store RuntimeObjectStore) (value string, found bool) {
+	//Check directly on the pod and return if any value
+	if pod.Annotations != nil {
+		if value, ok := pod.Annotations[annotationKey]; ok {
+			return value, ok
+		}
+	}
+
+	for _, r := range pod.OwnerReferences {
+		if r.Kind == "StatefulSet" {
+			sts, err := store.StatefulSets().Get(pod.Namespace, r.Name)
+			if err != nil {
+				return "", false
+			}
+			v, ok := sts.Annotations[annotationKey]
+			return v, ok
+		}
+	}
+	return "", false
+}
