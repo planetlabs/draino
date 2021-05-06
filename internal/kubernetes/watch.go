@@ -200,7 +200,7 @@ func NewStatefulsetWatch(c kubernetes.Interface) *StatefulSetWatch {
 		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.AppsV1().StatefulSets("").Watch(o) },
 	}
 
-	i := cache.NewSharedInformer(lw, &core.Pod{}, 30*time.Minute)
+	i := cache.NewSharedInformer(lw, &v1.StatefulSet{}, 30*time.Minute)
 	return &StatefulSetWatch{i}
 }
 
