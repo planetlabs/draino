@@ -134,3 +134,12 @@ func NewPodFiltersWithOptInFirst(optInFilter, filter PodFilterFunc) PodFilterFun
 		return filter(p)
 	}
 }
+
+func NewPodFiltersIgnoreCompletedPods(filter PodFilterFunc) PodFilterFunc {
+	return func(p core.Pod) (bool, string, error) {
+		if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {
+			return true, "", nil
+		}
+		return filter(p)
+	}
+}

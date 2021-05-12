@@ -290,7 +290,8 @@ func main() {
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
-		kubernetes.WithPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(pf...))),
+		kubernetes.WithPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
+			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(pf...)))),
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
@@ -305,7 +306,9 @@ func main() {
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)), pods),
+		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
+			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...))),
+			pods),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {
