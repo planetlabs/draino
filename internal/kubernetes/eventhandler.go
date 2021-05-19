@@ -87,10 +87,12 @@ var (
 	TagReason, _                     = tag.NewKey("reason")
 	TagFailureCause, _               = tag.NewKey("failure_cause")
 	TagInScope, _                    = tag.NewKey("in_scope")
+	TagDrainStatus, _                = tag.NewKey("drain_status")
 	TagPreprovisioning, _            = tag.NewKey("preprovisioning")
 	TagPVCManagement, _              = tag.NewKey("pvc_management")
 	TagDrainRetry, _                 = tag.NewKey("drain_retry")
 	TagUserOptOutViaPodAnnotation, _ = tag.NewKey("user_opt_out_via_pod_annotation")
+	TagUserOptInViaPodAnnotation, _  = tag.NewKey("user_opt_in_via_pod_annotation")
 )
 
 // A DrainingResourceEventHandler cordons and drains any added or updated nodes.

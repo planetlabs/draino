@@ -354,7 +354,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
 	if *resetScopeAnnotation == true {
 		go scopeObserver.Reset()
