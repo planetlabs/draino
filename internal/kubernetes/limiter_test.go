@@ -26,7 +26,7 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Status: core.NodeStatus{
 			Conditions: []core.NodeCondition{
-				{ Type: core.NodeReady, Status: core.ConditionTrue },
+				{Type: core.NodeReady, Status: core.ConditionTrue},
 			},
 		},
 	},
@@ -43,7 +43,7 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Status: core.NodeStatus{
 			Conditions: []core.NodeCondition{
-				{ Type: core.NodeReady, Status: core.ConditionTrue },
+				{Type: core.NodeReady, Status: core.ConditionTrue},
 			},
 		},
 	},
@@ -61,7 +61,7 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Status: core.NodeStatus{
 			Conditions: []core.NodeCondition{
-				{ Type: core.NodeReady, Status: core.ConditionTrue },
+				{Type: core.NodeReady, Status: core.ConditionTrue},
 			},
 		},
 	},
@@ -80,7 +80,7 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Status: core.NodeStatus{
 			Conditions: []core.NodeCondition{
-				{ Type: core.NodeReady, Status: core.ConditionTrue },
+				{Type: core.NodeReady, Status: core.ConditionTrue},
 			},
 		},
 	},
@@ -98,7 +98,7 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Status: core.NodeStatus{
 			Conditions: []core.NodeCondition{
-				{ Type: core.NodeReady, Status: core.ConditionTrue },
+				{Type: core.NodeReady, Status: core.ConditionTrue},
 			},
 		},
 	},
@@ -117,7 +117,7 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Status: core.NodeStatus{
 			Conditions: []core.NodeCondition{
-				{ Type: core.NodeReady, Status: core.ConditionTrue },
+				{Type: core.NodeReady, Status: core.ConditionTrue},
 			},
 		},
 	},
@@ -130,12 +130,12 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Spec: core.NodeSpec{
 			Taints: []core.Taint{
-				{Key: "D", Value: "D"},{Key: TaintNodeNotReady, Value: "NotReady"},
+				{Key: "D", Value: "D"}, {Key: TaintNodeNotReady, Value: "NotReady"},
 			},
 		},
 		Status: core.NodeStatus{
 			Conditions: []core.NodeCondition{
-				{ Type: core.NodeNetworkUnavailable, Status: core.ConditionTrue },
+				{Type: core.NodeNetworkUnavailable, Status: core.ConditionTrue},
 			},
 		},
 	},
@@ -158,8 +158,9 @@ func (t *testNodeLister) ListNodes() []*core.Node {
 }
 
 type testNodestore struct{}
-func (f testNodestore) HasSynced() bool { return true }
-func (f testNodestore) Get(name string) (*core.Node, error) { return nil, nil}
+
+func (f testNodestore) HasSynced() bool                     { return true }
+func (f testNodestore) Get(name string) (*core.Node, error) { return nil, nil }
 func (f testNodestore) ListNodes() []*core.Node {
 	return NodesMapAsSlice()
 }
@@ -267,7 +268,7 @@ func Test_getMatchingNodesForLabelsCount(t *testing.T) {
 }
 
 func TestLimiter_CanCordon(t *testing.T) {
-	var isGloballyBlocked *bool = new(bool)// Limit by %NodeUnReqdy
+	var isGloballyBlocked *bool = new(bool) // Limit by %NodeUnReqdy
 	tests := []struct {
 		name         string
 		limiterfuncs map[string]LimiterFunc
@@ -352,7 +353,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			name: "limit on 15%nodes NotReady m=10",
 			node: nodesTestMap["D"],
 			limiterfuncs: map[string]LimiterFunc{
-				"limiter-notReady-10%": MaxPercentOfUnreadyNodesFunc(10, true, nodeStore, isGloballyBlocked),
+				"limiter-notReady-10%": MaxNotReadyNodesFunc(10, true, nodeStore, isGloballyBlocked),
 			},
 			want:  false,
 			want1: "limiter-notReady-10%",
@@ -361,7 +362,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			name: "limit on 15%nodes NotReady m=20",
 			node: nodesTestMap["D"],
 			limiterfuncs: map[string]LimiterFunc{
-				"limiter-notReady-20%": MaxPercentOfUnreadyNodesFunc(20, true, nodeStore, isGloballyBlocked),
+				"limiter-notReady-20%": MaxNotReadyNodesFunc(20, true, nodeStore, isGloballyBlocked),
 			},
 			want:  true,
 			want1: "",

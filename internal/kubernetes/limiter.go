@@ -107,7 +107,7 @@ type Limiter struct {
 	nodeLister   NodeLister
 	rateLimiter  flowcontrol.RateLimiter // since we are relying on the store cache that is asynchronously populated to check cordon status, let's be sure that we don't have cordon burst
 	limiterfuncs map[string]LimiterFunc
-	logger *zap.Logger
+	logger       *zap.Logger
 }
 
 func (l *Limiter) SetNodeLister(lister NodeLister) {
@@ -271,7 +271,7 @@ func MaxSimultaneousCordonLimiterForTaintsFunc(max int, percent bool, taintKeys 
 	}
 }
 
-func MaxPercentOfUnreadyNodesFunc(max int, percent bool, store NodeStore, isGloballyBlocked *bool) LimiterFunc {
+func MaxNotReadyNodesFunc(max int, percent bool, store NodeStore, isGloballyBlocked *bool) LimiterFunc {
 	var unready int = -1
 
 	go func() { // counts UnReady nodes every T=60s
