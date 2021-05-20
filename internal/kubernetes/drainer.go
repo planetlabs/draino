@@ -633,7 +633,7 @@ func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(pod *core.Pod, pvc *core.
 
 		d.l.Info("deleting pod to force pvc recreate", zap.String("pod", pod.GetName()), zap.String("namespace", pod.GetNamespace()))
 		err = d.c.CoreV1().Pods(pod.GetNamespace()).Delete(pod.GetName(), &meta.DeleteOptions{})
-		if err != nil {
+		if err != nil && !apierrors.IsNotFound(err) {
 			return false, fmt.Errorf("cannot delete pod %s/%s to regenerated PVC: %w", pod.GetNamespace(), pod.GetName(), err)
 		}
 		return false, nil
