@@ -585,6 +585,36 @@ func TestPodFilters(t *testing.T) {
 			},
 			passesFilter: true,
 		},
+		{
+			name: "FilterRunningPod",
+			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}, Status: core.PodStatus{Phase: core.PodRunning}},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodFiltersIgnoreCompletedPods(NewPodFilters(
+					func(_ core.Pod) (bool, string, error) { return false, "", nil },
+				))
+			},
+			passesFilter: false,
+		},
+		{
+			name: "IgnoreCompletedSuccessPod",
+			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}, Status: core.PodStatus{Phase: core.PodSucceeded}},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodFiltersIgnoreCompletedPods(NewPodFilters(
+					func(_ core.Pod) (bool, string, error) { return false, "", nil },
+				))
+			},
+			passesFilter: true,
+		},
+		{
+			name: "IgnoreCompletedFailedPod",
+			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}, Status: core.PodStatus{Phase: core.PodFailed}},
+			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+				return NewPodFiltersIgnoreCompletedPods(NewPodFilters(
+					func(_ core.Pod) (bool, string, error) { return false, "", nil },
+				))
+			},
+			passesFilter: true,
+		},
 	}
 
 	for _, tc := range cases {
