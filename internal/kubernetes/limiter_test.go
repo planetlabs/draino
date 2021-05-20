@@ -24,6 +24,11 @@ var nodesTestMap = map[string]*core.Node{
 				{Key: "A", Value: "A"},
 			},
 		},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{
+				{ Type: core.NodeReady, Status: core.ConditionTrue },
+			},
+		},
 	},
 	"A-cordon": &core.Node{
 		ObjectMeta: v1.ObjectMeta{
@@ -36,6 +41,11 @@ var nodesTestMap = map[string]*core.Node{
 			},
 			Unschedulable: true,
 		},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{
+				{ Type: core.NodeReady, Status: core.ConditionTrue },
+			},
+		},
 	},
 	"AB": &core.Node{
 		ObjectMeta: v1.ObjectMeta{
@@ -47,6 +57,11 @@ var nodesTestMap = map[string]*core.Node{
 		Spec: core.NodeSpec{
 			Taints: []core.Taint{
 				{Key: "A", Value: "A"}, {Key: "B", Value: "B"},
+			},
+		},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{
+				{ Type: core.NodeReady, Status: core.ConditionTrue },
 			},
 		},
 	},
@@ -63,6 +78,11 @@ var nodesTestMap = map[string]*core.Node{
 			},
 			Unschedulable: true,
 		},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{
+				{ Type: core.NodeReady, Status: core.ConditionTrue },
+			},
+		},
 	},
 	"ABC": &core.Node{
 		ObjectMeta: v1.ObjectMeta{
@@ -74,6 +94,11 @@ var nodesTestMap = map[string]*core.Node{
 		Spec: core.NodeSpec{
 			Taints: []core.Taint{
 				{Key: "A", Value: "A"}, {Key: "B", Value: "B"}, {Key: "C", Value: "C"},
+			},
+		},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{
+				{ Type: core.NodeReady, Status: core.ConditionTrue },
 			},
 		},
 	},
@@ -90,6 +115,11 @@ var nodesTestMap = map[string]*core.Node{
 			},
 			Unschedulable: true,
 		},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{
+				{ Type: core.NodeReady, Status: core.ConditionTrue },
+			},
+		},
 	},
 	"D": &core.Node{
 		ObjectMeta: v1.ObjectMeta{
@@ -100,7 +130,12 @@ var nodesTestMap = map[string]*core.Node{
 		},
 		Spec: core.NodeSpec{
 			Taints: []core.Taint{
-				{Key: "D", Value: "D"},
+				{Key: "D", Value: "D"},{Key: TaintNodeNotReady, Value: "NotReady"},
+			},
+		},
+		Status: core.NodeStatus{
+			Conditions: []core.NodeCondition{
+				{ Type: core.NodeNetworkUnavailable, Status: core.ConditionTrue },
 			},
 		},
 	},
@@ -121,6 +156,15 @@ type testNodeLister struct{}
 func (t *testNodeLister) ListNodes() []*core.Node {
 	return NodesMapAsSlice()
 }
+
+type testNodestore struct{}
+func (f testNodestore) HasSynced() bool { return true }
+func (f testNodestore) Get(name string) (*core.Node, error) { return nil, nil}
+func (f testNodestore) ListNodes() []*core.Node {
+	return NodesMapAsSlice()
+}
+
+var nodeStore = &testNodestore{}
 
 func Test_getMatchingNodesForTaintCount(t *testing.T) {
 	tests := []struct {
@@ -223,6 +267,7 @@ func Test_getMatchingNodesForLabelsCount(t *testing.T) {
 }
 
 func TestLimiter_CanCordon(t *testing.T) {
+	var isGloballyBlocked *bool = new(bool)// Limit by %NodeUnReqdy
 	tests := []struct {
 		name         string
 		limiterfuncs map[string]LimiterFunc
@@ -303,6 +348,24 @@ func TestLimiter_CanCordon(t *testing.T) {
 			want:  true,
 			want1: "",
 		},
+		{
+			name: "limit on 15%nodes NotReady m=10",
+			node: nodesTestMap["D"],
+			limiterfuncs: map[string]LimiterFunc{
+				"limiter-notReady-10%": MaxPercentOfUnreadyNodesFunc(10, true, nodeStore, isGloballyBlocked),
+			},
+			want:  false,
+			want1: "limiter-notReady-10%",
+		},
+		{
+			name: "limit on 15%nodes NotReady m=20",
+			node: nodesTestMap["D"],
+			limiterfuncs: map[string]LimiterFunc{
+				"limiter-notReady-20%": MaxPercentOfUnreadyNodesFunc(20, true, nodeStore, isGloballyBlocked),
+			},
+			want:  true,
+			want1: "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -321,6 +384,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 			}
 			if got1 != tt.want1 {
 				t.Errorf("CanCordon() got1 = %v, want %v", got1, tt.want1)
+			}
+			if *isGloballyBlocked == true && *isGloballyBlocked == tt.want {
+				t.Errorf("CanCordon() isGloballyBlocked got = %v, want %v", got, tt.want)
 			}
 		})
 	}

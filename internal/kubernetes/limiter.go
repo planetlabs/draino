@@ -107,7 +107,6 @@ type Limiter struct {
 	nodeLister   NodeLister
 	rateLimiter  flowcontrol.RateLimiter // since we are relying on the store cache that is asynchronously populated to check cordon status, let's be sure that we don't have cordon burst
 	limiterfuncs map[string]LimiterFunc
-
 	logger *zap.Logger
 }
 
@@ -269,6 +268,56 @@ func MaxSimultaneousCordonLimiterForTaintsFunc(max int, percent bool, taintKeys 
 			return percentCordon <= max, nil
 		}
 		return cordonCount < max, nil
+	}
+}
+
+func MaxPercentOfUnreadyNodesFunc(max int, percent bool, store NodeStore, isGloballyBlocked *bool) LimiterFunc {
+	var unready int = -1
+
+	go func() { // counts UnReady nodes every T=60s
+		for {
+			if store != nil {
+				list := store.ListNodes()
+				if len(list) == 0 {
+					return
+				}
+
+				var i int
+				for _, n := range list {
+					ready, _, _ := GetReadinessState(n)
+					if !ready {
+						i++
+					}
+				}
+				unready = i
+			}
+
+			time.Sleep(60 * time.Second)
+		}
+	}()
+
+	return func(n *core.Node, cordonNodes, allNodes []*core.Node) (bool, error) {
+		rc := false
+		if len(allNodes) == 0 {
+			return false, errors.New("no node discovered")
+		}
+
+		if unready < 0 {
+			return false, errors.New("no node readiness data")
+		}
+
+		*isGloballyBlocked = false
+		if percent {
+			rc = math.Ceil(100*float64(unready)/float64(len(allNodes))) <= float64(max)
+		} else {
+			rc = unready < max
+		}
+
+		if !rc {
+			*isGloballyBlocked = true
+		}
+
+		return rc, nil
 	}
 }
 

@@ -104,6 +104,7 @@ type DrainingResourceEventHandler struct {
 
 	podStore     PodStore
 	cordonFilter PodFilterFunc
+	isGloballyBlocked *bool
 
 	lastDrainScheduledFor        time.Time
 	buffer                       time.Duration
@@ -153,6 +154,13 @@ func WithCordonPodFilter(f PodFilterFunc, podStore PodStore) DrainingResourceEve
 	return func(d *DrainingResourceEventHandler) {
 		d.cordonFilter = f
 		d.podStore = podStore
+	}
+}
+
+// WithGlobalBlocking configures a bool that may prevent cordon nodes due to % nodes UnReady
+func WithGlobalBlocking(isGloballyBlocked *bool) DrainingResourceEventHandlerOption {
+	return func(d *DrainingResourceEventHandler) {
+		d.isGloballyBlocked = isGloballyBlocked
 	}
 }
 
@@ -233,6 +241,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 		}
+		return
+	}
+
+	if *h.isGloballyBlocked {
+		logger.Info("Temporarily blocked due to high percentage of UnReady nodes")
 		return
 	}
 
