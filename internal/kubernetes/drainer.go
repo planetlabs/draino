@@ -54,6 +54,7 @@ const (
 
 	CompletedStr = "Completed"
 	FailedStr    = "Failed"
+	ScheduledStr = "Scheduled"
 
 	NodeLabelKeyReplaceRequest      = "node.datadoghq.com/replace"
 	NodeLabelValueReplaceRequested  = "requested"

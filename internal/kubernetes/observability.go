@@ -74,6 +74,7 @@ type DrainoConfigurationObserverImpl struct {
 	nodeFilterFunc      func(obj interface{}) bool
 	podFilterFunc       PodFilterFunc
 	userOptOutPodFilter PodFilterFunc
+	userOptInPodFilter  PodFilterFunc
 	logger              *zap.Logger
 
 	metricsObjects metricsObjectsForObserver
@@ -81,13 +82,14 @@ type DrainoConfigurationObserverImpl struct {
 
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
-func NewScopeObserver(client client.Interface, configName string, conditions []SuppliedCondition, runtimeObjectStore RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc PodFilterFunc, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
+func NewScopeObserver(client client.Interface, configName string, conditions []SuppliedCondition, runtimeObjectStore RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
 	scopeObserver := &DrainoConfigurationObserverImpl{
 		kclient:             client,
 		runtimeObjectStore:  runtimeObjectStore,
 		nodeFilterFunc:      nodeFilterFunc,
 		podFilterFunc:       podFilterFunc,
 		userOptOutPodFilter: userOptOutPodFilter,
+		userOptInPodFilter:  userOptInPodFilter,
 		analysisPeriod:      analysisPeriod,
 		logger:              log,
 		configName:          configName,
@@ -102,11 +104,13 @@ func NewScopeObserver(client client.Interface, configName string, conditions []S
 
 type inScopeTags struct {
 	NodeTagsValues
+	DrainStatus                string
 	InScope                    bool
 	PreprovisioningEnabled     bool
 	PVCManagementEnabled       bool
 	DrainRetry                 bool
 	UserOptOutViaPodAnnotation bool
+	UserOptInViaPodAnnotation  bool
 	Condition                  string
 }
 
@@ -143,11 +147,13 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				}
 				t := inScopeTags{
 					NodeTagsValues:             nodeTags,
+					DrainStatus:                getDrainStatusStr(node),
 					InScope:                    len(node.Annotations[ConfigurationAnnotationKey]) > 0,
 					PreprovisioningEnabled:     node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
 					PVCManagementEnabled:       s.HasPodWithPVCManagementEnabled(node),
-					DrainRetry:                 node.Annotations[drainRetryAnnotationKey] == drainRetryAnnotationValue,
+					DrainRetry:                 HasDrainRetryAnnotation(node),
 					UserOptOutViaPodAnnotation: s.HasPodWithUserOptOutAnnotation(node),
+					UserOptInViaPodAnnotation:  s.HasPodWithUserOptInAnnotation(node),
 				}
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
 				conditionsWithAll := append(GetConditionsTypes(conditions), "any")
@@ -178,11 +184,13 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 		allTags, _ := tag.New(context.Background(),
 			tag.Upsert(TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(TagNodegroupName, tagsValues.NgName),
 			tag.Upsert(TagTeam, tagsValues.Team),
+			tag.Upsert(TagDrainStatus, tagsValues.DrainStatus),
 			tag.Upsert(TagConditions, tagsValues.Condition),
 			tag.Upsert(TagInScope, strconv.FormatBool(tagsValues.InScope)),
 			tag.Upsert(TagPreprovisioning, strconv.FormatBool(tagsValues.PreprovisioningEnabled)),
 			tag.Upsert(TagPVCManagement, strconv.FormatBool(tagsValues.PVCManagementEnabled)),
 			tag.Upsert(TagDrainRetry, strconv.FormatBool(tagsValues.DrainRetry)),
+			tag.Upsert(TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
 			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)))
 		stats.Record(allTags, s.metricsObjects.MeasureNodesWithNodeOptions.M(count))
 	}
@@ -381,23 +389,47 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithPVCManagementEnabled(node *v
 }
 
 func (s *DrainoConfigurationObserverImpl) HasPodWithUserOptOutAnnotation(node *v1.Node) bool {
+	return s.hasPodThatMatchFilter(node, s.userOptOutPodFilter)
+}
+
+func (s *DrainoConfigurationObserverImpl) HasPodWithUserOptInAnnotation(node *v1.Node) bool {
+	return s.hasPodThatMatchFilter(node, s.userOptInPodFilter)
+}
+
+func (s *DrainoConfigurationObserverImpl) hasPodThatMatchFilter(node *v1.Node, filter PodFilterFunc) bool {
 	if node == nil {
 		return false
 	}
 	pods, err := s.runtimeObjectStore.Pods().ListPodsForNode(node.Name)
 	if err != nil {
-		s.logger.Error("Failed to list pods for node in DrainoConfigurationObserverImpl.HasPodWithUserOptOutAnnotation", zap.String("node", node.Name), zap.Error(err))
+		s.logger.Error("Failed to list pods for node in DrainoConfigurationObserverImpl.hasPodThatMatchFilter", zap.String("node", node.Name), zap.Error(err))
 		return false
 	}
 	for _, p := range pods {
-		optOut, _, err := s.userOptOutPodFilter(*p)
+		opt, _, err := filter(*p)
 		if err != nil {
-			s.logger.Error("Failed to check if pod is opt-out", zap.String("node", node.Name), zap.String("pod", p.Name), zap.Error(err))
+			s.logger.Error("Failed to check if pod is filtered", zap.String("node", node.Name), zap.String("pod", p.Name), zap.Error(err))
 			continue
 		}
-		if optOut {
+		if opt {
 			return true
 		}
 	}
 	return false
+}
+
+func getDrainStatusStr(node *v1.Node) string {
+	drainStatus, err := IsMarkedForDrain(node)
+	if err != nil {
+		return "Error"
+	}
+	switch {
+	case drainStatus.Completed:
+		return CompletedStr
+	case drainStatus.Failed:
+		return FailedStr
+	case drainStatus.Marked:
+		return ScheduledStr
+	}
+	return "None"
 }
