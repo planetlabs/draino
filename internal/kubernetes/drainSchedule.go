@@ -232,8 +232,6 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		log := LoggerForNode(node, d.logger)
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
 
-		// TODO - global interface AreWeBlocked() due to %nodes
-
 		// Node preprovisioning
 		if d.hasPreprovisioningAnnotation(node) {
 			log.Info("Start pre-provisioning before drain")
@@ -274,7 +272,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		// Node drain
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainStarting, "Draining node")
 		if err := d.drainer.Drain(node); err != nil {
-			d.handleDrainFailure(sched, log, err, tags, node) //TODO - call this when threshhold not met.
+			d.handleDrainFailure(sched, log, err, tags, node)
 			return
 		}
 		sched.finish = time.Now()
