@@ -86,7 +86,8 @@ func main() {
 		maxSimultaneousCordon          = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
 		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
-		maxNotReadyNodes               = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
+		maxNotReadyNodes               = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
+		maxNotReadyNodesPeriod         = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
 
 		// Pod Opt-in flags
 		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
@@ -287,7 +288,7 @@ func main() {
 		if parseErr != nil {
 			kingpin.FatalIfError(parseErr, "cannot parse 'max-notready-nodes' argument")
 		}
-		cordonLimiter.AddLimiter("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesFunc(max, percent, runtimeObjectStoreImpl.NodesStore, isGloballyBlocked))
+		cordonLimiter.AddLimiter("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesFunc(max, percent, runtimeObjectStoreImpl, isGloballyBlocked, maxNotReadyNodesPeriod))
 	}
 	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
 

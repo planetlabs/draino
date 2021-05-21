@@ -53,19 +53,6 @@ const (
 	// and removed when node becomes ready.
 	TaintNodeNotReady = "node.kubernetes.io/not-ready"
 
-	// TaintNodeUnreachable will be added when node becomes unreachable
-	// (corresponding to NodeReady status ConditionUnknown)
-	// and removed when node becomes reachable (NodeReady status ConditionTrue).
-	TaintNodeUnreachable = "node.kubernetes.io/unreachable"
-
-	// TaintNodeUnschedulable will be added when node becomes unschedulable
-	// and removed when node becomes scheduable.
-	TaintNodeUnschedulable = "node.kubernetes.io/unschedulable"
-
-	// TaintNodeMemoryPressure will be added when node has memory pressure
-	// and removed when node has enough memory.
-	TaintNodeMemoryPressure = "node.kubernetes.io/memory-pressure"
-
 	// TaintNodeDiskPressure will be added when node has disk pressure
 	// and removed when node has enough disk.
 	TaintNodeDiskPressure = "node.kubernetes.io/disk-pressure"
@@ -73,10 +60,6 @@ const (
 	// TaintNodeNetworkUnavailable will be added when node's network is unavailable
 	// and removed when network becomes ready.
 	TaintNodeNetworkUnavailable = "node.kubernetes.io/network-unavailable"
-
-	// TaintNodePIDPressure will be added when node has pid pressure
-	// and removed when node has enough disk.
-	TaintNodePIDPressure = "node.kubernetes.io/pid-pressure"
 )
 
 // BuildConfigFromFlags is clientcmd.BuildConfigFromFlags with no annoying
@@ -332,9 +315,8 @@ func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store
 }
 
 // GetReadinessState gets readiness state for the node
-func GetReadinessState(node *core.Node) (isNodeReady bool, lastTransitionTime time.Time, err error) {
+func GetReadinessState(node *core.Node) (isNodeReady bool, err error) {
 	canNodeBeReady, readyFound := true, false
-	lastTransitionTime = time.Time{}
 
 	for _, cond := range node.Status.Conditions {
 		switch cond.Type {
@@ -343,22 +325,13 @@ func GetReadinessState(node *core.Node) (isNodeReady bool, lastTransitionTime ti
 			if cond.Status == core.ConditionFalse || cond.Status == core.ConditionUnknown {
 				canNodeBeReady = false
 			}
-			if lastTransitionTime.Before(cond.LastTransitionTime.Time) {
-				lastTransitionTime = cond.LastTransitionTime.Time
-			}
 		case core.NodeDiskPressure:
 			if cond.Status == core.ConditionTrue {
 				canNodeBeReady = false
 			}
-			if lastTransitionTime.Before(cond.LastTransitionTime.Time) {
-				lastTransitionTime = cond.LastTransitionTime.Time
-			}
 		case core.NodeNetworkUnavailable:
 			if cond.Status == core.ConditionTrue {
 				canNodeBeReady = false
-			}
-			if lastTransitionTime.Before(cond.LastTransitionTime.Time) {
-				lastTransitionTime = cond.LastTransitionTime.Time
 			}
 		}
 	}
@@ -371,14 +344,11 @@ func GetReadinessState(node *core.Node) (isNodeReady bool, lastTransitionTime ti
 	for _, taint := range node.Spec.Taints {
 		if notReadyTaints[taint.Key] {
 			canNodeBeReady = false
-			if taint.TimeAdded != nil && lastTransitionTime.Before(taint.TimeAdded.Time) {
-				lastTransitionTime = taint.TimeAdded.Time
-			}
 		}
 	}
 
 	if !readyFound {
-		return false, time.Time{}, fmt.Errorf("readiness information not found")
+		return false, fmt.Errorf("readiness information not found")
 	}
-	return canNodeBeReady, lastTransitionTime, nil
+	return canNodeBeReady, nil
 }

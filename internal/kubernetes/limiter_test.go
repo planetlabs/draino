@@ -167,6 +167,15 @@ func (f testNodestore) ListNodes() []*core.Node {
 
 var nodeStore = &testNodestore{}
 
+type testRuntimeObjectStore struct{}
+
+func (r *testRuntimeObjectStore) Nodes() NodeStore               { return nodeStore }
+func (r *testRuntimeObjectStore) Pods() PodStore                 { return nil }
+func (r *testRuntimeObjectStore) StatefulSets() StatefulSetStore { return nil }
+func (r *testRuntimeObjectStore) HasSynced() bool                { return true }
+
+var runtimeObjectStore = &testRuntimeObjectStore{}
+
 func Test_getMatchingNodesForTaintCount(t *testing.T) {
 	tests := []struct {
 		name                 string
@@ -268,7 +277,9 @@ func Test_getMatchingNodesForLabelsCount(t *testing.T) {
 }
 
 func TestLimiter_CanCordon(t *testing.T) {
-	var isGloballyBlocked *bool = new(bool) // Limit by %NodeUnReqdy
+	isGloballyBlocked := false
+	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
+
 	tests := []struct {
 		name         string
 		limiterfuncs map[string]LimiterFunc
@@ -350,19 +361,37 @@ func TestLimiter_CanCordon(t *testing.T) {
 			want1: "",
 		},
 		{
-			name: "limit on 15%nodes NotReady m=10",
+			name: "limit on 15% of nodes NotReady with threshold at max=10%", // 15% = 1/7 nodes
 			node: nodesTestMap["D"],
 			limiterfuncs: map[string]LimiterFunc{
-				"limiter-notReady-10%": MaxNotReadyNodesFunc(10, true, nodeStore, isGloballyBlocked),
+				"limiter-notReady-10%": MaxNotReadyNodesFunc(10, true, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
 			},
 			want:  false,
 			want1: "limiter-notReady-10%",
 		},
 		{
-			name: "limit on 15%nodes NotReady m=20",
+			name: "limit on 1 nodes NotReady with threshold at max=1",
 			node: nodesTestMap["D"],
 			limiterfuncs: map[string]LimiterFunc{
-				"limiter-notReady-20%": MaxNotReadyNodesFunc(20, true, nodeStore, isGloballyBlocked),
+				"limiter-notReady-1": MaxNotReadyNodesFunc(1, false, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
+			},
+			want:  false,
+			want1: "limiter-notReady-1",
+		},
+		{
+			name: "no limit on 15% nodes NotReady with threshold max=20%",
+			node: nodesTestMap["D"],
+			limiterfuncs: map[string]LimiterFunc{
+				"no-limiter-notReady-20%": MaxNotReadyNodesFunc(20, true, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
+			},
+			want:  true,
+			want1: "",
+		},
+		{
+			name: "no limit on 1 nodes NotReady with threshold max=20",
+			node: nodesTestMap["D"],
+			limiterfuncs: map[string]LimiterFunc{
+				"no-limiter-notReady-20": MaxNotReadyNodesFunc(20, false, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
 			},
 			want:  true,
 			want1: "",
@@ -386,7 +415,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			if got1 != tt.want1 {
 				t.Errorf("CanCordon() got1 = %v, want %v", got1, tt.want1)
 			}
-			if *isGloballyBlocked == true && *isGloballyBlocked == tt.want {
+			if isGloballyBlocked == true && got != tt.want {
 				t.Errorf("CanCordon() isGloballyBlocked got = %v, want %v", got, tt.want)
 			}
 		})

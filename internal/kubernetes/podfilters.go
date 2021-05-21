@@ -49,7 +49,6 @@ func LocalStoragePodFilter(p core.Pod) (bool, string, error) {
 	return true, "", nil
 }
 
-//TODO - may crash if API (metrics server) is not avail
 func NewPodControlledByFilter(controlledByAPIResources []*meta.APIResource) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
 		for _, controlledBy := range controlledByAPIResources {
@@ -123,7 +122,6 @@ func NewPodFilters(filters ...PodFilterFunc) PodFilterFunc {
 	}
 }
 
-//TODO - optin will bypass filters (sts, ..)
 func NewPodFiltersWithOptInFirst(optInFilter, filter PodFilterFunc) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
 		optIn, r, err := optInFilter(p)

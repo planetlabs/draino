@@ -4,14 +4,8 @@ all: build
 build: fmt vet
         CGO_ENABLED=0 go build -o bin/draino ./cmd/draino/*.go
 
-
-#       --node-label-expr="metadata['labels']['node-role'] in ['default', 'default', 'default-compute', 'default-memory']"
-#       --evict-unreplicated-pods
-#       --evict-emptydir-pods
-#       --evict-daemonset-pods AMIProblem KernelDeadlock ReadonlyFilesystem OutOfDisk
-
 # Run against the configured Kubernetes cluster in ~/.kube/config
-run: fmt vet
+run-in-rage: fmt vet
 	go run ./cmd/draino/*.go  --kubeconfig=$(KUBECONFIG) --namespace=rage-k8s \
 	  --dry-run \
 	  --debug \
