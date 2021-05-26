@@ -86,6 +86,8 @@ func main() {
 		maxSimultaneousCordon          = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
 		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
+		maxNotReadyNodes               = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
+		maxNotReadyNodesPeriod         = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
 
 		// Pod Opt-in flags
 		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
@@ -101,7 +103,7 @@ func main() {
 		// PV/PVC management
 		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
 
-		configName           = app.Flag("config-name", "Name of the draino configuratio").Required().String()
+		configName           = app.Flag("config-name", "Name of the draino configuration").Required().String()
 		resetScopeAnnotation = app.Flag("reset-config-annotations", "Reset the scope annotation on the nodes").Bool()
 		scopeAnalysisPeriod  = app.Flag("scope-analysis-period", "Period to run the scope analysis and generate metric").Default((5 * time.Minute).String()).Duration()
 
@@ -280,7 +282,14 @@ func main() {
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
 	}
-
+	var isGloballyBlocked *bool = new(bool)
+	for _, p := range *maxNotReadyNodes {
+		max, percent, parseErr := kubernetes.ParseCordonMax(p)
+		if parseErr != nil {
+			kingpin.FatalIfError(parseErr, "cannot parse 'max-notready-nodes' argument")
+		}
+		cordonLimiter.AddLimiter("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesFunc(max, percent, runtimeObjectStoreImpl, isGloballyBlocked, maxNotReadyNodesPeriod))
+	}
 	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
 
 	eventRecorder := kubernetes.NewEventRecorder(cs)
@@ -309,6 +318,7 @@ func main() {
 		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
 			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...))),
 			pods),
+		kubernetes.WithGlobalBlocking(isGloballyBlocked),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {
@@ -321,6 +331,7 @@ func main() {
 				kubernetes.WithDrainBuffer(*drainBuffer),
 				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 				kubernetes.WithDrainGroups(*drainGroupLabelKey),
+				kubernetes.WithGlobalBlocking(isGloballyBlocked),
 				kubernetes.WithConditionsFilter(*conditions)),
 		}
 	}

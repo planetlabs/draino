@@ -48,6 +48,20 @@ const Component = "draino"
 const LabelKeyNodeGroupName = "nodegroups.datadoghq.com/name"
 const LabelKeyNodeGroupNamespace = "nodegroups.datadoghq.com/namespace"
 
+const (
+	// TaintNodeNotReady will be added when node is not ready
+	// and removed when node becomes ready.
+	TaintNodeNotReady = "node.kubernetes.io/not-ready"
+
+	// TaintNodeDiskPressure will be added when node has disk pressure
+	// and removed when node has enough disk.
+	TaintNodeDiskPressure = "node.kubernetes.io/disk-pressure"
+
+	// TaintNodeNetworkUnavailable will be added when node's network is unavailable
+	// and removed when network becomes ready.
+	TaintNodeNetworkUnavailable = "node.kubernetes.io/network-unavailable"
+)
+
 // BuildConfigFromFlags is clientcmd.BuildConfigFromFlags with no annoying
 // dependencies on glog.
 // https://godoc.org/k8s.io/client-go/tools/clientcmd#BuildConfigFromFlags
@@ -298,4 +312,43 @@ func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store
 		}
 	}
 	return "", false
+}
+
+// GetReadinessState gets readiness state for the node
+func GetReadinessState(node *core.Node) (isNodeReady bool, err error) {
+	canNodeBeReady, readyFound := true, false
+
+	for _, cond := range node.Status.Conditions {
+		switch cond.Type {
+		case core.NodeReady:
+			readyFound = true
+			if cond.Status == core.ConditionFalse || cond.Status == core.ConditionUnknown {
+				canNodeBeReady = false
+			}
+		case core.NodeDiskPressure:
+			if cond.Status == core.ConditionTrue {
+				canNodeBeReady = false
+			}
+		case core.NodeNetworkUnavailable:
+			if cond.Status == core.ConditionTrue {
+				canNodeBeReady = false
+			}
+		}
+	}
+
+	notReadyTaints := map[string]bool{
+		TaintNodeNotReady:           true,
+		TaintNodeDiskPressure:       true,
+		TaintNodeNetworkUnavailable: true,
+	}
+	for _, taint := range node.Spec.Taints {
+		if notReadyTaints[taint.Key] {
+			canNodeBeReady = false
+		}
+	}
+
+	if !readyFound {
+		return false, fmt.Errorf("readiness information not found")
+	}
+	return canNodeBeReady, nil
 }

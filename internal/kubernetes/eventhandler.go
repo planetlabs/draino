@@ -102,8 +102,9 @@ type DrainingResourceEventHandler struct {
 	eventRecorder  record.EventRecorder
 	drainScheduler DrainScheduler
 
-	podStore     PodStore
-	cordonFilter PodFilterFunc
+	podStore          PodStore
+	cordonFilter      PodFilterFunc
+	isGloballyBlocked *bool
 
 	lastDrainScheduledFor        time.Time
 	buffer                       time.Duration
@@ -156,6 +157,13 @@ func WithCordonPodFilter(f PodFilterFunc, podStore PodStore) DrainingResourceEve
 	}
 }
 
+// WithGlobalBlocking configures a bool that may prevent cordon nodes due to % nodes UnReady
+func WithGlobalBlocking(isGloballyBlocked *bool) DrainingResourceEventHandlerOption {
+	return func(d *DrainingResourceEventHandler) {
+		d.isGloballyBlocked = isGloballyBlocked
+	}
+}
+
 // WithDrainGroups configures draining groups. Schedules are done per groups
 func WithDrainGroups(labelKeysForDrainGroup string) DrainingResourceEventHandlerOption {
 	var drainGroup []string
@@ -182,6 +190,7 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 		eventRecorder:         e,
 		lastDrainScheduledFor: time.Now(),
 		buffer:                DefaultDrainBuffer,
+		isGloballyBlocked:     new(bool),
 	}
 	for _, o := range ho {
 		o(h)
@@ -233,6 +242,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 		}
+		return
+	}
+
+	if *h.isGloballyBlocked {
+		logger.Info("Temporarily blocked due to high number of NotReady nodes")
 		return
 	}
 
@@ -421,7 +435,6 @@ func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node)
 		}
 		n.Annotations[drainoConditionsAnnotationKey] = strings.Join(value, ";")
 	}
-	return func(n *core.Node) {}
 }
 
 // drain schedule the draining activity

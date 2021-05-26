@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"k8s.io/apimachinery/pkg/util/wait"
 	"math"
 	"strconv"
 	"strings"
@@ -28,6 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/util/flowcontrol"
 )
+
+const DefaultMaxNotReadyNodesPeriod = 60 * time.Second
 
 type NodeReplacementLimiter interface {
 	// Can ask for a new node replacement
@@ -107,8 +110,7 @@ type Limiter struct {
 	nodeLister   NodeLister
 	rateLimiter  flowcontrol.RateLimiter // since we are relying on the store cache that is asynchronously populated to check cordon status, let's be sure that we don't have cordon burst
 	limiterfuncs map[string]LimiterFunc
-
-	logger *zap.Logger
+	logger       *zap.Logger
 }
 
 func (l *Limiter) SetNodeLister(lister NodeLister) {
@@ -269,6 +271,44 @@ func MaxSimultaneousCordonLimiterForTaintsFunc(max int, percent bool, taintKeys 
 			return percentCordon <= max, nil
 		}
 		return cordonCount < max, nil
+	}
+}
+
+func MaxNotReadyNodesFunc(max int, percent bool, store RuntimeObjectStore, isGloballyBlocked *bool, maxNotReadyNodesPeriod *time.Duration) LimiterFunc {
+	notready := 0
+
+	go func() {
+		wait.PollImmediateInfinite(10*time.Second, func() (done bool, err error) {
+			return (store.Nodes() != nil), nil
+		})
+		wait.PollImmediateInfinite(10*time.Second, func() (done bool, err error) {
+			return store.Nodes().HasSynced(), nil
+		})
+
+		for {
+			i := 0
+			nodelist := store.Nodes().ListNodes()
+			for _, n := range nodelist {
+				if ready, _ := GetReadinessState(n); !ready {
+					i++
+				}
+			}
+
+			notready = i
+			time.Sleep(*maxNotReadyNodesPeriod)
+		}
+	}()
+
+	return func(n *core.Node, cordonNodes, allNodes []*core.Node) (bool, error) { // CanCordon Limiter
+		canCordon := false
+		if percent {
+			canCordon = math.Ceil(100*float64(notready)/float64(len(allNodes))) <= float64(max)
+		} else {
+			canCordon = notready < max
+		}
+
+		*isGloballyBlocked = !canCordon
+		return canCordon, nil
 	}
 }
 
