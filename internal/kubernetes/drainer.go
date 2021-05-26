@@ -17,9 +17,12 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"strings"
 	"time"
 
@@ -30,6 +33,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	runtimejson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -64,9 +71,22 @@ const (
 	eventReasonEvictionStarting  = "EvictionStarting"
 	eventReasonEvictionSucceeded = "EvictionSucceeded"
 	eventReasonEvictionFailed    = "EvictionFailed"
+
+	EvictionAPIURLAnnotationKey = "draino/eviction-api-url"
 )
 
 type nodeMutatorFn func(*core.Node)
+
+type EvictionEndpointError struct {
+	Message string
+}
+
+func (e EvictionEndpointError) Error() string {
+	if e.Message == "" {
+		return "Eviction endpoint error"
+	}
+	return "eviction endpoint error: "+e.Message
+}
 
 type NodePreprovisioningTimeoutError struct {
 }
@@ -511,10 +531,105 @@ func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*co
 }
 
 func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
+	evictionAPIURL, ok := pod.Annotations[EvictionAPIURLAnnotationKey]
+	if ok {
+		return d.evictWithOperatorAPI(evictionAPIURL, pod, abort)
+	}
+	return d.evictWithKubernetesAPI(pod, abort)
+}
+
+func (d *APICordonDrainer) getGracePeriod(pod *core.Pod) int64 {
 	gracePeriod := int64(d.maxGracePeriod.Seconds())
 	if pod.Spec.TerminationGracePeriodSeconds != nil && *pod.Spec.TerminationGracePeriodSeconds < gracePeriod {
 		gracePeriod = *pod.Spec.TerminationGracePeriodSeconds
 	}
+	return gracePeriod
+}
+func (d *APICordonDrainer) evictWithKubernetesAPI(pod *core.Pod, abort <-chan struct{}) error {
+	gracePeriod:=d.getGracePeriod(pod)
+	return d.evictionSequence(pod, abort,
+		//eviction function
+		func() error {
+			return d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
+				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
+				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
+			})
+		},
+		//error handling function
+		func(err error) error {
+			// The eviction API returns 500 if a pod
+			// matches more than one pod disruption budgets.
+			// We cannot use apierrors.IsInternalError because Reason is not set, just Code and Message.
+			if statErr, ok := err.(apierrors.APIStatus); ok && statErr.Status().Code == 500 {
+				return OverlappingDisruptionBudgetsError{} // this one is typed because we match it to a failure cause
+			}
+			return err // unexpected (we're already catching 429 and 500), may be a client side error
+		},
+	)
+
+}
+
+// evictWithOperatorAPI This function calls an Operator endpoint to perform the eviction instead of the classic kubernetes eviction endpoint
+// The endpoint should support the same payload than the kubernetes eviction endpoint.
+// The expected responses are:
+// 200/201: eviction accepted and performed/performing
+// 429    : need to retry later, equivalent to no credit in PDB
+// 404    : the pod is not found, already delete
+// 503    : the service is not able to answer now, potentially not reaching the leader, you should retry
+// 500    : server error, that could be a transient error, retry couple of times
+func (d *APICordonDrainer) evictWithOperatorAPI(url string, pod *core.Pod, abort <-chan struct{}) error {
+	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
+	gracePeriod:=d.getGracePeriod(pod)
+	maxRetryOn500:=4
+	return d.evictionSequence(pod, abort,
+		//eviction function
+		func() error {
+			evictionPayload := &policy.Eviction{
+				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
+				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
+			}
+
+			req, err := http.NewRequest("POST", url, GetEvictionJsonPayload(evictionPayload))
+			req.Header.Set("Content-Type", "application/json")
+
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				d.l.Info("custom eviction endpoint response error", zap.Error(err))
+				return fmt.Errorf("cannot evict pod %s/%s, %w", pod.GetNamespace(), pod.GetName(), err)
+			}
+			defer resp.Body.Close()
+			d.l.Info("custom eviction endpoint response", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
+			switch {
+			case resp.StatusCode == http.StatusTooManyRequests:
+				return apierrors.NewTooManyRequests("retry later", 10)
+			case resp.StatusCode == http.StatusNotFound:
+				return apierrors.NewNotFound(schema.GroupResource{Resource: "pod"}, pod.Name)
+			case resp.StatusCode == http.StatusServiceUnavailable:
+				return apierrors.NewTooManyRequests("retry later, service endpoint is not the leader", 15)
+			case resp.StatusCode == http.StatusInternalServerError:
+				respContent, _ := ioutil.ReadAll(resp.Body)
+				if maxRetryOn500>0 {
+					maxRetryOn500--
+					d.l.Info("Custom eviction endpoint returned an error", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+					return apierrors.NewTooManyRequests("retry later following endpoint error", 20)
+				}
+				d.l.Error("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d after several retries",resp.StatusCode)}
+			default:
+				respContent, _ := ioutil.ReadAll(resp.Body)
+				d.l.Error("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d",resp.StatusCode)}
+			}
+		},
+		//error handling function
+		func(err error) error {
+			return err
+		},
+	)
+}
+
+func (d *APICordonDrainer) evictionSequence(pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
 	deadline := time.After(d.deleteTimeout())
 	for {
 		select {
@@ -537,27 +652,32 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 			// doesn't make much sense anyway. However, we still want to wait for their
 			// deletion, which is why we filter here and not in GetPodsToDrain.
 			if pod.DeletionTimestamp == nil {
-				err = d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
-					ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
-					DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
-				})
+				err = evictionFunc()
 			}
 			switch {
 			// The eviction API returns 429 Too Many Requests if a pod
 			// cannot currently be evicted, for example due to a pod
 			// disruption budget.
 			case apierrors.IsTooManyRequests(err):
-				time.Sleep(5 * time.Second)
+				waitTime := 10 * time.Second
+				if statErr, ok := err.(apierrors.APIStatus); ok && statErr.Status().Details != nil {
+					if proposedWaitSeconds := statErr.Status().Details.RetryAfterSeconds; proposedWaitSeconds > 0 {
+						waitTime = time.Duration(proposedWaitSeconds) * time.Second
+					}
+				}
+				time.Sleep(waitTime)
 			case apierrors.IsNotFound(err):
+				// the pod is already gone
+				// maybe we still need to perform PVC management
+				err = d.deletePVCAndPV(pod)
+				if err != nil {
+					return VolumeCleanupError{Err: err} // this one is typed because we match it to a failure cause
+				}
 				return nil
 			case err != nil:
-				// The eviction API returns 500 if a pod
-				// matches more than one pod disruption budgets.
-				// We cannot use apierrors.IsInternalError because Reason is not set, just Code and Message.
-				if statErr, ok := err.(apierrors.APIStatus); ok && statErr.Status().Code == 500 {
-					return OverlappingDisruptionBudgetsError{} // this one is typed because we match it to a failure cause
+				if eh := otherErrorsHandlerFunc(err); eh != nil {
+					return err
 				}
-				return err // unexpected (we're already catching 429 and 500), may be a client side error
 			default:
 				err := d.awaitDeletion(pod, d.deleteTimeout())
 				if err != nil {
@@ -566,7 +686,6 @@ func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
 				err = d.deletePVCAndPV(pod)
 				if err != nil {
 					return VolumeCleanupError{Err: err} // this one is typed because we match it to a failure cause
-					// TODO?(adrienjt): more detailed volume-related failure causes?
 				}
 				return nil
 			}
@@ -814,4 +933,24 @@ func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, err
 
 func (d *APICordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatus, error) {
 	return d.performNodeReplacement(n, newNodeRequestReasonPreprovisioning, false)
+}
+
+var evictionPayloadEncoder runtime.Encoder
+
+func GetEvictionPayloadEncoder() runtime.Encoder {
+	if evictionPayloadEncoder != nil {
+		return evictionPayloadEncoder
+	}
+	scheme := runtime.NewScheme()
+	policy.SchemeBuilder.AddToScheme(scheme)
+	codecFactory := serializer.NewCodecFactory(scheme)
+	jsonSerializer := runtimejson.NewSerializerWithOptions(runtimejson.DefaultMetaFactory, scheme, scheme, runtimejson.SerializerOptions{})
+	evictionPayloadEncoder = codecFactory.WithoutConversion().EncoderForVersion(jsonSerializer, policy.SchemeGroupVersion)
+	return evictionPayloadEncoder
+}
+
+func GetEvictionJsonPayload(obj *policy.Eviction) *bytes.Buffer {
+	buffer := bytes.NewBuffer([]byte{})
+	GetEvictionPayloadEncoder().Encode(obj, buffer)
+	return buffer
 }
