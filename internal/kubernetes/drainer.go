@@ -85,7 +85,7 @@ func (e EvictionEndpointError) Error() string {
 	if e.Message == "" {
 		return "Eviction endpoint error"
 	}
-	return "eviction endpoint error: "+e.Message
+	return "eviction endpoint error: " + e.Message
 }
 
 type NodePreprovisioningTimeoutError struct {
@@ -546,7 +546,7 @@ func (d *APICordonDrainer) getGracePeriod(pod *core.Pod) int64 {
 	return gracePeriod
 }
 func (d *APICordonDrainer) evictWithKubernetesAPI(pod *core.Pod, abort <-chan struct{}) error {
-	gracePeriod:=d.getGracePeriod(pod)
+	gracePeriod := d.getGracePeriod(pod)
 	return d.evictionSequence(pod, abort,
 		//eviction function
 		func() error {
@@ -579,8 +579,8 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(pod *core.Pod, abort <-chan st
 // 500    : server error, that could be a transient error, retry couple of times
 func (d *APICordonDrainer) evictWithOperatorAPI(url string, pod *core.Pod, abort <-chan struct{}) error {
 	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
-	gracePeriod:=d.getGracePeriod(pod)
-	maxRetryOn500:=4
+	gracePeriod := d.getGracePeriod(pod)
+	maxRetryOn500 := 4
 	return d.evictionSequence(pod, abort,
 		//eviction function
 		func() error {
@@ -609,17 +609,17 @@ func (d *APICordonDrainer) evictWithOperatorAPI(url string, pod *core.Pod, abort
 				return apierrors.NewTooManyRequests("retry later, service endpoint is not the leader", 15)
 			case resp.StatusCode == http.StatusInternalServerError:
 				respContent, _ := ioutil.ReadAll(resp.Body)
-				if maxRetryOn500>0 {
+				if maxRetryOn500 > 0 {
 					maxRetryOn500--
 					d.l.Info("Custom eviction endpoint returned an error", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
 					return apierrors.NewTooManyRequests("retry later following endpoint error", 20)
 				}
 				d.l.Error("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d after several retries",resp.StatusCode)}
+				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d after several retries", resp.StatusCode)}
 			default:
 				respContent, _ := ioutil.ReadAll(resp.Body)
 				d.l.Error("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d",resp.StatusCode)}
+				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d", resp.StatusCode)}
 			}
 		},
 		//error handling function

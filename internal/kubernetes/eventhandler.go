@@ -102,9 +102,9 @@ type DrainingResourceEventHandler struct {
 	eventRecorder  record.EventRecorder
 	drainScheduler DrainScheduler
 
-	podStore          PodStore
-	cordonFilter      PodFilterFunc
-	isGloballyBlocked *bool
+	podStore     PodStore
+	cordonFilter PodFilterFunc
+	globalLocker GlobalBlocker
 
 	lastDrainScheduledFor        time.Time
 	buffer                       time.Duration
@@ -158,9 +158,9 @@ func WithCordonPodFilter(f PodFilterFunc, podStore PodStore) DrainingResourceEve
 }
 
 // WithGlobalBlocking configures a bool that may prevent cordon nodes due to % nodes UnReady
-func WithGlobalBlocking(isGloballyBlocked *bool) DrainingResourceEventHandlerOption {
+func WithGlobalBlocking(globalLocker GlobalBlocker) DrainingResourceEventHandlerOption {
 	return func(d *DrainingResourceEventHandler) {
-		d.isGloballyBlocked = isGloballyBlocked
+		d.globalLocker = globalLocker
 	}
 }
 
@@ -190,7 +190,6 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 		eventRecorder:         e,
 		lastDrainScheduledFor: time.Now(),
 		buffer:                DefaultDrainBuffer,
-		isGloballyBlocked:     new(bool),
 	}
 	for _, o := range ho {
 		o(h)
@@ -245,11 +244,6 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		return
 	}
 
-	if *h.isGloballyBlocked {
-		logger.Info("Temporarily blocked due to high number of NotReady nodes")
-		return
-	}
-
 	// First cordon the node if it is not yet cordoned
 	if !n.Spec.Unschedulable {
 		// check if the node passes filters
@@ -263,6 +257,13 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		}
 		if !done {
 			return // we have probably been rate limited
+		}
+	}
+
+	if h.globalLocker != nil {
+		if locked, reason := h.globalLocker.IsBlocked(); locked {
+			logger.Info("Temporarily blocked due to lock: " + reason)
+			return
 		}
 	}
 

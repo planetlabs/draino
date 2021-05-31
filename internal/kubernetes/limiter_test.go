@@ -1,11 +1,11 @@
 package kubernetes
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
-	"errors"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -279,13 +279,13 @@ func Test_getMatchingNodesForLabelsCount(t *testing.T) {
 func TestLimiter_CanCordon(t *testing.T) {
 	isGloballyBlocked := false
 	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
-
 	tests := []struct {
-		name         string
-		limiterfuncs map[string]LimiterFunc
-		node         *core.Node
-		want         bool
-		want1        string
+		name                 string
+		globalBlockerBuilder func() GlobalBlocker
+		limiterfuncs         map[string]LimiterFunc
+		node                 *core.Node
+		want                 bool
+		want1                string
 	}{
 		{
 			name:  "not limited",
@@ -363,8 +363,11 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "limit on 15% of nodes NotReady with threshold at max=10%", // 15% = 1/7 nodes
 			node: nodesTestMap["D"],
-			limiterfuncs: map[string]LimiterFunc{
-				"limiter-notReady-10%": MaxNotReadyNodesFunc(10, true, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
+			globalBlockerBuilder: func() GlobalBlocker {
+				g := NewGlobalBlocker()
+				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.blockers[0].updateBlockState()
+				return g
 			},
 			want:  false,
 			want1: "limiter-notReady-10%",
@@ -372,8 +375,11 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "limit on 1 nodes NotReady with threshold at max=1",
 			node: nodesTestMap["D"],
-			limiterfuncs: map[string]LimiterFunc{
-				"limiter-notReady-1": MaxNotReadyNodesFunc(1, false, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
+			globalBlockerBuilder: func() GlobalBlocker {
+				g := NewGlobalBlocker()
+				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.blockers[0].updateBlockState()
+				return g
 			},
 			want:  false,
 			want1: "limiter-notReady-1",
@@ -381,8 +387,11 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "no limit on 15% nodes NotReady with threshold max=20%",
 			node: nodesTestMap["D"],
-			limiterfuncs: map[string]LimiterFunc{
-				"no-limiter-notReady-20%": MaxNotReadyNodesFunc(20, true, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
+			globalBlockerBuilder: func() GlobalBlocker {
+				g := NewGlobalBlocker()
+				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.blockers[0].updateBlockState()
+				return g
 			},
 			want:  true,
 			want1: "",
@@ -390,8 +399,11 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "no limit on 1 nodes NotReady with threshold max=20",
 			node: nodesTestMap["D"],
-			limiterfuncs: map[string]LimiterFunc{
-				"no-limiter-notReady-20": MaxNotReadyNodesFunc(20, false, runtimeObjectStore, &isGloballyBlocked, &maxNotReadyNodePeriod),
+			globalBlockerBuilder: func() GlobalBlocker {
+				g := NewGlobalBlocker()
+				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.blockers[0].updateBlockState()
+				return g
 			},
 			want:  true,
 			want1: "",
@@ -407,6 +419,12 @@ func TestLimiter_CanCordon(t *testing.T) {
 			for k, v := range tt.limiterfuncs {
 				l.AddLimiter(k, v)
 			}
+			if tt.globalBlockerBuilder != nil {
+				gl := tt.globalBlockerBuilder()
+				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
+					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return blockStateFunc(), nil })
+				}
+			}
 
 			got, got1 := l.CanCordon(tt.node)
 			if got != tt.want {
@@ -416,7 +434,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 				t.Errorf("CanCordon() got1 = %v, want %v", got1, tt.want1)
 			}
 			if isGloballyBlocked == true && got != tt.want {
-				t.Errorf("CanCordon() isGloballyBlocked got = %v, want %v", got, tt.want)
+				t.Errorf("CanCordon() globalLocker got = %v, want %v", got, tt.want)
 			}
 		})
 	}

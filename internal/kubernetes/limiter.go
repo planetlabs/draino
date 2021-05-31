@@ -17,13 +17,12 @@ and limitations under the License.
 package kubernetes
 
 import (
-	"k8s.io/apimachinery/pkg/util/wait"
+	"errors"
 	"math"
 	"strconv"
 	"strings"
 	"time"
 
-	"errors"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -271,44 +270,6 @@ func MaxSimultaneousCordonLimiterForTaintsFunc(max int, percent bool, taintKeys 
 			return percentCordon <= max, nil
 		}
 		return cordonCount < max, nil
-	}
-}
-
-func MaxNotReadyNodesFunc(max int, percent bool, store RuntimeObjectStore, isGloballyBlocked *bool, maxNotReadyNodesPeriod *time.Duration) LimiterFunc {
-	notready := 0
-
-	go func() {
-		wait.PollImmediateInfinite(10*time.Second, func() (done bool, err error) {
-			return (store.Nodes() != nil), nil
-		})
-		wait.PollImmediateInfinite(10*time.Second, func() (done bool, err error) {
-			return store.Nodes().HasSynced(), nil
-		})
-
-		for {
-			i := 0
-			nodelist := store.Nodes().ListNodes()
-			for _, n := range nodelist {
-				if ready, _ := GetReadinessState(n); !ready {
-					i++
-				}
-			}
-
-			notready = i
-			time.Sleep(*maxNotReadyNodesPeriod)
-		}
-	}()
-
-	return func(n *core.Node, cordonNodes, allNodes []*core.Node) (bool, error) { // CanCordon Limiter
-		canCordon := false
-		if percent {
-			canCordon = math.Ceil(100*float64(notready)/float64(len(allNodes))) <= float64(max)
-		} else {
-			canCordon = notready < max
-		}
-
-		*isGloballyBlocked = !canCordon
-		return canCordon, nil
 	}
 }
 
