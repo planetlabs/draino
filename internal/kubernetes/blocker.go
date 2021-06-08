@@ -72,30 +72,37 @@ func (g *GlobalBlocksRunner) Run(stopCh <-chan struct{}) {
 	g.Lock()
 	defer g.Unlock()
 	g.started = true
+
+	var wg sync.WaitGroup
 	for i := range g.blockers {
+		wg.Add(1)
 		localBlocker := g.blockers[i]
-		go wait.Until(
-			func() {
-				// Perform Check
-				localBlocker.updateBlockState()
-				val := int64(0)
-				if localBlocker.blockState {
-					val = 1
-				}
-				// Observability
-				tag, _ := tag.New(context.Background(), tag.Upsert(tagBlock, localBlocker.name))
-				stats.Record(tag, MeasureBlocker.M(val))
-			},
-			localBlocker.period,
-			stopCh)
+		go func() {
+			defer wg.Done()
+			wait.Until(
+				func() {
+					// Perform Check
+					localBlocker.updateBlockState()
+					val := int64(0)
+					if localBlocker.blockState {
+						val = 1
+					}
+					// Observability
+					tag, _ := tag.New(context.Background(), tag.Upsert(tagBlock, localBlocker.name))
+					stats.Record(tag, MeasureBlocker.M(val))
+				},
+				localBlocker.period,
+				stopCh)
+		}()
 	}
+	wg.Wait()
 }
 
 func (g *GlobalBlocksRunner) AddBlocker(name string, checkFunc ComputeBlockStateFunction, period time.Duration) error {
 	g.Lock()
 	defer g.Unlock()
 	if g.started {
-		errors.New("Can't add a Blocker once the GlobalBlocker has been started")
+		return errors.New("Can't add a Blocker once the GlobalBlocker has been started")
 	}
 	g.blockers = append(g.blockers, &blocker{
 		name:       name,
