@@ -194,7 +194,7 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 	for _, o := range ho {
 		o(h)
 	}
-	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.conditions, h.preprovisioningConfiguration, h.logger)
+	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.conditions, h.preprovisioningConfiguration, h.logger, h.globalLocker)
 	return h
 }
 

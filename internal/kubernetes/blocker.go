@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"errors"
+	"k8s.io/api/core/v1"
 	"math"
 	"sync"
 	"time"
@@ -47,8 +48,10 @@ type GlobalBlocksRunner struct {
 	logger   *zap.Logger
 }
 
-func NewGlobalBlocker() *GlobalBlocksRunner {
-	return &GlobalBlocksRunner{}
+func NewGlobalBlocker(logger *zap.Logger) *GlobalBlocksRunner {
+	return &GlobalBlocksRunner{
+		logger: logger,
+	}
 }
 
 var (
@@ -148,9 +151,40 @@ func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore) 
 		}
 		blocked := false
 		if percent {
-			blocked = math.Ceil(100*float64(notReadyCount)/float64(len(nodeList))) <= float64(max)
+			blocked = math.Ceil(100*float64(notReadyCount)/float64(len(nodeList))) > float64(max)
 		} else {
-			blocked = notReadyCount < max
+			blocked = notReadyCount >= max
+		}
+		return blocked
+	}
+}
+
+func MaxPendingPodsCheckFunc(max int, percent bool, store RuntimeObjectStore) ComputeBlockStateFunction {
+	return func() bool {
+		if !store.HasSynced() {
+			return false
+		}
+		if store.Nodes() == nil || store.Pods() == nil {
+			return false
+		}
+
+		podCount, err := store.Pods().GetPodCount()
+		if err != nil {
+			return false
+		}
+
+		pendingPodList, err := store.Pods().ListPodsByStatus(string(v1.PodPending))
+		if err != nil {
+			return false
+		}
+
+		pendingCount := len(pendingPodList)
+
+		blocked := false
+		if percent {
+			blocked = math.Ceil(100*float64(pendingCount)/float64(podCount)) > float64(max)
+		} else {
+			blocked = pendingCount >= max
 		}
 		return blocked
 	}

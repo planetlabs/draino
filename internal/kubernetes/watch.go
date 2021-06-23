@@ -123,6 +123,8 @@ type PodStore interface {
 	SyncedStore
 	// List all the pods of a given node
 	ListPodsForNode(nodeName string) ([]*core.Pod, error)
+	ListPodsByStatus(podStatus string) ([]*core.Pod, error)
+	GetPodCount() (int, error)
 }
 
 // A PodWatch is a cache of node resources that notifies registered
@@ -134,8 +136,9 @@ type PodWatch struct {
 var _ PodStore = &PodWatch{}
 
 const podNodeNameIndexField = ".spec.nodeName"
+const podStatusIndexField = ".status.phase"
 
-// NewNodeWatch creates a watch on node resources. Nodes are cached and the
+// NewPodWatch creates a watch on pod resources. Pods are cached and the
 // provided ResourceEventHandlers are called when the cache changes.
 func NewPodWatch(c kubernetes.Interface) *PodWatch {
 	lw := &cache.ListWatch{
@@ -143,13 +146,22 @@ func NewPodWatch(c kubernetes.Interface) *PodWatch {
 		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Pods("").Watch(o) },
 	}
 
-	i := cache.NewSharedIndexInformer(lw, &core.Pod{}, 30*time.Minute, cache.Indexers{podNodeNameIndexField: func(obj interface{}) ([]string, error) {
-		p, ok := obj.(*core.Pod)
-		if !ok {
-			return []string{""}, nil
-		}
-		return []string{p.Spec.NodeName}, nil
-	}})
+	i := cache.NewSharedIndexInformer(lw, &core.Pod{}, 30*time.Minute, cache.Indexers{
+		podNodeNameIndexField: func(obj interface{}) ([]string, error) {
+			p, ok := obj.(*core.Pod)
+			if !ok {
+				return []string{""}, nil
+			}
+			return []string{p.Spec.NodeName}, nil
+		},
+		podStatusIndexField: func(obj interface{}) ([]string, error) {
+			p, ok := obj.(*core.Pod)
+			if !ok {
+				return []string{""}, nil
+			}
+			return []string{string(p.Status.Phase)}, nil
+		},
+	})
 	return &PodWatch{i}
 }
 
@@ -171,6 +183,34 @@ func (w *PodWatch) ListPodsForNode(nodeName string) ([]*core.Pod, error) {
 	}
 	sort.Sort(PodsSortedByName(pods))
 	return pods, nil
+}
+
+func (w *PodWatch) ListPodsByStatus(podStatus string) ([]*core.Pod, error) {
+	if !w.HasSynced() {
+		return nil, errors.New("pod informer not yet synced")
+	}
+	objs, err := w.GetIndexer().ByIndex(podStatusIndexField, podStatus)
+	if err != nil {
+		return nil, err
+	}
+	pods := make([]*core.Pod, len(objs))
+	for i, obj := range objs {
+		p, ok := obj.(*core.Pod)
+		if !ok {
+			return nil, errors.New("unexpected object type in Pod store")
+		}
+		pods[i] = p
+	}
+	sort.Sort(PodsSortedByName(pods))
+	return pods, nil
+}
+
+func (w *PodWatch) GetPodCount() (int, error) {
+	if !w.HasSynced() {
+		return 0, errors.New("pod informer not yet synced")
+	}
+	count := len(w.GetStore().List())
+	return count, nil
 }
 
 type PodsSortedByName []*core.Pod

@@ -62,9 +62,10 @@ type DrainSchedules struct {
 	preprovisioningConfiguration NodePreprovisioningConfiguration
 	eventRecorder                record.EventRecorder
 	suppliedConditions           []SuppliedCondition
+	globalLocker                 GlobalBlocker
 }
 
-func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger) DrainScheduler {
+func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger, locker GlobalBlocker) DrainScheduler {
 	sort.Strings(labelKeysForGroups)
 	return &DrainSchedules{
 		labelKeysForGroups:           labelKeysForGroups,
@@ -75,6 +76,7 @@ func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRe
 		preprovisioningConfiguration: preprovisioningCfg,
 		eventRecorder:                eventRecorder,
 		suppliedConditions:           suppliedConditions,
+		globalLocker:                 locker,
 	}
 }
 
@@ -227,10 +229,16 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		}
 		sched.customDrainBuffer = &durationValue
 	}
-
 	sched.timer = time.AfterFunc(time.Until(when), func() {
 		log := LoggerForNode(node, d.logger)
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
+		if d.globalLocker != nil {
+			if locked, reason := d.globalLocker.IsBlocked(); locked {
+				log.Error("Failed to Drain due to globalLock: " + reason)
+				d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Failed to Drain due to globalLock: %s", reason)
+				return
+			}
+		}
 
 		// Node preprovisioning
 		if d.hasPreprovisioningAnnotation(node) {

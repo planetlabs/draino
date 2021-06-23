@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -89,6 +90,7 @@ func main() {
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxNotReadyNodes               = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
 		maxNotReadyNodesPeriod         = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
+		maxPendingPods                 = app.Flag("max-pending-pods", "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
 
 		// Pod Opt-in flags
 		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
@@ -283,7 +285,7 @@ func main() {
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
 	}
-	globalLocker := kubernetes.NewGlobalBlocker()
+	globalLocker := kubernetes.NewGlobalBlocker(log)
 	for _, p := range *maxNotReadyNodes {
 		max, percent, parseErr := kubernetes.ParseCordonMax(p)
 		if parseErr != nil {
@@ -291,8 +293,17 @@ func main() {
 		}
 		globalLocker.AddBlocker("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesCheckFunc(max, percent, runtimeObjectStoreImpl), *maxNotReadyNodesPeriod)
 	}
+	for _, p := range *maxPendingPods {
+		max, percent, parseErr := kubernetes.ParseCordonMax(p)
+		if parseErr != nil {
+			kingpin.FatalIfError(parseErr, "cannot parse 'max-pending-pods' argument")
+		}
+		fmt.Println(max, percent)
+		globalLocker.AddBlocker("MaxPendingPods:"+p, kubernetes.MaxPendingPodsCheckFunc(max, percent, runtimeObjectStoreImpl), *maxNotReadyNodesPeriod)
+	}
+
 	for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {
-		cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return blockStateFunc(), nil })
+		cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !blockStateFunc(), nil })
 	}
 
 	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
