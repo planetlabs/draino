@@ -90,6 +90,7 @@ func main() {
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxNotReadyNodes               = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
 		maxNotReadyNodesPeriod         = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
+		maxPendingPodsPeriod           = app.Flag("max-pending-pods-period", "Polling period to check volume of pending pods").Default(kubernetes.DefaultMaxPendingPodsPeriod.String()).Duration()
 		maxPendingPods                 = app.Flag("max-pending-pods", "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
 
 		// Pod Opt-in flags
@@ -299,7 +300,7 @@ func main() {
 			kingpin.FatalIfError(parseErr, "cannot parse 'max-pending-pods' argument")
 		}
 		fmt.Println(max, percent)
-		globalLocker.AddBlocker("MaxPendingPods:"+p, kubernetes.MaxPendingPodsCheckFunc(max, percent, runtimeObjectStoreImpl), *maxNotReadyNodesPeriod)
+		globalLocker.AddBlocker("MaxPendingPods:"+p, kubernetes.MaxPendingPodsCheckFunc(max, percent, runtimeObjectStoreImpl), *maxPendingPodsPeriod)
 	}
 
 	for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {

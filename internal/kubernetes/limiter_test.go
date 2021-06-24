@@ -320,7 +320,6 @@ func Test_getMatchingNodesForLabelsCount(t *testing.T) {
 }
 
 func TestLimiter_CanCordon(t *testing.T) {
-	//isGloballyBlocked := false
 	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
 	tests := []struct {
 		name                 string
@@ -412,8 +411,8 @@ func TestLimiter_CanCordon(t *testing.T) {
 				g.blockers[0].updateBlockState()
 				return g
 			},
-			want:  true,
-			want1: "",
+			want:  false,
+			want1: "limiter-notReady-10%",
 		},
 		{
 			name: "limit on 1 nodes NotReady with threshold at max=1",
@@ -424,8 +423,8 @@ func TestLimiter_CanCordon(t *testing.T) {
 				g.blockers[0].updateBlockState()
 				return g
 			},
-			want:  true,
-			want1: "",
+			want:  false,
+			want1: "limiter-notReady-1",
 		},
 		{
 			name: "no limit on 15% nodes NotReady with threshold max=20%",
@@ -436,8 +435,8 @@ func TestLimiter_CanCordon(t *testing.T) {
 				g.blockers[0].updateBlockState()
 				return g
 			},
-			want:  false,
-			want1: "no-limiter-notReady-20%",
+			want:  true,
+			want1: "",
 		},
 		{
 			name: "no limit on 1 nodes NotReady with threshold max=20",
@@ -448,8 +447,8 @@ func TestLimiter_CanCordon(t *testing.T) {
 				g.blockers[0].updateBlockState()
 				return g
 			},
-			want:  false,
-			want1: "no-limiter-notReady-20",
+			want:  true,
+			want1: "",
 		},
 	}
 	for _, tt := range tests {
@@ -465,7 +464,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			if tt.globalBlockerBuilder != nil {
 				gl := tt.globalBlockerBuilder()
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
-					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return blockStateFunc(), nil })
+					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !blockStateFunc(), nil })
 				}
 			}
 
@@ -476,9 +475,6 @@ func TestLimiter_CanCordon(t *testing.T) {
 			if got1 != tt.want1 {
 				t.Errorf("CanCordon() got1 = %v, want %v", got1, tt.want1)
 			}
-			//if isGloballyBlocked == true && got != tt.want {
-			//	t.Errorf("CanCordon() globalLocker got = %v, want %v", got, tt.want)
-			//}
 		})
 	}
 }
@@ -619,8 +615,8 @@ func TestPodLimiter(t *testing.T) {
 				g.blockers[0].updateBlockState()
 				return g
 			},
-			want:  true,
-			want1: "",
+			want:  false,
+			want1: "limiter-pending-pods-1",
 		},
 	}
 
@@ -637,7 +633,7 @@ func TestPodLimiter(t *testing.T) {
 			if tt.globalBlockerBuilder != nil {
 				gl := tt.globalBlockerBuilder()
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
-					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return blockStateFunc(), nil })
+					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !blockStateFunc(), nil })
 				}
 			}
 

@@ -29,7 +29,10 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
-const DefaultMaxNotReadyNodesPeriod = 60 * time.Second
+const (
+	DefaultMaxNotReadyNodesPeriod = 60 * time.Second
+	DefaultMaxPendingPodsPeriod = 60 * time.Second
+)
 
 type NodeReplacementLimiter interface {
 	// Can ask for a new node replacement

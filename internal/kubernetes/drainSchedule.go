@@ -234,8 +234,8 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
 		if d.globalLocker != nil {
 			if locked, reason := d.globalLocker.IsBlocked(); locked {
-				log.Error("Failed to Drain due to globalLock: " + reason)
-				d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Failed to Drain due to globalLock: %s", reason)
+				log.Info("Cancelling drain due to globalLock",zap.String("reason",reason),zap.String("node",node.GetName()))
+				d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
 				return
 			}
 		}
@@ -266,7 +266,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 					return false, nil
 				},
 			); err != nil {
-				log.Info("Pre-provisioning failed")
+				log.Error("Failed pre-provisioning")
 				d.handleDrainFailure(sched, log, &NodePreprovisioningTimeoutError{}, tags, node)
 				tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 				StatRecordForNode(tags, node, MeasurePreprovisioningLatency.M(sinceInMilliseconds(preprovisionStartTime)))

@@ -3,10 +3,11 @@ package kubernetes
 import (
 	"context"
 	"errors"
-	"k8s.io/api/core/v1"
 	"math"
 	"sync"
 	"time"
+
+	"k8s.io/api/core/v1"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
@@ -25,7 +26,7 @@ type GlobalBlocker interface {
 // ComputeBlockStateFunction a function that would analyse the system state and return true if we should lock draino to prevent any cordon/drain activity
 type ComputeBlockStateFunction func() bool
 
-// GetBlockStateFunction a function that would return the current state of the lock using the cached value (no analysis)
+// GetBlockStateFunction a function that would return the current state of the lock using the cached value (no analysis) true=blocked
 type GetBlockStateFunction func() bool
 
 type blocker struct {
@@ -164,7 +165,7 @@ func MaxPendingPodsCheckFunc(max int, percent bool, store RuntimeObjectStore) Co
 		if !store.HasSynced() {
 			return false
 		}
-		if store.Nodes() == nil || store.Pods() == nil {
+		if store.Pods() == nil {
 			return false
 		}
 
