@@ -139,7 +139,6 @@ func (sg *SchedulesGroup) whenNextSchedule() time.Time {
 		lastScheduleName := sg.schedulesChain[len(sg.schedulesChain)-1]
 		if lastSchedule, ok := sg.schedules[lastScheduleName]; ok {
 			if lastSchedule.customDrainBuffer != nil {
-				fmt.Printf("found custom drain buffer\n")
 				period = *lastSchedule.customDrainBuffer
 			}
 			when = lastSchedule.when.Add(period)
@@ -148,7 +147,6 @@ func (sg *SchedulesGroup) whenNextSchedule() time.Time {
 	if when.Before(sooner) {
 		when = sooner
 	}
-	fmt.Printf("sched: %v\n", when)
 	return when
 }
 

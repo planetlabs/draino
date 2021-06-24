@@ -80,24 +80,23 @@ func (g *GlobalBlocksRunner) Run(stopCh <-chan struct{}) {
 	var wg sync.WaitGroup
 	for i := range g.blockers {
 		wg.Add(1)
-		localBlocker := g.blockers[i]
-		go func() {
+		go func(b * blocker) {
 			defer wg.Done()
 			wait.Until(
 				func() {
 					// Perform Check
-					localBlocker.updateBlockState()
+					b.updateBlockState()
 					val := int64(0)
-					if localBlocker.blockState {
+					if b.blockState {
 						val = 1
 					}
 					// Observability
-					tag, _ := tag.New(context.Background(), tag.Upsert(tagBlock, localBlocker.name))
+					tag, _ := tag.New(context.Background(), tag.Upsert(tagBlock, b.name))
 					stats.Record(tag, MeasureBlocker.M(val))
 				},
-				localBlocker.period,
+				b.period,
 				stopCh)
-		}()
+		}(g.blockers[i])
 	}
 	wg.Wait()
 }
@@ -121,7 +120,9 @@ func (g *GlobalBlocksRunner) GetBlockStateCacheAccessor() map[string]GetBlockSta
 	m := map[string]GetBlockStateFunction{}
 	for i := range g.blockers {
 		l := g.blockers[i]
-		m[l.name] = func() bool { return l.blockState }
+		m[l.name] = func() bool {
+			return l.blockState
+		}
 	}
 	return m
 }
@@ -138,7 +139,7 @@ func (g *GlobalBlocksRunner) IsBlocked() (bool, string) {
 func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore) ComputeBlockStateFunction {
 	return func() bool {
 		if !store.HasSynced() {
-			return false
+			return true // better block till we know exactly the state of the system
 		}
 		if store.Nodes() == nil {
 			return false
@@ -163,7 +164,7 @@ func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore) 
 func MaxPendingPodsCheckFunc(max int, percent bool, store RuntimeObjectStore) ComputeBlockStateFunction {
 	return func() bool {
 		if !store.HasSynced() {
-			return false
+			return true // better block till we know exactly the state of the system
 		}
 		if store.Pods() == nil {
 			return false

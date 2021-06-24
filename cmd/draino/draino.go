@@ -304,7 +304,8 @@ func main() {
 	}
 
 	for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {
-		cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !blockStateFunc(), nil })
+		localFunc:=blockStateFunc
+		cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 	}
 
 	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
