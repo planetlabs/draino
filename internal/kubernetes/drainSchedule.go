@@ -62,9 +62,10 @@ type DrainSchedules struct {
 	preprovisioningConfiguration NodePreprovisioningConfiguration
 	eventRecorder                record.EventRecorder
 	suppliedConditions           []SuppliedCondition
+	globalLocker                 GlobalBlocker
 }
 
-func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger) DrainScheduler {
+func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger, locker GlobalBlocker) DrainScheduler {
 	sort.Strings(labelKeysForGroups)
 	return &DrainSchedules{
 		labelKeysForGroups:           labelKeysForGroups,
@@ -75,6 +76,7 @@ func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRe
 		preprovisioningConfiguration: preprovisioningCfg,
 		eventRecorder:                eventRecorder,
 		suppliedConditions:           suppliedConditions,
+		globalLocker:                 locker,
 	}
 }
 
@@ -137,7 +139,6 @@ func (sg *SchedulesGroup) whenNextSchedule() time.Time {
 		lastScheduleName := sg.schedulesChain[len(sg.schedulesChain)-1]
 		if lastSchedule, ok := sg.schedules[lastScheduleName]; ok {
 			if lastSchedule.customDrainBuffer != nil {
-				fmt.Printf("found custom drain buffer\n")
 				period = *lastSchedule.customDrainBuffer
 			}
 			when = lastSchedule.when.Add(period)
@@ -146,7 +147,6 @@ func (sg *SchedulesGroup) whenNextSchedule() time.Time {
 	if when.Before(sooner) {
 		when = sooner
 	}
-	fmt.Printf("sched: %v\n", when)
 	return when
 }
 
@@ -227,10 +227,16 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		}
 		sched.customDrainBuffer = &durationValue
 	}
-
 	sched.timer = time.AfterFunc(time.Until(when), func() {
 		log := LoggerForNode(node, d.logger)
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
+		if d.globalLocker != nil {
+			if locked, reason := d.globalLocker.IsBlocked(); locked {
+				log.Info("Cancelling drain due to globalLock",zap.String("reason",reason),zap.String("node",node.GetName()))
+				d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
+				return
+			}
+		}
 
 		// Node preprovisioning
 		if d.hasPreprovisioningAnnotation(node) {
@@ -258,7 +264,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 					return false, nil
 				},
 			); err != nil {
-				log.Info("Pre-provisioning failed")
+				log.Error("Failed pre-provisioning")
 				d.handleDrainFailure(sched, log, &NodePreprovisioningTimeoutError{}, tags, node)
 				tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 				StatRecordForNode(tags, node, MeasurePreprovisioningLatency.M(sinceInMilliseconds(preprovisionStartTime)))

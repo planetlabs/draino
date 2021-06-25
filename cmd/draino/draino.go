@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	"gopkg.in/alecthomas/kingpin.v2"
+	core "k8s.io/api/core/v1"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
@@ -88,6 +90,8 @@ func main() {
 		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
 		maxNotReadyNodes               = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
 		maxNotReadyNodesPeriod         = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
+		maxPendingPodsPeriod           = app.Flag("max-pending-pods-period", "Polling period to check volume of pending pods").Default(kubernetes.DefaultMaxPendingPodsPeriod.String()).Duration()
+		maxPendingPods                 = app.Flag("max-pending-pods", "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
 
 		// Pod Opt-in flags
 		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
@@ -282,14 +286,28 @@ func main() {
 		}
 		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
 	}
-	var isGloballyBlocked *bool = new(bool)
+	globalLocker := kubernetes.NewGlobalBlocker(log)
 	for _, p := range *maxNotReadyNodes {
 		max, percent, parseErr := kubernetes.ParseCordonMax(p)
 		if parseErr != nil {
 			kingpin.FatalIfError(parseErr, "cannot parse 'max-notready-nodes' argument")
 		}
-		cordonLimiter.AddLimiter("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesFunc(max, percent, runtimeObjectStoreImpl, isGloballyBlocked, maxNotReadyNodesPeriod))
+		globalLocker.AddBlocker("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesCheckFunc(max, percent, runtimeObjectStoreImpl), *maxNotReadyNodesPeriod)
 	}
+	for _, p := range *maxPendingPods {
+		max, percent, parseErr := kubernetes.ParseCordonMax(p)
+		if parseErr != nil {
+			kingpin.FatalIfError(parseErr, "cannot parse 'max-pending-pods' argument")
+		}
+		fmt.Println(max, percent)
+		globalLocker.AddBlocker("MaxPendingPods:"+p, kubernetes.MaxPendingPodsCheckFunc(max, percent, runtimeObjectStoreImpl), *maxPendingPodsPeriod)
+	}
+
+	for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {
+		localFunc:=blockStateFunc
+		cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
+	}
+
 	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
 
 	eventRecorder := kubernetes.NewEventRecorder(cs)
@@ -318,7 +336,7 @@ func main() {
 		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
 			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...))),
 			pods),
-		kubernetes.WithGlobalBlocking(isGloballyBlocked),
+		kubernetes.WithGlobalBlocking(globalLocker),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {
@@ -331,7 +349,7 @@ func main() {
 				kubernetes.WithDrainBuffer(*drainBuffer),
 				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 				kubernetes.WithDrainGroups(*drainGroupLabelKey),
-				kubernetes.WithGlobalBlocking(isGloballyBlocked),
+				kubernetes.WithGlobalBlocking(globalLocker),
 				kubernetes.WithConditionsFilter(*conditions)),
 		}
 	}
@@ -395,7 +413,7 @@ func main() {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Info("watchers are running")
-				kingpin.FatalIfError(kubernetes.Await(nodes, pods, statefulSets), "error watching")
+				kingpin.FatalIfError(kubernetes.Await(nodes, pods, statefulSets, globalLocker), "error watching")
 			},
 			OnStoppedLeading: func() {
 				kingpin.Fatalf("lost leader election")

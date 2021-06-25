@@ -7,7 +7,6 @@ build: fmt vet
 # Run against the configured Kubernetes cluster in ~/.kube/config
 run-in-rage: fmt vet
 	go run ./cmd/draino/*.go  --kubeconfig=$(KUBECONFIG) --namespace=rage-k8s \
-	  --dry-run \
 	  --debug \
       --leader-election-token-name=draino-standard \
       --drain-buffer=3m \
@@ -28,6 +27,7 @@ run-in-rage: fmt vet
       --max-simultaneous-cordon-for-labels=15%,nodegroups.datadoghq.com/name,nodegroups.datadoghq.com/namespace \
       --max-simultaneous-cordon-for-labels=15,nodegroups.datadoghq.com/name,nodegroups.datadoghq.com/namespace \
       --max-notready-nodes=1 \
+      --max-pending-pods=3 \
       --do-not-evict-pod-controlled-by=StatefulSet \
       --do-not-evict-pod-controlled-by=DaemonSet \
       --do-not-evict-pod-controlled-by=ExtendedDaemonSetReplicaSet \
