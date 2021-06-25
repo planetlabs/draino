@@ -62,8 +62,16 @@ var (
 func (g *GlobalBlocksRunner) Run(stopCh <-chan struct{}) {
 	if g.started {
 		g.logger.Error("GlobalBlocker run twice")
+		<-stopCh
 		return
 	}
+
+	if len(g.blockers)==0 {
+		g.logger.Info("No blocker to run")
+		<-stopCh
+		return
+	}
+
 	tagBlock, _ := tag.NewKey("block")
 	blockerView := &view.View{
 		Name:        "global_block",
