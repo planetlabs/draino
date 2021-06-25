@@ -601,6 +601,8 @@ func (d *APICordonDrainer) evictWithOperatorAPI(url string, pod *core.Pod, abort
 			defer resp.Body.Close()
 			d.l.Info("custom eviction endpoint response", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
 			switch {
+			case resp.StatusCode == http.StatusOK:
+				return nil
 			case resp.StatusCode == http.StatusTooManyRequests:
 				return apierrors.NewTooManyRequests("retry later", 10)
 			case resp.StatusCode == http.StatusNotFound:
