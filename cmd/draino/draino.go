@@ -304,7 +304,7 @@ func main() {
 	}
 
 	for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {
-		localFunc:=blockStateFunc
+		localFunc := blockStateFunc
 		cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 	}
 

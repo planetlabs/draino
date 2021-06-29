@@ -66,7 +66,7 @@ func (g *GlobalBlocksRunner) Run(stopCh <-chan struct{}) {
 		return
 	}
 
-	if len(g.blockers)==0 {
+	if len(g.blockers) == 0 {
 		g.logger.Info("No blocker to run")
 		<-stopCh
 		return
@@ -88,7 +88,7 @@ func (g *GlobalBlocksRunner) Run(stopCh <-chan struct{}) {
 	var wg sync.WaitGroup
 	for i := range g.blockers {
 		wg.Add(1)
-		go func(b * blocker) {
+		go func(b *blocker) {
 			defer wg.Done()
 			wait.Until(
 				func() {

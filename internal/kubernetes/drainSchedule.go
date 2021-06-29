@@ -232,7 +232,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
 		if d.globalLocker != nil {
 			if locked, reason := d.globalLocker.IsBlocked(); locked {
-				log.Info("Cancelling drain due to globalLock",zap.String("reason",reason),zap.String("node",node.GetName()))
+				log.Info("Cancelling drain due to globalLock", zap.String("reason", reason), zap.String("node", node.GetName()))
 				d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
 				return
 			}

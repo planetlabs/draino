@@ -531,7 +531,7 @@ func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*co
 }
 
 func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
-	evictionAPIURL, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey,pod,d.runtimeObjectStore)
+	evictionAPIURL, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, d.runtimeObjectStore)
 	if ok {
 		return d.evictWithOperatorAPI(evictionAPIURL, pod, abort)
 	}
