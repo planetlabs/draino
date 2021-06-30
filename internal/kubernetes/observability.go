@@ -52,7 +52,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureNodesWithNodeOptions,
 		Description: "Number of nodes for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagConditions, TagUserOptOutViaPodAnnotation, TagDrainRetry, TagPVCManagement, TagPreprovisioning, TagInScope},
+		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagDrainRetry, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
 	}
 
 	view.Register(g.previousMeasureNodesWithNodeOptions)
@@ -104,14 +104,15 @@ func NewScopeObserver(client client.Interface, configName string, conditions []S
 
 type inScopeTags struct {
 	NodeTagsValues
-	DrainStatus                string
-	InScope                    bool
-	PreprovisioningEnabled     bool
-	PVCManagementEnabled       bool
-	DrainRetry                 bool
-	UserOptOutViaPodAnnotation bool
-	UserOptInViaPodAnnotation  bool
-	Condition                  string
+	DrainStatus                     string
+	InScope                         bool
+	PreprovisioningEnabled          bool
+	PVCManagementEnabled            bool
+	DrainRetry                      bool
+	UserOptOutViaPodAnnotation      bool
+	UserOptInViaPodAnnotation       bool
+	TagUserEvictionURLViaAnnotation bool
+	Condition                       string
 }
 
 type inScopeMetrics map[inScopeTags]int64
@@ -146,14 +147,15 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					node.Annotations = map[string]string{}
 				}
 				t := inScopeTags{
-					NodeTagsValues:             nodeTags,
-					DrainStatus:                getDrainStatusStr(node),
-					InScope:                    len(node.Annotations[ConfigurationAnnotationKey]) > 0,
-					PreprovisioningEnabled:     node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
-					PVCManagementEnabled:       s.HasPodWithPVCManagementEnabled(node),
-					DrainRetry:                 HasDrainRetryAnnotation(node),
-					UserOptOutViaPodAnnotation: s.HasPodWithUserOptOutAnnotation(node),
-					UserOptInViaPodAnnotation:  s.HasPodWithUserOptInAnnotation(node),
+					NodeTagsValues:                  nodeTags,
+					DrainStatus:                     getDrainStatusStr(node),
+					InScope:                         len(node.Annotations[ConfigurationAnnotationKey]) > 0,
+					PreprovisioningEnabled:          node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
+					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
+					DrainRetry:                      HasDrainRetryAnnotation(node),
+					UserOptOutViaPodAnnotation:      s.HasPodWithUserOptOutAnnotation(node),
+					UserOptInViaPodAnnotation:       s.HasPodWithUserOptInAnnotation(node),
+					TagUserEvictionURLViaAnnotation: s.HasEvictionUrlViaAnnotation(node),
 				}
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
 				conditionsWithAll := append(GetConditionsTypes(conditions), "any")
@@ -181,6 +183,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 	}
 	s.logger.Info("reset gauges done")
 	for tagsValues, count := range metrics {
+		// This list of tags must be in sync with the list of tags in the function metricsObjectsForObserver::reset()
 		allTags, _ := tag.New(context.Background(),
 			tag.Upsert(TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(TagNodegroupName, tagsValues.NgName),
 			tag.Upsert(TagTeam, tagsValues.Team),
@@ -190,6 +193,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 			tag.Upsert(TagPreprovisioning, strconv.FormatBool(tagsValues.PreprovisioningEnabled)),
 			tag.Upsert(TagPVCManagement, strconv.FormatBool(tagsValues.PVCManagementEnabled)),
 			tag.Upsert(TagDrainRetry, strconv.FormatBool(tagsValues.DrainRetry)),
+			tag.Upsert(TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
 			tag.Upsert(TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
 			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)))
 		stats.Record(allTags, s.metricsObjects.MeasureNodesWithNodeOptions.M(count))
@@ -382,6 +386,23 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithPVCManagementEnabled(node *v
 	for _, p := range pods {
 		valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, p, s.runtimeObjectStore)
 		if valAnnotation == PVCStorageClassCleanupAnnotationValue {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *DrainoConfigurationObserverImpl) HasEvictionUrlViaAnnotation(node *v1.Node) bool {
+	if node == nil {
+		return false
+	}
+	pods, err := s.runtimeObjectStore.Pods().ListPodsForNode(node.Name)
+	if err != nil {
+		s.logger.Error("Failed to list pod for node in DrainoConfigurationObserverImpl.HasEvictionUrlViaAnnotation", zap.String("node", node.Name), zap.Error(err))
+		return false
+	}
+	for _, p := range pods {
+		if _, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, p, s.runtimeObjectStore); ok {
 			return true
 		}
 	}

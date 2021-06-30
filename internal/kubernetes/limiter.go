@@ -31,7 +31,7 @@ import (
 
 const (
 	DefaultMaxNotReadyNodesPeriod = 60 * time.Second
-	DefaultMaxPendingPodsPeriod = 60 * time.Second
+	DefaultMaxPendingPodsPeriod   = 60 * time.Second
 )
 
 type NodeReplacementLimiter interface {

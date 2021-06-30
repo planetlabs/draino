@@ -464,7 +464,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			if tt.globalBlockerBuilder != nil {
 				gl := tt.globalBlockerBuilder()
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
-					localFunc:=blockStateFunc
+					localFunc := blockStateFunc
 					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 				}
 			}
@@ -634,7 +634,7 @@ func TestPodLimiter(t *testing.T) {
 			if tt.globalBlockerBuilder != nil {
 				gl := tt.globalBlockerBuilder()
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
-					localFunc:=blockStateFunc
+					localFunc := blockStateFunc
 					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 				}
 			}
