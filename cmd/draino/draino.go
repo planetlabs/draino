@@ -325,6 +325,10 @@ func main() {
 		kubernetes.WithAPICordonDrainerLogger(log),
 	)
 
+	podFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
+		kubernetes.NewPodFiltersWithOptInFirst(
+			kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
+
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		cordonDrainer,
 		eventRecorder,
@@ -333,9 +337,7 @@ func main() {
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
-			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...))),
-			pods),
+		kubernetes.WithCordonPodFilter(podFilteringFunc, pods),
 		kubernetes.WithGlobalBlocking(globalLocker),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
@@ -386,7 +388,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, kubernetes.NewPodFilters(podFilterCordon...), kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
 	if *resetScopeAnnotation == true {
 		go scopeObserver.Reset()

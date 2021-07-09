@@ -352,3 +352,9 @@ func GetReadinessState(node *core.Node) (isNodeReady bool, err error) {
 	}
 	return canNodeBeReady, nil
 }
+
+func LogForVerboseNode(logger *zap.Logger, node *core.Node, msg string, fields ...zap.Field) {
+	if node.Annotations["draino/logs"] == "verbose" {
+		logger.Info(msg, append(fields, zap.String("node", node.Name))...)
+	}
+}
