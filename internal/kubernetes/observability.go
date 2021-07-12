@@ -208,11 +208,12 @@ func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
 
 func (s *DrainoConfigurationObserverImpl) IsAnnotationUpdateNeeded(node *v1.Node) bool {
 	configs := strings.Split(node.Annotations[ConfigurationAnnotationKey], ",")
-	inScope, _, err := s.IsInScope(node)
+	inScope, reason, err := s.IsInScope(node)
 	if err != nil {
 		s.logger.Error("Can't check if node is in scope", zap.Error(err), zap.String("node", node.Name))
 		return false
 	}
+	LogForVerboseNode(s.logger, node, "InScope information", zap.Bool("inScope", inScope), zap.String("reason", reason))
 	if inScope {
 		for _, c := range configs {
 			if c == s.configName {

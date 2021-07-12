@@ -238,9 +238,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	logger := LoggerForNode(n, h.logger)
 	badConditions := GetNodeOffendingConditions(n, h.conditions)
 	if len(badConditions) == 0 {
+		LogForVerboseNode(h.logger, n, "No offending condition")
 		if shouldUncordon(n) {
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
+			LogForVerboseNode(h.logger, n, "Uncordon")
 		}
 		return
 	}
@@ -249,9 +251,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	if !n.Spec.Unschedulable {
 		// check if the node passes filters
 		if !h.checkCordonFilters(n) {
+			LogForVerboseNode(h.logger, n, "Not passing cordon filters")
 			return
 		}
 		done, err := h.cordon(n, badConditions)
+		LogForVerboseNode(h.logger, n, "Cordonning", zap.Bool("done", done), zap.Error(err))
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -279,12 +283,18 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		logger.Error(err.Error())
 		return
 	}
+	LogForVerboseNode(h.logger, n, "drainStatus",
+		zap.Bool("marked", drainStatus.Marked),
+		zap.Bool("completed", drainStatus.Completed),
+		zap.Bool("failed", drainStatus.Failed),
+		zap.Error(err))
 
 	if len(pods) == 0 && drainStatus.Completed {
 		elapseSinceCompleted := time.Since(drainStatus.LastTransition)
 		if elapseSinceCompleted > h.durationWithCompletedStatusBeforeReplacement {
 			// This node probably blocked due to minSize set on the nodegroup
-			h.cordonDrainer.ReplaceNode(n)
+			status, err := h.cordonDrainer.ReplaceNode(n)
+			LogForVerboseNode(h.logger, n, "node replacement", zap.String("status", string(status)), zap.Error(err))
 		}
 		return // we are waiting for that node to be removed from the cluster by the CA
 	}
@@ -294,6 +304,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		if HasDrainRetryAnnotation(n) {
 			h.drainScheduler.DeleteSchedule(n)
 			h.scheduleDrain(n)
+			LogForVerboseNode(h.logger, n, "retry with new schedule")
 			return
 		}
 		// Else we leave it like this
@@ -301,7 +312,8 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	}
 
 	// Let's ensure that a drain is scheduled
-	hasSchedule, _ := h.drainScheduler.HasSchedule(n)
+	hasSchedule, failedSched := h.drainScheduler.HasSchedule(n)
+	LogForVerboseNode(h.logger, n, "hasSchedule", zap.Bool("hasSchedule", hasSchedule), zap.Bool("failedSchedule", failedSched))
 	if !hasSchedule {
 		h.scheduleDrain(n)
 		return
@@ -319,6 +331,7 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(n *core.Node) bool {
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 		for _, pod := range pods {
 			ok, reason, err := h.cordonFilter(*pod)
+			LogForVerboseNode(h.logger, n, "Cordon Filter", zap.String("pod", pod.Name), zap.String("reason", reason), zap.Bool("ok", ok))
 			if err != nil {
 				tags, _ := tag.New(tags, tag.Upsert(TagReason, "error"))
 				StatRecordForEachCondition(tags, n, h.conditions, MeasureSkippedCordon.M(1))
