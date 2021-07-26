@@ -67,7 +67,7 @@ func (d *mockCordonDrainer) Drain(n *core.Node) error {
 	return nil
 }
 
-func (d *mockCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool) error {
+func (d *mockCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	d.calls = append(d.calls, mockCall{
 		name: "MarkDrain",
 		node: n.Name,
@@ -91,7 +91,7 @@ func (d *mockCordonDrainer) HasSchedule(node *core.Node) (has, failed bool) {
 	return false, false
 }
 
-func (d *mockCordonDrainer) Schedule(node *core.Node) (time.Time, error) {
+func (d *mockCordonDrainer) Schedule(node *core.Node, failedCount int32) (time.Time, error) {
 	d.calls = append(d.calls, mockCall{
 		name: "Schedule",
 		node: node.Name,

@@ -26,8 +26,10 @@ run-in-rage: fmt vet
       --max-simultaneous-cordon-for-labels=15,app \
       --max-simultaneous-cordon-for-labels=15%,nodegroups.datadoghq.com/name,nodegroups.datadoghq.com/namespace \
       --max-simultaneous-cordon-for-labels=15,nodegroups.datadoghq.com/name,nodegroups.datadoghq.com/namespace \
-      --max-notready-nodes=1 \
-      --max-pending-pods=3 \
+      --max-notready-nodes=10% \
+      --max-notready-nodes=50 \
+      --max-pending-pods=10% \
+      --max-drain-attempts-before-fail=8 \
       --do-not-evict-pod-controlled-by=StatefulSet \
       --do-not-evict-pod-controlled-by=DaemonSet \
       --do-not-evict-pod-controlled-by=ExtendedDaemonSetReplicaSet \

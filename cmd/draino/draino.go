@@ -92,6 +92,7 @@ func main() {
 		maxNotReadyNodesPeriod         = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
 		maxPendingPodsPeriod           = app.Flag("max-pending-pods-period", "Polling period to check volume of pending pods").Default(kubernetes.DefaultMaxPendingPodsPeriod.String()).Duration()
 		maxPendingPods                 = app.Flag("max-pending-pods", "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
+		maxDrainAttemptsBeforeFail     = app.Flag("max-drain-attempts-before-fail", "Maximum number of failed drain attempts before giving-up on draining the node.").Default("8").Int()
 
 		// Pod Opt-in flags
 		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
@@ -314,6 +315,7 @@ func main() {
 
 	cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 		eventRecorder,
+		*maxDrainAttemptsBeforeFail,
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
@@ -322,6 +324,7 @@ func main() {
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
+		//kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
 		kubernetes.WithAPICordonDrainerLogger(log),
 	)
 
@@ -339,6 +342,7 @@ func main() {
 		kubernetes.WithConditionsFilter(*conditions),
 		kubernetes.WithCordonPodFilter(podFilteringFunc, pods),
 		kubernetes.WithGlobalBlocking(globalLocker),
+		kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {
@@ -352,6 +356,7 @@ func main() {
 				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 				kubernetes.WithDrainGroups(*drainGroupLabelKey),
 				kubernetes.WithGlobalBlocking(globalLocker),
+				kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
 				kubernetes.WithConditionsFilter(*conditions)),
 		}
 	}

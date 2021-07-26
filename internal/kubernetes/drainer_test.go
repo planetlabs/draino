@@ -176,7 +176,7 @@ func TestCordon(t *testing.T) {
 			for _, r := range tc.reactions {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, WithCordonLimiter(&fakeLimiter{}))
+			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, 1, WithCordonLimiter(&fakeLimiter{}))
 			if err := d.Cordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
@@ -263,7 +263,7 @@ func TestUncordon(t *testing.T) {
 			for _, r := range tc.reactions {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{})
+			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, 1)
 			if err := d.Uncordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
@@ -536,7 +536,7 @@ func TestDrain(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newFakeClientSet(tc.reactions...)
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, tc.options...)
+			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, 1, tc.options...)
 			if err := d.Drain(tc.node); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
@@ -585,12 +585,54 @@ func TestMarkDrain(t *testing.T) {
 			drainStatus: DrainConditionStatus{Marked: true, LastTransition: now.Time},
 			isErr:       false,
 		},
+		{
+			name: "markDrain Failed",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionFalse,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+							//Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, Completed: false, Failed: true, FailedCount: 1, LastTransition: now.Time},
+			isErr:       false,
+		},
+		{
+			name: "markDrain Failed(2)",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionFalse,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed(2): 2020-03-20T15:55:50+01:00",
+							//Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed(2): 2020-03-20T15:55:50+01:00
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, Completed: false, Failed: true, FailedCount: 2, LastTransition: now.Time},
+			isErr:       false,
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fake.NewSimpleClientset(tc.node)
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{})
+			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, 1)
 			{
 				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
 				if err != nil {
@@ -601,7 +643,7 @@ func TestMarkDrain(t *testing.T) {
 					t.Errorf("node %v initial drainStatus is not correct", tc.node.Name)
 				}
 				if !drainStatus.Marked {
-					if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false); err != nil {
+					if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false, 0); err != nil {
 						t.Errorf("d.MarkDrain(%v): %v", tc.node.Name, err)
 					}
 					{

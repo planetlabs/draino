@@ -141,7 +141,7 @@ type Cordoner interface {
 type Drainer interface {
 	// Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 	Drain(n *core.Node) error
-	MarkDrain(n *core.Node, when, finish time.Time, failed bool) error
+	MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error
 	GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error)
 }
 
@@ -189,7 +189,7 @@ func (d *NoopCordonDrainer) Uncordon(_ *core.Node, _ ...nodeMutatorFn) error { r
 func (d *NoopCordonDrainer) Drain(_ *core.Node) error { return nil }
 
 // MarkDrain does nothing.
-func (d *NoopCordonDrainer) MarkDrain(_ *core.Node, _, _ time.Time, _ bool) error {
+func (d *NoopCordonDrainer) MarkDrain(_ *core.Node, _, _ time.Time, _ bool, _ int32) error {
 	return nil
 }
 
@@ -216,9 +216,10 @@ type APICordonDrainer struct {
 	cordonLimiter          CordonLimiter
 	nodeReplacementLimiter NodeReplacementLimiter
 
-	maxGracePeriod   time.Duration
-	evictionHeadroom time.Duration
-	skipDrain        bool
+	maxGracePeriod             time.Duration
+	evictionHeadroom           time.Duration
+	skipDrain                  bool
+	maxDrainAttemptsBeforeFail int32
 
 	storageClassesAllowingPVDeletion map[string]struct{}
 }
@@ -292,15 +293,16 @@ func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDraine
 
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
-func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecorder, ao ...APICordonDrainerOption) *APICordonDrainer {
+func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecorder, maxDrainAttemptsBeforeFail int, ao ...APICordonDrainerOption) *APICordonDrainer {
 	d := &APICordonDrainer{
-		c:                c,
-		l:                zap.NewNop(),
-		filter:           NewPodFilters(),
-		maxGracePeriod:   DefaultMaxGracePeriod,
-		evictionHeadroom: DefaultEvictionOverhead,
-		skipDrain:        DefaultSkipDrain,
-		eventRecorder:    eventRecorder,
+		c:                          c,
+		l:                          zap.NewNop(),
+		filter:                     NewPodFilters(),
+		maxGracePeriod:             DefaultMaxGracePeriod,
+		evictionHeadroom:           DefaultEvictionOverhead,
+		skipDrain:                  DefaultSkipDrain,
+		eventRecorder:              eventRecorder,
+		maxDrainAttemptsBeforeFail: int32(maxDrainAttemptsBeforeFail),
 	}
 	for _, o := range ao {
 		o(d)
@@ -364,8 +366,8 @@ func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) err
 	return nil
 }
 
-// MarkDrain set a condition on the node to mark that that drain is scheduled.
-func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool) error {
+// MarkDrain set a condition on the node to mark that the drain is scheduled.
+func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	nodeName := n.Name
 	// Refresh the node object
 	freshNode, err := d.c.CoreV1().Nodes().Get(nodeName, meta.GetOptions{})
@@ -380,7 +382,11 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 	conditionStatus := core.ConditionTrue
 	if !finish.IsZero() {
 		if failed {
-			msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
+			msgSuffix = fmt.Sprintf(" | %s(%d): %s", FailedStr, failCount, finish.Format(time.RFC3339))
+			if failCount >= d.maxDrainAttemptsBeforeFail {
+				freshNode.Annotations[drainRetryAnnotationKey] = drainRetryAnnotationFailedValue
+
+			}
 		} else {
 			msgSuffix = fmt.Sprintf(" | %s: %s", CompletedStr, finish.Format(time.RFC3339))
 		}
@@ -421,6 +427,7 @@ type DrainConditionStatus struct {
 	Marked         bool
 	Completed      bool
 	Failed         bool
+	FailedCount    int32
 	LastTransition time.Time
 }
 
@@ -438,7 +445,18 @@ func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
 				return drainStatus, nil
 			}
 			if strings.Contains(condition.Message, FailedStr) {
+				//Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00
 				drainStatus.Failed = true
+				drainStatus.FailedCount = 1
+				msg := strings.Split(condition.Message, " | ")
+				msgSuffix := msg[1]
+				if msgSuffix[6] != ':' { //Failed: 2020-03-20T15:55:50+01:00
+					var tmp string
+					_, err := fmt.Sscanf(msgSuffix, "Failed(%d): %s", &drainStatus.FailedCount, &tmp)
+					if err != nil {
+						return drainStatus, fmt.Errorf("cannot parse failedCount on node%s: %w", n.GetName(), err)
+					}
+				}
 				return drainStatus, nil
 			}
 		} else if condition.Status == core.ConditionTrue {
