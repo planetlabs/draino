@@ -190,7 +190,7 @@ func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, 
 	// Mark the node with the condition stating that drain is scheduled
 	if err := RetryWithTimeout(
 		func() error {
-			return d.drainer.MarkDrain(node, when, time.Time{}, false, 0)
+			return d.drainer.MarkDrain(node, when, time.Time{}, false, failedCount)
 		},
 		SetConditionRetryPeriod,
 		SetConditionTimeout,
@@ -293,7 +293,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
 		if err := RetryWithTimeout(
 			func() error {
-				return d.drainer.MarkDrain(node, when, sched.finish, false, 0)
+				return d.drainer.MarkDrain(node, when, sched.finish, false, failedCount)
 			},
 			SetConditionRetryPeriod,
 			SetConditionTimeout,

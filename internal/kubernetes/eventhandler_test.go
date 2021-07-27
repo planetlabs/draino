@@ -67,6 +67,10 @@ func (d *mockCordonDrainer) Drain(n *core.Node) error {
 	return nil
 }
 
+func (d *mockCordonDrainer) GetMaxDrainAttemptsBeforeFail() int32 {
+	return 0
+}
+
 func (d *mockCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	d.calls = append(d.calls, mockCall{
 		name: "MarkDrain",

@@ -143,6 +143,7 @@ type Drainer interface {
 	Drain(n *core.Node) error
 	MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error
 	GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error)
+	GetMaxDrainAttemptsBeforeFail() int32
 }
 
 type NodeReplacementStatus string
@@ -191,6 +192,10 @@ func (d *NoopCordonDrainer) Drain(_ *core.Node) error { return nil }
 // MarkDrain does nothing.
 func (d *NoopCordonDrainer) MarkDrain(_ *core.Node, _, _ time.Time, _ bool, _ int32) error {
 	return nil
+}
+
+func (d *NoopCordonDrainer) GetMaxDrainAttemptsBeforeFail() int32 {
+	return 0
 }
 
 // ReplaceNode return none
@@ -291,18 +296,24 @@ func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDraine
 	}
 }
 
+// WithMaxDrainAttemptsBeforeFail configures the max count of failed drain attempts before a final fail
+func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.maxDrainAttemptsBeforeFail = int32(maxDrainAttemptsBeforeFail)
+	}
+}
+
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
-func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecorder, maxDrainAttemptsBeforeFail int, ao ...APICordonDrainerOption) *APICordonDrainer {
+func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecorder, ao ...APICordonDrainerOption) *APICordonDrainer {
 	d := &APICordonDrainer{
-		c:                          c,
-		l:                          zap.NewNop(),
-		filter:                     NewPodFilters(),
-		maxGracePeriod:             DefaultMaxGracePeriod,
-		evictionHeadroom:           DefaultEvictionOverhead,
-		skipDrain:                  DefaultSkipDrain,
-		eventRecorder:              eventRecorder,
-		maxDrainAttemptsBeforeFail: int32(maxDrainAttemptsBeforeFail),
+		c:                c,
+		l:                zap.NewNop(),
+		filter:           NewPodFilters(),
+		maxGracePeriod:   DefaultMaxGracePeriod,
+		evictionHeadroom: DefaultEvictionOverhead,
+		skipDrain:        DefaultSkipDrain,
+		eventRecorder:    eventRecorder,
 	}
 	for _, o := range ao {
 		o(d)
@@ -316,6 +327,10 @@ func (d *APICordonDrainer) SetRuntimeObjectStore(store RuntimeObjectStore) {
 
 func (d *APICordonDrainer) deleteTimeout() time.Duration {
 	return d.maxGracePeriod + d.evictionHeadroom
+}
+
+func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail() int32 {
+	return d.maxDrainAttemptsBeforeFail
 }
 
 // Cordon the supplied node. Marks it unschedulable for new pods.

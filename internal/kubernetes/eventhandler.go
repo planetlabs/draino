@@ -116,7 +116,6 @@ type DrainingResourceEventHandler struct {
 	conditions []SuppliedCondition
 
 	durationWithCompletedStatusBeforeReplacement time.Duration
-	maxDrainAttemptsBeforeFail                   int32
 }
 
 // DrainingResourceEventHandlerOption configures an DrainingResourceEventHandler.
@@ -164,13 +163,6 @@ func WithCordonPodFilter(f PodFilterFunc, podStore PodStore) DrainingResourceEve
 func WithGlobalBlocking(globalLocker GlobalBlocker) DrainingResourceEventHandlerOption {
 	return func(d *DrainingResourceEventHandler) {
 		d.globalLocker = globalLocker
-	}
-}
-
-// WithMaxDrainAttemptsBeforeFail configures the max count of failed drain attempts before a final fail
-func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) DrainingResourceEventHandlerOption {
-	return func(d *DrainingResourceEventHandler) {
-		d.maxDrainAttemptsBeforeFail = int32(maxDrainAttemptsBeforeFail)
 	}
 }
 
@@ -300,7 +292,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 
 	if len(pods) == 0 && drainStatus.Completed {
 		elapseSinceCompleted := time.Since(drainStatus.LastTransition)
-		if elapseSinceCompleted >= h.durationWithCompletedStatusBeforeReplacement {
+		if elapseSinceCompleted > h.durationWithCompletedStatusBeforeReplacement {
 			// This node probably blocked due to minSize set on the nodegroup
 			status, err := h.cordonDrainer.ReplaceNode(n)
 			LogForVerboseNode(h.logger, n, "node replacement", zap.String("status", string(status)), zap.Error(err))
@@ -312,7 +304,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		// Is there a request to retry a failed drain activity. If yes reschedule drain
 		if HasDrainRetryAnnotation(n) {
 			h.drainScheduler.DeleteSchedule(n)
-			if drainStatus.FailedCount >= h.maxDrainAttemptsBeforeFail {
+			if drainStatus.FailedCount >= h.cordonDrainer.GetMaxDrainAttemptsBeforeFail() {
 				logger.Warn("Drain Failed: MaxDrainAttempts reached")
 				return
 			}

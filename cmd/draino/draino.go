@@ -315,7 +315,6 @@ func main() {
 
 	cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 		eventRecorder,
-		*maxDrainAttemptsBeforeFail,
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
@@ -324,7 +323,7 @@ func main() {
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
-		//kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
+		kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
 		kubernetes.WithAPICordonDrainerLogger(log),
 	)
 
@@ -342,7 +341,6 @@ func main() {
 		kubernetes.WithConditionsFilter(*conditions),
 		kubernetes.WithCordonPodFilter(podFilteringFunc, pods),
 		kubernetes.WithGlobalBlocking(globalLocker),
-		kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
 	if *dryRun {
@@ -356,7 +354,6 @@ func main() {
 				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 				kubernetes.WithDrainGroups(*drainGroupLabelKey),
 				kubernetes.WithGlobalBlocking(globalLocker),
-				kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
 				kubernetes.WithConditionsFilter(*conditions)),
 		}
 	}
