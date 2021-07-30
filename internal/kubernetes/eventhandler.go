@@ -248,6 +248,16 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		return
 	}
 
+	if HasDrainRetryFailedAnnotation(n) {
+		if n.Spec.Unschedulable {
+			nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
+			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainFailed, "Pod failed to Drain after multiple retries. Uncordoning node to free slot.")
+			h.drainScheduler.DeleteSchedule(n)
+			h.uncordon(n)
+		}
+		return
+	}
+
 	// First cordon the node if it is not yet cordoned
 	if !n.Spec.Unschedulable {
 		// check if the node passes filters
@@ -482,4 +492,8 @@ func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node, fc int32) {
 
 func HasDrainRetryAnnotation(n *core.Node) bool {
 	return n.GetAnnotations()[drainRetryAnnotationKey] == drainRetryAnnotationValue
+}
+
+func HasDrainRetryFailedAnnotation(n *core.Node) bool {
+	return n.GetAnnotations()[drainRetryAnnotationKey] == drainRetryAnnotationFailedValue
 }

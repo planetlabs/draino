@@ -397,10 +397,9 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 	conditionStatus := core.ConditionTrue
 	if !finish.IsZero() {
 		if failed {
-			msgSuffix = fmt.Sprintf(" | %s(%d): %s", FailedStr, failCount, finish.Format(time.RFC3339))
+			msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
 			if failCount >= d.maxDrainAttemptsBeforeFail {
 				freshNode.Annotations[drainRetryAnnotationKey] = drainRetryAnnotationFailedValue
-
 			}
 		} else {
 			msgSuffix = fmt.Sprintf(" | %s: %s", CompletedStr, finish.Format(time.RFC3339))
@@ -415,8 +414,9 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 		if string(condition.Type) != ConditionDrainedScheduled {
 			continue
 		}
+		msgPrefix := fmt.Sprintf("[%d] | ", failCount)
 		freshNode.Status.Conditions[i].LastHeartbeatTime = now
-		freshNode.Status.Conditions[i].Message = "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
+		freshNode.Status.Conditions[i].Message = msgPrefix + "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
 		freshNode.Status.Conditions[i].Status = conditionStatus
 		conditionUpdated = true
 	}
@@ -460,14 +460,13 @@ func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
 				return drainStatus, nil
 			}
 			if strings.Contains(condition.Message, FailedStr) {
-				//Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00
+				//[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00
 				drainStatus.Failed = true
 				drainStatus.FailedCount = 1
 				msg := strings.Split(condition.Message, " | ")
-				msgSuffix := msg[1]
-				if msgSuffix[6] != ':' { //Failed: 2020-03-20T15:55:50+01:00
-					var tmp string
-					_, err := fmt.Sscanf(msgSuffix, "Failed(%d): %s", &drainStatus.FailedCount, &tmp)
+				msgPrefix := msg[0]
+				if msgPrefix[0] == '[' { //Detect new prefix format
+					_, err := fmt.Sscanf(msgPrefix, "[%d]", &drainStatus.FailedCount)
 					if err != nil {
 						return drainStatus, fmt.Errorf("cannot parse failedCount on node%s: %w", n.GetName(), err)
 					}
