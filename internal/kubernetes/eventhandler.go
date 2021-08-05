@@ -251,7 +251,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	if HasDrainRetryFailedAnnotation(n) {
 		if n.Spec.Unschedulable {
 			nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
-			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainFailed, "Pod failed to Drain after multiple retries. Uncordoning node to free slot.")
+			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain still failing after multiple retries. Uncordoning and ignoring the node.")
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 		}
@@ -289,7 +289,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		return
 	}
 
-	drainStatus, err := IsMarkedForDrain(n)
+	drainStatus, err := GetDrainConditionStatus(n)
 	if err != nil {
 		logger.Error(err.Error())
 		return
@@ -468,12 +468,12 @@ func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node)
 }
 
 // drain schedule the draining activity
-func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node, fc int32) {
+func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node, failedCount int32) {
 	log := LoggerForNode(n, h.logger)
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 	nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 	log.Debug("Scheduling drain")
-	when, err := h.drainScheduler.Schedule(n, fc)
+	when, err := h.drainScheduler.Schedule(n, failedCount)
 	if err != nil {
 		if IsAlreadyScheduledError(err) {
 			return

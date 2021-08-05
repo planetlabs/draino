@@ -6,7 +6,7 @@ build: fmt vet
 
 # Run against the configured Kubernetes cluster in ~/.kube/config
 run-in-rage: fmt vet
-	go run ./cmd/draino/*.go  --kubeconfig=$(KUBECONFIG) --namespace=rage-k8s \
+	go run ./cmd/draino/*.go  --kubeconfig=$(KUBECONFIG) --namespace=cluster-controllers \
 	  --debug \
       --leader-election-token-name=draino-standard \
       --drain-buffer=3m \
@@ -29,7 +29,7 @@ run-in-rage: fmt vet
       --max-notready-nodes=10% \
       --max-notready-nodes=50 \
       --max-pending-pods=10% \
-      --max-drain-attempts-before-fail=8 \
+      --max-drain-attempts-before-fail=7 \
       --do-not-evict-pod-controlled-by=StatefulSet \
       --do-not-evict-pod-controlled-by=DaemonSet \
       --do-not-evict-pod-controlled-by=ExtendedDaemonSetReplicaSet \

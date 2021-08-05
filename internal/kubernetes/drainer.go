@@ -446,7 +446,7 @@ type DrainConditionStatus struct {
 	LastTransition time.Time
 }
 
-func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
+func GetDrainConditionStatus(n *core.Node) (DrainConditionStatus, error) {
 	var drainStatus DrainConditionStatus
 	for _, condition := range n.Status.Conditions {
 		if string(condition.Type) != ConditionDrainedScheduled {
@@ -454,6 +454,16 @@ func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
 		}
 		drainStatus.Marked = true
 		drainStatus.LastTransition = condition.LastTransitionTime.Time
+		drainStatus.FailedCount = 1
+		msg := strings.Split(condition.Message, " | ")
+		msgPrefix := msg[0]
+		if len(msgPrefix) > 0 && msgPrefix[0] == '[' { //Detect new prefix format
+			_, err := fmt.Sscanf(msgPrefix, "[%d]", &drainStatus.FailedCount)
+			if err != nil {
+				return drainStatus, fmt.Errorf("cannot parse failedCount on node%s: %w", n.GetName(), err)
+			}
+		}
+
 		if condition.Status == core.ConditionFalse {
 			if strings.Contains(condition.Message, CompletedStr) {
 				drainStatus.Completed = true
@@ -462,15 +472,6 @@ func IsMarkedForDrain(n *core.Node) (DrainConditionStatus, error) {
 			if strings.Contains(condition.Message, FailedStr) {
 				//[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00
 				drainStatus.Failed = true
-				drainStatus.FailedCount = 1
-				msg := strings.Split(condition.Message, " | ")
-				msgPrefix := msg[0]
-				if msgPrefix[0] == '[' { //Detect new prefix format
-					_, err := fmt.Sscanf(msgPrefix, "[%d]", &drainStatus.FailedCount)
-					if err != nil {
-						return drainStatus, fmt.Errorf("cannot parse failedCount on node%s: %w", n.GetName(), err)
-					}
-				}
 				return drainStatus, nil
 			}
 		} else if condition.Status == core.ConditionTrue {
