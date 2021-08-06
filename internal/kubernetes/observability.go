@@ -52,7 +52,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureNodesWithNodeOptions,
 		Description: "Number of nodes for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagDrainRetry, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
+		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagDrainRetry, TagDrainRetryFailed, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
 	}
 
 	view.Register(g.previousMeasureNodesWithNodeOptions)
@@ -109,6 +109,7 @@ type inScopeTags struct {
 	PreprovisioningEnabled          bool
 	PVCManagementEnabled            bool
 	DrainRetry                      bool
+	DrainRetryFailed                bool
 	UserOptOutViaPodAnnotation      bool
 	UserOptInViaPodAnnotation       bool
 	TagUserEvictionURLViaAnnotation bool
@@ -153,6 +154,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					PreprovisioningEnabled:          node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
 					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
 					DrainRetry:                      HasDrainRetryAnnotation(node),
+					DrainRetryFailed:                HasDrainRetryFailedAnnotation(node),
 					UserOptOutViaPodAnnotation:      s.HasPodWithUserOptOutAnnotation(node),
 					UserOptInViaPodAnnotation:       s.HasPodWithUserOptInAnnotation(node),
 					TagUserEvictionURLViaAnnotation: s.HasEvictionUrlViaAnnotation(node),
@@ -193,6 +195,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 			tag.Upsert(TagPreprovisioning, strconv.FormatBool(tagsValues.PreprovisioningEnabled)),
 			tag.Upsert(TagPVCManagement, strconv.FormatBool(tagsValues.PVCManagementEnabled)),
 			tag.Upsert(TagDrainRetry, strconv.FormatBool(tagsValues.DrainRetry)),
+			tag.Upsert(TagDrainRetryFailed, strconv.FormatBool(tagsValues.DrainRetryFailed)),
 			tag.Upsert(TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
 			tag.Upsert(TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
 			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)))

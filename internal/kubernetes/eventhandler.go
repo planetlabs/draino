@@ -92,6 +92,7 @@ var (
 	TagPreprovisioning, _            = tag.NewKey("preprovisioning")
 	TagPVCManagement, _              = tag.NewKey("pvc_management")
 	TagDrainRetry, _                 = tag.NewKey("drain_retry")
+	TagDrainRetryFailed, _           = tag.NewKey("drain_retry_failed")
 	TagUserOptOutViaPodAnnotation, _ = tag.NewKey("user_opt_out_via_pod_annotation")
 	TagUserOptInViaPodAnnotation, _  = tag.NewKey("user_opt_in_via_pod_annotation")
 	TagUserEvictionURL, _            = tag.NewKey("eviction_url")
