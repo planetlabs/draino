@@ -441,7 +441,7 @@ func (s *DrainoConfigurationObserverImpl) hasPodThatMatchFilter(node *v1.Node, f
 }
 
 func getDrainStatusStr(node *v1.Node) string {
-	drainStatus, err := IsMarkedForDrain(node)
+	drainStatus, err := GetDrainConditionStatus(node)
 	if err != nil {
 		return "Error"
 	}

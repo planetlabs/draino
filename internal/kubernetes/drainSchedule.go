@@ -35,7 +35,7 @@ const (
 
 type DrainScheduler interface {
 	HasSchedule(node *v1.Node) (has, failed bool)
-	Schedule(node *v1.Node) (time.Time, error)
+	Schedule(node *v1.Node, failedCount int32) (time.Time, error)
 	DeleteSchedule(node *v1.Node)
 	DeleteScheduleByName(nodeName string)
 }
@@ -150,10 +150,13 @@ func (sg *SchedulesGroup) whenNextSchedule() time.Time {
 	return when
 }
 
-func (sg *SchedulesGroup) addSchedule(node *v1.Node, scheduleRunner func(node *v1.Node, when time.Time) *schedule) time.Time {
+func (sg *SchedulesGroup) addSchedule(node *v1.Node, failedCount int32, scheduleRunner func(node *v1.Node, when time.Time, failedCount int32) *schedule) time.Time {
 	when := sg.whenNextSchedule()
+	if failedCount > 0 {
+		when = when.Add(time.Duration(2*failedCount) * time.Hour) // add backoff delay
+	}
 	sg.schedulesChain = append(sg.schedulesChain, node.GetName())
-	sg.schedules[node.GetName()] = scheduleRunner(node, when)
+	sg.schedules[node.GetName()] = scheduleRunner(node, when, failedCount)
 	return when
 }
 
@@ -172,7 +175,7 @@ func (sg *SchedulesGroup) removeSchedule(name string) {
 	sg.schedulesChain = newScheduleChain
 }
 
-func (d *DrainSchedules) Schedule(node *v1.Node) (time.Time, error) {
+func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, error) {
 	d.Lock()
 	scheduleGroup := d.getScheduleGroup(node)
 	if sched, ok := scheduleGroup.schedules[node.GetName()]; ok {
@@ -181,13 +184,13 @@ func (d *DrainSchedules) Schedule(node *v1.Node) (time.Time, error) {
 	}
 
 	// compute drain schedule time
-	when := scheduleGroup.addSchedule(node, d.newSchedule)
+	when := scheduleGroup.addSchedule(node, failedCount, d.newSchedule)
 	d.Unlock()
 
 	// Mark the node with the condition stating that drain is scheduled
 	if err := RetryWithTimeout(
 		func() error {
-			return d.drainer.MarkDrain(node, when, time.Time{}, false)
+			return d.drainer.MarkDrain(node, when, time.Time{}, false, failedCount)
 		},
 		SetConditionRetryPeriod,
 		SetConditionTimeout,
@@ -203,6 +206,7 @@ type schedule struct {
 	when              time.Time
 	customDrainBuffer *time.Duration
 	failed            int32
+	failedCount       int32
 	finish            time.Time
 	timer             *time.Timer
 }
@@ -215,10 +219,11 @@ func (s *schedule) isFailed() bool {
 	return atomic.LoadInt32(&s.failed) == 1
 }
 
-func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
+func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount int32) *schedule {
 	nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
 	sched := &schedule{
-		when: when,
+		when:        when,
+		failedCount: failedCount,
 	}
 	if customDrainBuffer, ok := node.Annotations[CustomDrainBufferAnnotation]; ok {
 		durationValue, err := time.ParseDuration(customDrainBuffer)
@@ -288,7 +293,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time) *schedule {
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
 		if err := RetryWithTimeout(
 			func() error {
-				return d.drainer.MarkDrain(node, when, sched.finish, false)
+				return d.drainer.MarkDrain(node, when, sched.finish, false, failedCount)
 			},
 			SetConditionRetryPeriod,
 			SetConditionTimeout,
@@ -304,13 +309,14 @@ func (d *DrainSchedules) handleDrainFailure(sched *schedule, log *zap.Logger, dr
 	nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
 	sched.finish = time.Now()
 	sched.setFailed()
+	sched.failedCount++
 	log.Info("Failed to drain", zap.Error(drainError))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
 	StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
 	d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", drainError)
 	if err := RetryWithTimeout(
 		func() error {
-			return d.drainer.MarkDrain(node, sched.when, sched.finish, true)
+			return d.drainer.MarkDrain(node, sched.when, sched.finish, true, sched.failedCount)
 		},
 		SetConditionRetryPeriod,
 		SetConditionTimeout,

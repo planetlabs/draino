@@ -61,8 +61,9 @@ const (
 	newNodeRequestReasonPreprovisioning = "preprovisioning"
 	newNodeRequestReasonReplacement     = "replacement"
 
-	drainRetryAnnotationKey   = "draino/drain-retry"
-	drainRetryAnnotationValue = "true"
+	drainRetryAnnotationKey         = "draino/drain-retry"
+	drainRetryAnnotationValue       = "true"
+	drainRetryAnnotationFailedValue = "failed"
 
 	drainoConditionsAnnotationKey = "draino.planet.com/conditions"
 )
@@ -247,6 +248,16 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		return
 	}
 
+	if HasDrainRetryFailedAnnotation(n) {
+		if n.Spec.Unschedulable {
+			nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
+			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain still failing after multiple retries. Uncordoning and ignoring the node.")
+			h.drainScheduler.DeleteSchedule(n)
+			h.uncordon(n)
+		}
+		return
+	}
+
 	// First cordon the node if it is not yet cordoned
 	if !n.Spec.Unschedulable {
 		// check if the node passes filters
@@ -278,7 +289,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		return
 	}
 
-	drainStatus, err := IsMarkedForDrain(n)
+	drainStatus, err := GetDrainConditionStatus(n)
 	if err != nil {
 		logger.Error(err.Error())
 		return
@@ -303,7 +314,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		// Is there a request to retry a failed drain activity. If yes reschedule drain
 		if HasDrainRetryAnnotation(n) {
 			h.drainScheduler.DeleteSchedule(n)
-			h.scheduleDrain(n)
+			if drainStatus.FailedCount >= h.cordonDrainer.GetMaxDrainAttemptsBeforeFail() {
+				logger.Warn("Drain Failed: MaxDrainAttempts reached")
+				return
+			}
+			h.scheduleDrain(n, drainStatus.FailedCount)
 			LogForVerboseNode(h.logger, n, "retry with new schedule")
 			return
 		}
@@ -315,7 +330,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	hasSchedule, failedSched := h.drainScheduler.HasSchedule(n)
 	LogForVerboseNode(h.logger, n, "hasSchedule", zap.Bool("hasSchedule", hasSchedule), zap.Bool("failedSchedule", failedSched))
 	if !hasSchedule {
-		h.scheduleDrain(n)
+		h.scheduleDrain(n, drainStatus.FailedCount)
 		return
 	}
 }
@@ -453,12 +468,12 @@ func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node)
 }
 
 // drain schedule the draining activity
-func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node) {
+func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node, failedCount int32) {
 	log := LoggerForNode(n, h.logger)
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 	nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 	log.Debug("Scheduling drain")
-	when, err := h.drainScheduler.Schedule(n)
+	when, err := h.drainScheduler.Schedule(n, failedCount)
 	if err != nil {
 		if IsAlreadyScheduledError(err) {
 			return
@@ -477,4 +492,8 @@ func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node) {
 
 func HasDrainRetryAnnotation(n *core.Node) bool {
 	return n.GetAnnotations()[drainRetryAnnotationKey] == drainRetryAnnotationValue
+}
+
+func HasDrainRetryFailedAnnotation(n *core.Node) bool {
+	return n.GetAnnotations()[drainRetryAnnotationKey] == drainRetryAnnotationFailedValue
 }

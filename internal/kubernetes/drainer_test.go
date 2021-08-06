@@ -552,6 +552,98 @@ func TestDrain(t *testing.T) {
 	}
 }
 
+func TestGetDrainConditionStatus(t *testing.T) {
+	now := meta.Time{Time: time.Now()}
+	cases := []struct {
+		name        string
+		node        *core.Node
+		drainStatus DrainConditionStatus
+		isErr       bool
+	}{
+		{
+			name:  "conditionStatus0",
+			node:  &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			isErr: false,
+		},
+		{
+			name: "conditionStatus1",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled",
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, FailedCount: 1, LastTransition: now.Time},
+			isErr:       false,
+		},
+		{
+			name: "conditionStatus failed(1)",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionFalse,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, Completed: false, Failed: true, FailedCount: 1, LastTransition: now.Time},
+			isErr:       false,
+		},
+		{
+			name: "conditionStatus Failed(2)",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionFalse,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "[2] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, Completed: false, Failed: true, FailedCount: 2, LastTransition: now.Time},
+			isErr:       false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fake.NewSimpleClientset(tc.node)
+			{
+				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				if err != nil {
+					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
+				}
+				drainStatus, err := GetDrainConditionStatus(n)
+				if drainStatus != tc.drainStatus {
+					t.Errorf("node %v initial drainStatus is not correct", tc.node.Name)
+				}
+			}
+		})
+	}
+}
+
 func TestMarkDrain(t *testing.T) {
 	now := meta.Time{Time: time.Now()}
 	cases := []struct {
@@ -582,7 +674,67 @@ func TestMarkDrain(t *testing.T) {
 					},
 				},
 			},
-			drainStatus: DrainConditionStatus{Marked: true, LastTransition: now.Time},
+			drainStatus: DrainConditionStatus{Marked: true, FailedCount: 1, LastTransition: now.Time},
+			isErr:       false,
+		},
+		{
+			name: "markDrain Failed",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionFalse,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, Completed: false, Failed: true, FailedCount: 1, LastTransition: now.Time},
+			isErr:       false,
+		},
+		{
+			name: "markDrain Failed(2)",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionFalse,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "[2] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, Completed: false, Failed: true, FailedCount: 2, LastTransition: now.Time},
+			isErr:       false,
+		},
+		{
+			name: "markDrain Failed(8)",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionFalse,
+							LastHeartbeatTime:  now,
+							LastTransitionTime: now,
+							Reason:             "Draino",
+							Message:            "[8] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+						},
+					},
+				},
+			},
+			drainStatus: DrainConditionStatus{Marked: true, Completed: false, Failed: true, FailedCount: 8, LastTransition: now.Time},
 			isErr:       false,
 		},
 	}
@@ -596,12 +748,12 @@ func TestMarkDrain(t *testing.T) {
 				if err != nil {
 					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 				}
-				drainStatus, err := IsMarkedForDrain(n)
+				drainStatus, err := GetDrainConditionStatus(n)
 				if drainStatus != tc.drainStatus {
 					t.Errorf("node %v initial drainStatus is not correct", tc.node.Name)
 				}
 				if !drainStatus.Marked {
-					if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false); err != nil {
+					if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false, 0); err != nil {
 						t.Errorf("d.MarkDrain(%v): %v", tc.node.Name, err)
 					}
 					{
@@ -609,7 +761,7 @@ func TestMarkDrain(t *testing.T) {
 						if err != nil {
 							t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 						}
-						if drainStatus, err = IsMarkedForDrain(n); !drainStatus.Marked {
+						if drainStatus, err = GetDrainConditionStatus(n); !drainStatus.Marked {
 							t.Errorf("node %v is not marked for drain", tc.node.Name)
 						}
 					}

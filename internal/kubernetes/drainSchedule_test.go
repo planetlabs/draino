@@ -15,9 +15,10 @@ import (
 func TestDrainSchedules_Schedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
+	var failedCount int32 = 0
 	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
-	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}})
-	whenFirstSchedSpecificGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeGrp", Annotations: map[string]string{DrainGroupAnnotation: "grp1"}}})
+	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
+	whenFirstSchedSpecificGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeGrp", Annotations: map[string]string{DrainGroupAnnotation: "grp1"}}}, failedCount)
 
 	type timeWindow struct {
 		from, to time.Time
@@ -77,8 +78,8 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 			if hasSchedule {
 				t.Errorf("Node %v should not have any schedule", tt.node.Name)
 			}
-
-			when, err := scheduler.Schedule(tt.node)
+			var failedCount int32 = 0
+			when, err := scheduler.Schedule(tt.node, failedCount)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DrainSchedules.Schedule() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -107,8 +108,8 @@ func (d *failDrainer) Drain(n *v1.Node) error { return errors.New("myerr") }
 func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
 	scheduler := NewDrainSchedules(&failDrainer{}, &record.FakeRecorder{}, 0, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	node := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}
-
-	when, err := scheduler.Schedule(node)
+	var failedCount int32 = 0
+	when, err := scheduler.Schedule(node, failedCount)
 	if err != nil {
 		t.Fatalf("DrainSchedules.Schedule() error = %v", err)
 	}
@@ -141,8 +142,9 @@ func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
 func TestDrainSchedules_DeleteSchedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
+	var failedCount int32 = 0
 	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
-	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}})
+	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
 
 	type timeWindow struct {
 		from, to time.Time
@@ -178,8 +180,8 @@ func TestDrainSchedules_DeleteSchedule(t *testing.T) {
 			if hasSchedule {
 				t.Errorf("Node %v should not have any schedule", tt.node.Name)
 			}
-
-			when, err := scheduler.Schedule(tt.node)
+			var failedCount int32 = 0
+			when, err := scheduler.Schedule(tt.node, failedCount)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DrainSchedules.Schedule() error = %v, wantErr %v", err, tt.wantErr)
 				return
