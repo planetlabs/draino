@@ -17,12 +17,12 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
-
-	"errors"
 
 	v1 "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
@@ -259,4 +259,32 @@ func (s StatefulSetWatch) Get(namespace, name string) (*v1.StatefulSet, error) {
 		}
 	}
 	return nil, apierrors.NewNotFound(v1.Resource("statefulset"), name)
+}
+
+// RunStoreForTest can be used in test to get a running and synched store
+func RunStoreForTest(kclient kubernetes.Interface) (store RuntimeObjectStore, closingFunc func()) {
+	stopCh := make(chan struct{})
+	stsWatch := NewStatefulsetWatch(kclient)
+	podWatch := NewPodWatch(kclient)
+	nodeWatch := NewNodeWatch(kclient)
+
+	go stsWatch.Run(stopCh)
+	go podWatch.Run(stopCh)
+	go nodeWatch.Run(stopCh)
+
+	store = &RuntimeObjectStoreImpl{
+		StatefulSetsStore: stsWatch,
+		PodsStore:         podWatch,
+		NodesStore:        nodeWatch,
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for !store.HasSynced() {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	wg.Wait()
+	return store, func() { close(stopCh) }
 }

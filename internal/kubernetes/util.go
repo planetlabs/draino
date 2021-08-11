@@ -301,17 +301,25 @@ func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store
 		}
 	}
 
+	if ctrl, found := GetControllerForPod(pod, store); found {
+		v, ok := ctrl.GetAnnotations()[annotationKey]
+		return v, ok
+	}
+	return "", false
+}
+
+// GetControllerForPod for the moment it handles only statefulSets controller
+func GetControllerForPod(pod *core.Pod, store RuntimeObjectStore) (ctrl metav1.Object, found bool) {
 	for _, r := range pod.OwnerReferences {
 		if r.Kind == "StatefulSet" {
 			sts, err := store.StatefulSets().Get(pod.Namespace, r.Name)
 			if err != nil {
-				return "", false
+				return nil, false
 			}
-			v, ok := sts.Annotations[annotationKey]
-			return v, ok
+			return sts, true
 		}
 	}
-	return "", false
+	return nil, false
 }
 
 // GetReadinessState gets readiness state for the node

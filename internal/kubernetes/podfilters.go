@@ -90,7 +90,7 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 	}
 }
 
-func PodHasAnyOfTheAnnotations(annotations ...string) PodFilterFunc {
+func PodOrControllerHasAnyOfTheAnnotations(store RuntimeObjectStore, annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
 		for _, annot := range annotations {
 			selector, err := labels.Parse(annot)
@@ -99,6 +99,11 @@ func PodHasAnyOfTheAnnotations(annotations ...string) PodFilterFunc {
 			}
 			if selector.Matches(labels.Set(p.GetAnnotations())) {
 				return true, "pod-annotation", nil
+			}
+			if ctrl, found := GetControllerForPod(&p, store); found {
+				if selector.Matches(labels.Set(ctrl.GetAnnotations())) {
+					return true, "ctrl-annotation", nil
+				}
 			}
 		}
 		return false, "", nil

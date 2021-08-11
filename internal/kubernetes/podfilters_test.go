@@ -25,12 +25,13 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestPodFilters(t *testing.T) {
 	cases := []struct {
 		name              string
-		filterBuilderFunc func(obj ...runtime.Object) PodFilterFunc
+		filterBuilderFunc func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc
 		objects           []runtime.Object
 		pod               core.Pod
 		passesFilter      bool
@@ -44,13 +45,13 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{core.MirrorPodAnnotationKey: "definitelyahash"},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return MirrorPodFilter },
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc { return MirrorPodFilter },
 			passesFilter:      false,
 		},
 		{
 			name:              "IsNotMirror",
 			pod:               core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return MirrorPodFilter },
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc { return MirrorPodFilter },
 			passesFilter:      true,
 		},
 		{
@@ -64,7 +65,7 @@ func TestPodFilters(t *testing.T) {
 					},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return LocalStoragePodFilter },
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc { return LocalStoragePodFilter },
 			passesFilter:      false,
 		},
 		{
@@ -75,13 +76,13 @@ func TestPodFilters(t *testing.T) {
 					Volumes: []core.Volume{core.Volume{VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{}}}},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return LocalStoragePodFilter },
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc { return LocalStoragePodFilter },
 			passesFilter:      true,
 		},
 		{
 			name: "Unreplicated",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{nil})
 			},
 			passesFilter: false,
@@ -98,7 +99,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{nil})
 			},
 			passesFilter: true,
@@ -109,7 +110,7 @@ func TestPodFilters(t *testing.T) {
 				ObjectMeta: meta.ObjectMeta{Name: podName},
 				Status:     core.PodStatus{Phase: core.PodSucceeded},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{nil})
 			},
 			passesFilter: true,
@@ -120,7 +121,7 @@ func TestPodFilters(t *testing.T) {
 				ObjectMeta: meta.ObjectMeta{Name: podName},
 				Status:     core.PodStatus{Phase: core.PodFailed},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{nil})
 			},
 			passesFilter: true,
@@ -145,7 +146,7 @@ func TestPodFilters(t *testing.T) {
 					},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{{
 					Name:    "daemonsets",
 					Group:   "apps",
@@ -168,7 +169,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{{
 					Name:    "daemonsets",
 					Group:   "apps",
@@ -198,7 +199,7 @@ func TestPodFilters(t *testing.T) {
 					},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{{
 					Name:    "statefulsets",
 					Group:   "apps",
@@ -228,7 +229,7 @@ func TestPodFilters(t *testing.T) {
 					},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{nil, {
 					Name:    "daemonsets",
 					Group:   "apps",
@@ -256,7 +257,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{{
 					Name:    "statefulsets",
 					Group:   "apps",
@@ -279,7 +280,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{nil, {
 					Name:    "daemonsets",
 					Group:   "apps",
@@ -302,7 +303,7 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Random": "true"},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter() },
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter() },
 			passesFilter:      true,
 		},
 		{
@@ -312,8 +313,10 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect") },
-			passesFilter:      true,
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("Protect")
+			},
+			passesFilter: true,
 		},
 		{
 			name: "NoPodAnnotationsWithEmptyUserValue",
@@ -322,8 +325,10 @@ func TestPodFilters(t *testing.T) {
 					Name: podName,
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect=") },
-			passesFilter:      true,
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("Protect=")
+			},
+			passesFilter: true,
 		},
 		{
 			name: "NoMatchingProtectionAnnotations",
@@ -333,8 +338,10 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Useless": "true"},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect", "ProtectTwo=true") },
-			passesFilter:      true,
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("Protect", "ProtectTwo=true")
+			},
+			passesFilter: true,
 		},
 		{
 			name: "AltNoMatchingProtectionAnnotations",
@@ -344,7 +351,7 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"NeedsAValue": ""},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return UnprotectedPodFilter("Protect", "ProtectTwo=true", "NeedsAValue=true")
 			},
 			passesFilter: true,
@@ -357,8 +364,10 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Protect": ""},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect") },
-			passesFilter:      false,
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("Protect")
+			},
+			passesFilter: false,
 		},
 		{
 			name: "MultipleKeyOnlyProtectionAnnotations",
@@ -368,8 +377,10 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectTwo": ""},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("ProtectOne", "ProtectTwo") },
-			passesFilter:      false,
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("ProtectOne", "ProtectTwo")
+			},
+			passesFilter: false,
 		},
 		{
 			name: "SingleProtectionAnnotation",
@@ -379,8 +390,10 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Protect": "true"},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter("Protect=true") },
-			passesFilter:      false,
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter("Protect=true")
+			},
+			passesFilter: false,
 		},
 		{
 			name: "MultipleProtectionAnnotations",
@@ -390,7 +403,7 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectTwo": "true"},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return UnprotectedPodFilter("ProtectOne=true", "ProtectTwo=true")
 			},
 			passesFilter: false,
@@ -403,7 +416,7 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectTwo": ""},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return UnprotectedPodFilter("ProtectOne=true", "ProtectTwo")
 			},
 			passesFilter: false,
@@ -416,7 +429,7 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"ProtectOne": "true"},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return UnprotectedPodFilter("ProtectOne", "ProtectTwo=true")
 			},
 			passesFilter: false,
@@ -424,13 +437,13 @@ func TestPodFilters(t *testing.T) {
 		{
 			name:              "NoFiltersProvided",
 			pod:               core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc { return NewPodFilters() },
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc { return NewPodFilters() },
 			passesFilter:      true,
 		},
 		{
 			name: "AllFiltersPass",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodFilters(
 					func(_ core.Pod) (bool, string, error) { return true, "", nil },
 					func(_ core.Pod) (bool, string, error) { return true, "", nil },
@@ -441,7 +454,7 @@ func TestPodFilters(t *testing.T) {
 		{
 			name: "OneFilterFails",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodFilters(
 					func(_ core.Pod) (bool, string, error) { return true, "", nil },
 					func(_ core.Pod) (bool, string, error) { return false, "", nil },
@@ -452,7 +465,7 @@ func TestPodFilters(t *testing.T) {
 		{
 			name: "OneFilterErrors",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodFilters(
 					func(_ core.Pod) (bool, string, error) { return true, "", nil },
 					func(_ core.Pod) (bool, string, error) { return false, "", errExploded },
@@ -484,7 +497,7 @@ func TestPodFilters(t *testing.T) {
 					},
 				},
 			},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodControlledByFilter([]*meta.APIResource{{
 					Name:    "somethings",
 					Group:   "agroup",
@@ -495,74 +508,105 @@ func TestPodFilters(t *testing.T) {
 			passesFilter: false,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - empty list",
+			name: "PodOrControllerHasAnyOfTheAnnotations - empty list",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{}...)
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{}...)
 			},
 			passesFilter: false,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - non empty list - no annotation",
+			name: "PodOrControllerHasAnyOfTheAnnotations - non empty list - no annotation",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{"test=1"}...)
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test=1"}...)
 			},
 			passesFilter: false,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - match",
+			name: "PodOrControllerHasAnyOfTheAnnotations - match",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1"}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{"test=1"}...)
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test=1"}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - match key not value",
-			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1"}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{"test=2"}...)
+			name:    "PodOrControllerHasAnyOfTheAnnotations - match with sts",
+			objects: []runtime.Object{&v1.StatefulSet{ObjectMeta: meta.ObjectMeta{Name: "stsName", Namespace: "ns", Annotations: map[string]string{"test": "1"}}}},
+			pod: core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Namespace: "ns", Annotations: map[string]string{"test": "nomatch"}, OwnerReferences: []meta.OwnerReference{
+				{
+					Kind: "StatefulSet",
+					Name: "stsName",
+				},
+			}}},
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test=1"}...)
+			},
+			passesFilter: true,
+		},
+		{
+			name: "PodOrControllerHasAnyOfTheAnnotations - no match with sts",
+			objects: []runtime.Object{
+				&v1.StatefulSet{ObjectMeta: meta.ObjectMeta{Name: "stsname", Namespace: "ns", Annotations: map[string]string{"test": "notTheGoodValue"}}},
+				&v1.StatefulSet{ObjectMeta: meta.ObjectMeta{Name: "otherstsname", Namespace: "ns", Annotations: map[string]string{"test": "1"}}}, // good value but on different sts
+			},
+			pod: core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Namespace: "ns", Annotations: map[string]string{"test": "nomatch"}, OwnerReferences: []meta.OwnerReference{
+				{
+					Kind: "StatefulSet",
+					Name: "stsname",
+				},
+			}}},
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test=1"}...)
 			},
 			passesFilter: false,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - match key empty value",
+			name: "PodOrControllerHasAnyOfTheAnnotations - match key not value",
+			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1"}}},
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test=2"}...)
+			},
+			passesFilter: false,
+		},
+		{
+			name: "PodOrControllerHasAnyOfTheAnnotations - match key empty value",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": ""}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{"test="}...)
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test="}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - match key empty value no equal sign",
+			name: "PodOrControllerHasAnyOfTheAnnotations - match key empty value no equal sign",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": ""}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{"test"}...)
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test"}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - match one in list",
+			name: "PodOrControllerHasAnyOfTheAnnotations - match one in list",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{"aaa=bbb", "test=1"}...)
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"aaa=bbb", "test=1"}...)
 			},
 			passesFilter: true,
 		},
 		{
-			name: "PodHasAnyOfTheAnnotations - match key in list",
+			name: "PodOrControllerHasAnyOfTheAnnotations - match key in list",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return PodHasAnyOfTheAnnotations([]string{"test", "whatever"}...)
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return PodOrControllerHasAnyOfTheAnnotations(store, []string{"test", "whatever"}...)
 			},
 			passesFilter: true,
 		},
 		{
 			name: "NewPodFiltersWithOptInFirst - no opt-in and filter true",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return NewPodFiltersWithOptInFirst(PodHasAnyOfTheAnnotations(nil...),
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return NewPodFiltersWithOptInFirst(PodOrControllerHasAnyOfTheAnnotations(nil, nil...),
 					func(p core.Pod) (pass bool, reason string, err error) { return true, "", nil })
 			},
 			passesFilter: true,
@@ -570,8 +614,8 @@ func TestPodFilters(t *testing.T) {
 		{
 			name: "NewPodFiltersWithOptInFirst - no opt-in and filter false",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return NewPodFiltersWithOptInFirst(PodHasAnyOfTheAnnotations(nil...),
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return NewPodFiltersWithOptInFirst(PodOrControllerHasAnyOfTheAnnotations(nil, nil...),
 					func(p core.Pod) (pass bool, reason string, err error) { return false, "", nil })
 			},
 			passesFilter: false,
@@ -579,8 +623,8 @@ func TestPodFilters(t *testing.T) {
 		{
 			name: "NewPodFiltersWithOptInFirst - opt-in and filter false",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName, Annotations: map[string]string{"test": "1", "foo": "bar", "other": "value"}}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
-				return NewPodFiltersWithOptInFirst(PodHasAnyOfTheAnnotations([]string{"foo=bar"}...),
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return NewPodFiltersWithOptInFirst(PodOrControllerHasAnyOfTheAnnotations(store, []string{"foo=bar"}...),
 					func(p core.Pod) (pass bool, reason string, err error) { return false, "", nil })
 			},
 			passesFilter: true,
@@ -588,7 +632,7 @@ func TestPodFilters(t *testing.T) {
 		{
 			name: "FilterRunningPod",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}, Status: core.PodStatus{Phase: core.PodRunning}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodFiltersIgnoreCompletedPods(NewPodFilters(
 					func(_ core.Pod) (bool, string, error) { return false, "", nil },
 				))
@@ -598,7 +642,7 @@ func TestPodFilters(t *testing.T) {
 		{
 			name: "IgnoreCompletedSuccessPod",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}, Status: core.PodStatus{Phase: core.PodSucceeded}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodFiltersIgnoreCompletedPods(NewPodFilters(
 					func(_ core.Pod) (bool, string, error) { return false, "", nil },
 				))
@@ -608,7 +652,7 @@ func TestPodFilters(t *testing.T) {
 		{
 			name: "IgnoreCompletedFailedPod",
 			pod:  core.Pod{ObjectMeta: meta.ObjectMeta{Name: podName}, Status: core.PodStatus{Phase: core.PodFailed}},
-			filterBuilderFunc: func(obj ...runtime.Object) PodFilterFunc {
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
 				return NewPodFiltersIgnoreCompletedPods(NewPodFilters(
 					func(_ core.Pod) (bool, string, error) { return false, "", nil },
 				))
@@ -619,7 +663,11 @@ func TestPodFilters(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			filter := tc.filterBuilderFunc(tc.objects...)
+			kclient := fake.NewSimpleClientset(tc.objects...)
+			store, closingFunc := RunStoreForTest(kclient)
+			defer closingFunc()
+
+			filter := tc.filterBuilderFunc(store, tc.objects...)
 			passesFilter, _, err := filter(tc.pod)
 			if err != nil && tc.errFn != nil && !tc.errFn(err) {
 				t.Errorf("tc.filter(%v): %v", tc.pod.GetName(), err)
