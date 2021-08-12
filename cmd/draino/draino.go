@@ -319,7 +319,7 @@ func main() {
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
 		kubernetes.WithPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
-			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(pf...)))),
+			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.NewPodFilters(pf...)))),
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
@@ -329,7 +329,7 @@ func main() {
 
 	podFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
 		kubernetes.NewPodFiltersWithOptInFirst(
-			kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
+			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		cordonDrainer,
@@ -390,7 +390,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodHasAnyOfTheAnnotations(*optInPodAnnotations...), kubernetes.PodHasAnyOfTheAnnotations(*cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
 	if *resetScopeAnnotation == true {
 		go scopeObserver.Reset()
