@@ -118,19 +118,8 @@ func TestScopeObserverImpl_IsAnnotationUpdateNeeded(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			nodesWatch := NewNodeWatch(kclient)
-			podsWatch := NewPodWatch(kclient)
-			statefulsetsWatch := NewStatefulsetWatch(kclient)
-			runtimeObjectStore := &RuntimeObjectStoreImpl{
-				NodesStore:        nodesWatch,
-				PodsStore:         podsWatch,
-				StatefulSetsStore: statefulsetsWatch,
-			}
-			stopCh := make(chan struct{})
-			defer close(stopCh)
-			go nodesWatch.Run(stopCh)
-			go podsWatch.Run(stopCh)
-			go statefulsetsWatch.Run(stopCh)
+			runtimeObjectStore, closeFunc := RunStoreForTest(kclient)
+			defer closeFunc()
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
@@ -227,19 +216,8 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			nodesWatch := NewNodeWatch(kclient)
-			podsWatch := NewPodWatch(kclient)
-			statefulsetsWatch := NewStatefulsetWatch(kclient)
-			runtimeObjectStore := &RuntimeObjectStoreImpl{
-				NodesStore:        nodesWatch,
-				PodsStore:         podsWatch,
-				StatefulSetsStore: statefulsetsWatch,
-			}
-			stopCh := make(chan struct{})
-			defer close(stopCh)
-			go nodesWatch.Run(stopCh)
-			go podsWatch.Run(stopCh)
-			go statefulsetsWatch.Run(stopCh)
+			runtimeObjectStore, closeFunc := RunStoreForTest(kclient)
+			defer closeFunc()
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
@@ -249,9 +227,6 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 				podFilterFunc:      tt.podFilterFunc,
 				logger:             zap.NewNop(),
 			}
-			wait.PollImmediate(200*time.Millisecond, 5*time.Second, func() (done bool, err error) {
-				return s.runtimeObjectStore.HasSynced(), nil
-			})
 			if err := s.updateNodeAnnotations(tt.nodeName); (err != nil) != tt.wantErr {
 				t.Errorf("updateNodeAnnotations() error = %v, wantErr %v", err, tt.wantErr)
 				return

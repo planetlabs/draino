@@ -45,6 +45,8 @@ const (
 	eventReasonUncordonSucceeded = "UncordonSucceeded"
 	eventReasonUncordonFailed    = "UncordonFailed"
 
+	eventReasonUncordonDueToPendingPodWithLocalPV = "PodBoundToNodeViaLocalPV"
+
 	eventReasonDrainScheduled        = "DrainScheduled"
 	eventReasonDrainSchedulingFailed = "DrainSchedulingFailed"
 	eventReasonDrainStarting         = "DrainStarting"
@@ -105,7 +107,7 @@ type DrainingResourceEventHandler struct {
 	eventRecorder  record.EventRecorder
 	drainScheduler DrainScheduler
 
-	podStore     PodStore
+	objectsStore RuntimeObjectStore
 	cordonFilter PodFilterFunc
 	globalLocker GlobalBlocker
 
@@ -161,10 +163,9 @@ func WithConditionsFilter(conditions []string) DrainingResourceEventHandlerOptio
 
 // WithCordonPodFilter configures a filter that may prevent to cordon nodes
 // to avoid further impossible eviction when draining.
-func WithCordonPodFilter(f PodFilterFunc, podStore PodStore) DrainingResourceEventHandlerOption {
+func WithCordonPodFilter(f PodFilterFunc) DrainingResourceEventHandlerOption {
 	return func(d *DrainingResourceEventHandler) {
 		d.cordonFilter = f
-		d.podStore = podStore
 	}
 }
 
@@ -194,7 +195,7 @@ func WithPreprovisioningConfiguration(config NodePreprovisioningConfiguration) D
 }
 
 // NewDrainingResourceEventHandler returns a new DrainingResourceEventHandler.
-func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
+func NewDrainingResourceEventHandler(d CordonDrainer, store RuntimeObjectStore, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
 	h := &DrainingResourceEventHandler{
 		logger:                 zap.NewNop(),
 		cordonDrainer:          d,
@@ -202,6 +203,7 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 		lastDrainScheduledFor:  time.Now(),
 		buffer:                 DefaultDrainBuffer,
 		schedulingBackoffDelay: DefaultSchedulingRetryBackoffDelay,
+		objectsStore:          store,
 	}
 	for _, o := range ho {
 		o(h)
@@ -241,21 +243,29 @@ func (h *DrainingResourceEventHandler) OnDelete(obj interface{}) {
 
 func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	// Let proceed only if the informers have synced to avoid error logs at start up.
-	if h.podStore != nil && !h.podStore.HasSynced() {
+	if h.objectsStore != nil && !h.objectsStore.HasSynced() {
 		h.logger.Debug("Waiting for pod informer to sync")
 		return
 	}
-
 	logger := LoggerForNode(n, h.logger)
-	badConditions := GetNodeOffendingConditions(n, h.conditions)
-	if len(badConditions) == 0 {
-		LogForVerboseNode(h.logger, n, "No offending condition")
-		if shouldUncordon(n) {
+
+	// If the node is already cordon we may need to check if it should be uncordon, in case:
+	// - no more bad condition
+	// - it is cordon but still hold a PV needed by a pod that is pending schedule
+	// - cordon filters are not passing anymore
+	if n.Spec.Unschedulable {
+		uncordon, err := h.shouldUncordon(n)
+		if err != nil {
+			logger.Error("Can't check if the node should be uncordon")
+			return
+		}
+
+		if uncordon {
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 			LogForVerboseNode(h.logger, n, "Uncordon")
+			return
 		}
-		return
 	}
 
 	if HasDrainRetryFailedAnnotation(n) {
@@ -268,8 +278,33 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		return
 	}
 
+	if h.globalLocker != nil {
+		if locked, reason := h.globalLocker.IsBlocked(); locked {
+			logger.Info("Temporarily blocked due to lock: " + reason)
+			return
+		}
+	}
+
+	badConditions := GetNodeOffendingConditions(n, h.conditions)
+	if len(badConditions) == 0 {
+		return
+	}
+
 	// First cordon the node if it is not yet cordoned
 	if !n.Spec.Unschedulable {
+		// Check if the node is not needed due to a local PV and a pending pod trying to land on that node
+		podsWithPVCBoundToThatNode,err:=GetPodsBoundToNodeByPV(n.Name,h.objectsStore)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		if len(podsWithPVCBoundToThatNode)>0 {
+			LogForVerboseNode(logger, n, "Cordon Skip: Pod"+podsWithPVCBoundToThatNode[0].ResourceVersion+" need to be scheduled on node")
+			nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
+			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+podsWithPVCBoundToThatNode[0].Name+" needs that node due to local PV. Not cordoning the node.")
+			return
+		}
+
 		// check if the node passes filters
 		if !h.checkCordonFilters(n) {
 			LogForVerboseNode(h.logger, n, "Not passing cordon filters")
@@ -286,14 +321,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		}
 	}
 
-	if h.globalLocker != nil {
-		if locked, reason := h.globalLocker.IsBlocked(); locked {
-			logger.Info("Temporarily blocked due to lock: " + reason)
-			return
-		}
-	}
-
-	pods, err := h.cordonDrainer.GetPodsToDrain(n.GetName(), h.podStore)
+	pods, err := h.cordonDrainer.GetPodsToDrain(n.GetName(), h.objectsStore.Pods())
 	if err != nil {
 		logger.Error(err.Error())
 		return
@@ -310,6 +338,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		zap.Bool("failed", drainStatus.Failed),
 		zap.Error(err))
 
+	// Check if empty node is blocked due to minSize. If yes request a node replacement
 	if len(pods) == 0 && drainStatus.Completed {
 		elapseSinceCompleted := time.Since(drainStatus.LastTransition)
 		if elapseSinceCompleted > h.durationWithCompletedStatusBeforeReplacement {
@@ -347,8 +376,8 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 
 // checkCordonFilters return true if the filtering is ok to proceed
 func (h *DrainingResourceEventHandler) checkCordonFilters(n *core.Node) bool {
-	if h.cordonFilter != nil && h.podStore != nil {
-		pods, err := h.podStore.ListPodsForNode(n.Name)
+	if h.cordonFilter != nil && h.objectsStore != nil && h.objectsStore.Pods() != nil {
+		pods, err := h.objectsStore.Pods().ListPodsForNode(n.Name)
 		if err != nil {
 			h.logger.Error("cannot retrieve pods for node", zap.Error(err), zap.String("node", n.Name))
 			return false
@@ -377,24 +406,51 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(n *core.Node) bool {
 	return true
 }
 
-func shouldUncordon(n *core.Node) bool {
+func (h *DrainingResourceEventHandler) shouldUncordon(n *core.Node) (bool, error) {
 	if !n.Spec.Unschedulable {
-		return false
+		return false, nil
 	}
-	previousConditions := parseConditionsFromAnnotation(n)
-	if len(previousConditions) == 0 {
-		return false
-	}
-	for _, previousCondition := range previousConditions {
-		for _, nodeCondition := range n.Status.Conditions {
-			if previousCondition.Type == nodeCondition.Type &&
-				previousCondition.Status != nodeCondition.Status &&
-				time.Since(nodeCondition.LastTransitionTime.Time) >= previousCondition.MinimumDuration {
-				return true
+	logger := LoggerForNode(n, h.logger)
+
+	badConditions := GetNodeOffendingConditions(n, h.conditions)
+	if len(badConditions) == 0 {
+		LogForVerboseNode(logger, n, "No offending condition")
+		previousConditions := parseConditionsFromAnnotation(n)
+		if len(previousConditions) > 0 {
+			for _, previousCondition := range previousConditions {
+				for _, nodeCondition := range n.Status.Conditions {
+					if previousCondition.Type == nodeCondition.Type &&
+						previousCondition.Status != nodeCondition.Status &&
+						time.Since(nodeCondition.LastTransitionTime.Time) >= previousCondition.MinimumDuration {
+						return true, nil
+					}
+				}
 			}
 		}
 	}
-	return false
+
+	// Only take the nodes that have been cordon by `draino` (with schedule)
+	// Chek if the node need to be uncordon because a pod is bound to it due to a PV/PVC (local volume)
+	if hasSchedule, _ := h.drainScheduler.HasSchedule(n); hasSchedule {
+		pods, err := GetPodsBoundToNodeByPV(n.Name, h.objectsStore)
+		if err != nil {
+			return false, err
+		}
+		if len(pods) > 0 {
+			LogForVerboseNode(logger, n, "Pod need to be scheduled on node")
+			nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
+			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+pods[0].Name+" needs that node due to local PV. Uncordoning the node.")
+			return true, nil
+		}
+	}
+
+	// Check if the cordon filter are still valid for that node
+	if !h.checkCordonFilters(n) {
+		LogForVerboseNode(h.logger, n, "Not passing cordon filters")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func parseConditionsFromAnnotation(n *core.Node) []SuppliedCondition {

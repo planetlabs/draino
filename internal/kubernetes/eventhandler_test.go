@@ -19,7 +19,6 @@ package kubernetes
 import (
 	"fmt"
 	"reflect"
-	"sync"
 	"testing"
 	"time"
 
@@ -136,7 +135,7 @@ func (d *mockCordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatu
 func TestDrainingResourceEventHandler(t *testing.T) {
 	cases := []struct {
 		name       string
-		obj        interface{}
+		obj        runtime.Object
 		conditions []string
 		expected   []mockCall
 	}{
@@ -198,6 +197,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 			},
 			expected: []mockCall{
+				{name: "HasSchedule", node: nodeName},
 				{name: "GetPodsToDrain", node: nodeName},
 				{name: "HasSchedule", node: nodeName},
 				{name: "Schedule", node: nodeName},
@@ -222,6 +222,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 			},
 			expected: []mockCall{
+				{name: "HasSchedule", node: nodeName},
 				{name: "GetPodsToDrain", node: nodeName},
 				{name: "ReplaceNode", node: nodeName},
 			},
@@ -238,6 +239,9 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 						Status: core.ConditionFalse,
 					}},
 				},
+			},
+			expected: []mockCall{
+				{name: "HasSchedule", node: nodeName},
 			},
 		},
 		{
@@ -278,6 +282,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 			},
 			expected: []mockCall{
+				{name: "HasSchedule", node: nodeName},
 				{name: "GetPodsToDrain", node: nodeName},
 				{name: "HasSchedule", node: nodeName},
 				{name: "Schedule", node: nodeName},
@@ -287,8 +292,11 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			kclient := fake.NewSimpleClientset(tc.obj)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
 			cordonDrainer := &mockCordonDrainer{}
-			h := NewDrainingResourceEventHandler(cordonDrainer, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
+			h := NewDrainingResourceEventHandler(cordonDrainer, store, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
 			h.drainScheduler = cordonDrainer
 			h.OnUpdate(nil, tc.obj)
 
@@ -354,26 +362,14 @@ func TestDrainingResourceEventHandler_checkCordonFilters(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Prepare podStore
-			w := NewPodWatch(fake.NewSimpleClientset(tt.pods...))
-			stop := make(chan struct{})
-			defer close(stop)
-			go w.SharedIndexInformer.Run(stop)
-			// Wait for the informer to sync
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for !w.HasSynced() {
-					time.Sleep(100 * time.Millisecond)
-				}
-			}()
-			wg.Wait()
+			kclient := fake.NewSimpleClientset(tt.pods...)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
 
 			h := &DrainingResourceEventHandler{
 				logger:        zap.NewNop(),
 				eventRecorder: &record.FakeRecorder{},
-				podStore:      w,
+				objectsStore:  store,
 				cordonFilter:  tt.cordonFilter,
 			}
 			if got := h.checkCordonFilters(node); got != tt.want {

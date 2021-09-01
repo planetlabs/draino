@@ -211,9 +211,13 @@ func main() {
 
 	pods := kubernetes.NewPodWatch(cs)
 	statefulSets := kubernetes.NewStatefulsetWatch(cs)
+	persistentVolumes := kubernetes.NewPersistentVolumeWatch(cs)
+	persistentVolumeClaims := kubernetes.NewPersistentVolumeClaimWatch(cs)
 	runtimeObjectStoreImpl := &kubernetes.RuntimeObjectStoreImpl{
-		StatefulSetsStore: statefulSets,
-		PodsStore:         pods,
+		StatefulSetsStore:          statefulSets,
+		PodsStore:                  pods,
+		PersistentVolumeStore:      persistentVolumes,
+		PersistentVolumeClaimStore: persistentVolumeClaims,
 	}
 
 	// Sanitize user input
@@ -334,6 +338,7 @@ func main() {
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		cordonDrainer,
+		runtimeObjectStoreImpl,
 		eventRecorder,
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
@@ -341,7 +346,7 @@ func main() {
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(podFilteringFunc, pods),
+		kubernetes.WithCordonPodFilter(podFilteringFunc),
 		kubernetes.WithGlobalBlocking(globalLocker),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
@@ -350,6 +355,7 @@ func main() {
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
 				&kubernetes.NoopCordonDrainer{},
+				runtimeObjectStoreImpl,
 				eventRecorder,
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer),

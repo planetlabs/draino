@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -498,6 +500,104 @@ func TestConvertLabelsToFilterExpr(t *testing.T) {
 			got := *actual
 			if !reflect.DeepEqual(tc.expected, got) {
 				t.Errorf("expect %v, got: %v", tc.expected, got)
+			}
+		})
+	}
+}
+
+func TestGetPodsBoundToNodeByPV(t *testing.T) {
+	pv0 := &core.PersistentVolume{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "pv0",
+			Labels: map[string]string{"kubernetes.io/hostname": "ip-10-128-208-156"},
+		},
+		Spec: core.PersistentVolumeSpec{
+			ClaimRef: &core.ObjectReference{
+				Name:      "claim0",
+				Namespace: "ns0",
+			},
+		},
+	}
+	pod0 := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "pod0",
+			Namespace: "ns0",
+		},
+		Spec: core.PodSpec{
+			Volumes: []core.Volume{
+				{
+					Name: "v0",
+					VolumeSource: core.VolumeSource{
+						PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+							ClaimName: "claim0",
+						},
+					},
+				},
+			},
+		},
+	}
+	podScheduled := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "pod0",
+			Namespace: "ns0",
+		},
+		Spec: core.PodSpec{
+			NodeName: "ip-10-128-208-156",
+			Volumes: []core.Volume{
+				{
+					Name: "v0",
+					VolumeSource: core.VolumeSource{
+						PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+							ClaimName: "claim0",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		objects  []runtime.Object
+		nodeName string
+		want     []*core.Pod
+		wantErr  bool
+	}{
+		{
+			name: "nothing",
+			want: nil,
+		},
+		{
+			name:     "no match",
+			nodeName: "nomatch",
+			objects:  []runtime.Object{pv0},
+			want:     nil,
+		},
+		{
+			name:     "match",
+			nodeName: "ip-10-128-208-156",
+			objects:  []runtime.Object{pv0, pod0},
+			want:     []*core.Pod{pod0},
+		},
+		{
+			name:     "match but scheduled",
+			nodeName: "ip-10-128-208-156",
+			objects:  []runtime.Object{pv0, podScheduled},
+			want:     nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kclient := fake.NewSimpleClientset(tt.objects...)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
+			got, err := GetPodsBoundToNodeByPV(tt.nodeName, store)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetPodsBoundToNodeByPV() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetPodsBoundToNodeByPV() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

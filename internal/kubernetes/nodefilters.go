@@ -135,3 +135,24 @@ func ConvertLabelsToFilterExpr(labelsSlice []string) (*string, error) {
 	temp := strings.Join(res, " && ")
 	return &temp, nil
 }
+
+// GetPodsBoundToNodeByPV Check if there is any pod that would be bound to that node due to PV/PVC and that is not yet scheduled
+func GetPodsBoundToNodeByPV(nodeName string, store RuntimeObjectStore) ([]*core.Pod, error) {
+	var result []*core.Pod
+	// Is there a local PV on the node
+	for _, pv := range store.PersistentVolumes().GetPVForNode(nodeName) {
+		if pv.Spec.ClaimRef != nil {
+			// Get the pods for the PVCs
+			pods, err := store.Pods().ListPodsForClaim(pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name)
+			if err != nil {
+				return nil, err
+			}
+			for _, pod := range pods {
+				if pod.Spec.NodeName == "" {
+					result = append(result, pod)
+				}
+			}
+		}
+	}
+	return result, nil
+}

@@ -17,13 +17,13 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 
-	"errors"
 	"github.com/go-test/deep"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -278,6 +278,51 @@ func TestPodWatch_ListPodsForNode(t *testing.T) {
 			sort.Sort(PodsSortedByName(tt.want))
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ListPodsForNode() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_GetPVForNode(t *testing.T) {
+	pv0 := &core.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "pv0",
+			Labels: map[string]string{"kubernetes.io/hostname": "ip-10-128-208-156"},
+		},
+		Spec:   core.PersistentVolumeSpec{},
+		Status: core.PersistentVolumeStatus{},
+	}
+
+	tests := []struct {
+		name     string
+		objects  []runtime.Object
+		nodeName string
+		want     []*core.PersistentVolume
+	}{
+		{
+			name: "nothing",
+			want: []*core.PersistentVolume{},
+		},
+		{
+			name:     "no match",
+			nodeName: "nomatch",
+			objects:  []runtime.Object{pv0},
+			want:     []*core.PersistentVolume{},
+		},
+		{
+			name:     "match",
+			nodeName: "ip-10-128-208-156",
+			objects:  []runtime.Object{pv0},
+			want:     []*core.PersistentVolume{pv0},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kclient := fake.NewSimpleClientset(tt.objects...)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
+			if got := store.PersistentVolumes().GetPVForNode(tt.nodeName); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetPVForNode() = %v, want %v", got, tt.want)
 			}
 		})
 	}
