@@ -416,7 +416,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var objects []runtime.Object
-			for _,n:=range NodesMapAsSlice(){
+			for _, n := range NodesMapAsSlice() {
 				objects = append(objects, n)
 			}
 			kclient := fake.NewSimpleClientset(objects...)
@@ -593,10 +593,10 @@ func TestPodLimiter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var objects []runtime.Object
-			for _,p:=range tt.pods{
+			for _, p := range tt.pods {
 				objects = append(objects, p)
 			}
-			for _,n:=range tt.nodes{
+			for _, n := range tt.nodes {
 				objects = append(objects, n)
 			}
 			kclient := fake.NewSimpleClientset(objects...)

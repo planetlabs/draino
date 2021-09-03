@@ -293,12 +293,12 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	// First cordon the node if it is not yet cordoned
 	if !n.Spec.Unschedulable {
 		// Check if the node is not needed due to a local PV and a pending pod trying to land on that node
-		podsWithPVCBoundToThatNode,err:=GetPodsBoundToNodeByPV(n.Name,h.objectsStore)
+		podsWithPVCBoundToThatNode, err := GetPodsBoundToNodeByPV(n.Name, h.objectsStore)
 		if err != nil {
 			logger.Error(err.Error())
 			return
 		}
-		if len(podsWithPVCBoundToThatNode)>0 {
+		if len(podsWithPVCBoundToThatNode) > 0 {
 			LogForVerboseNode(logger, n, "Cordon Skip: Pod"+podsWithPVCBoundToThatNode[0].ResourceVersion+" need to be scheduled on node")
 			nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
 			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+podsWithPVCBoundToThatNode[0].Name+" needs that node due to local PV. Not cordoning the node.")

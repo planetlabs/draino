@@ -44,15 +44,13 @@ type RuntimeObjectStore interface {
 	Pods() PodStore
 	StatefulSets() StatefulSetStore
 	PersistentVolumes() PersistentVolumeStore
-	PersistentVolumeClaims() PersistentVolumeClaimStore
 }
 
 type RuntimeObjectStoreImpl struct {
-	NodesStore                 NodeStore
-	PodsStore                  PodStore
-	StatefulSetsStore          StatefulSetStore
-	PersistentVolumeStore      PersistentVolumeStore
-	PersistentVolumeClaimStore PersistentVolumeClaimStore
+	NodesStore            NodeStore
+	PodsStore             PodStore
+	StatefulSetsStore     StatefulSetStore
+	PersistentVolumeStore PersistentVolumeStore
 }
 
 func (r *RuntimeObjectStoreImpl) Nodes() NodeStore {
@@ -71,16 +69,11 @@ func (r *RuntimeObjectStoreImpl) PersistentVolumes() PersistentVolumeStore {
 	return r.PersistentVolumeStore
 }
 
-func (r *RuntimeObjectStoreImpl) PersistentVolumeClaims() PersistentVolumeClaimStore {
-	return r.PersistentVolumeClaimStore
-}
-
 func (r *RuntimeObjectStoreImpl) HasSynced() bool {
 	return r.NodesStore.HasSynced() &&
 		r.StatefulSetsStore.HasSynced() &&
 		r.PodsStore.HasSynced() &&
-		r.PersistentVolumeStore.HasSynced() &&
-		r.PersistentVolumeClaimStore.HasSynced()
+		r.PersistentVolumeStore.HasSynced()
 }
 
 // An NodeStore is a cache of node resources.
@@ -359,49 +352,6 @@ func (p *PersistentVolumeWatch) GetPVForNode(nodeName string) []*core.Persistent
 	return result
 }
 
-type PersistentVolumeClaimStore interface {
-	SyncedStore
-
-	// Get pvc by name
-	Get(namespace, name string) (*core.PersistentVolumeClaim, error)
-}
-
-type PersistentVolumeClaimWatch struct {
-	cache.SharedInformer
-}
-
-var _ PersistentVolumeClaimStore = &PersistentVolumeClaimWatch{}
-
-// NewPersistentVolumeClaimWatch creates a watch on persistentVolume resources.
-func NewPersistentVolumeClaimWatch(c kubernetes.Interface) *PersistentVolumeClaimWatch {
-	lw := &cache.ListWatch{
-		ListFunc: func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().PersistentVolumeClaims("").List(o) },
-		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) {
-			return c.CoreV1().PersistentVolumeClaims("").Watch(o)
-		},
-	}
-
-	i := cache.NewSharedInformer(lw, &core.PersistentVolume{}, 30*time.Minute)
-	return &PersistentVolumeClaimWatch{i}
-}
-
-func (p *PersistentVolumeClaimWatch) Get(namespace, name string) (*core.PersistentVolumeClaim, error) {
-	obj, _, err := p.GetStore().GetByKey(namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if obj != nil {
-		pvc, ok := obj.(*core.PersistentVolumeClaim)
-		if ok {
-			return pvc, nil
-		}
-		if !ok {
-			return nil, errors.New("Failed to cast object from store to PersistentVolumeClaim.")
-		}
-	}
-	return nil, apierrors.NewNotFound(v1.Resource("persistentVolumeClaim"), name)
-}
-
 // RunStoreForTest can be used in test to get a running and synched store
 func RunStoreForTest(kclient kubernetes.Interface) (store RuntimeObjectStore, closingFunc func()) {
 	stopCh := make(chan struct{})
@@ -409,20 +359,17 @@ func RunStoreForTest(kclient kubernetes.Interface) (store RuntimeObjectStore, cl
 	podWatch := NewPodWatch(kclient)
 	nodeWatch := NewNodeWatch(kclient)
 	pvWatch := NewPersistentVolumeWatch(kclient)
-	pvcWatch := NewPersistentVolumeClaimWatch(kclient)
 
 	go stsWatch.Run(stopCh)
 	go podWatch.Run(stopCh)
 	go nodeWatch.Run(stopCh)
-	go pvcWatch.Run(stopCh)
 	go pvWatch.Run(stopCh)
 
 	store = &RuntimeObjectStoreImpl{
-		StatefulSetsStore:          stsWatch,
-		PodsStore:                  podWatch,
-		NodesStore:                 nodeWatch,
-		PersistentVolumeStore:      pvWatch,
-		PersistentVolumeClaimStore: pvcWatch,
+		StatefulSetsStore:     stsWatch,
+		PodsStore:             podWatch,
+		NodesStore:            nodeWatch,
+		PersistentVolumeStore: pvWatch,
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
