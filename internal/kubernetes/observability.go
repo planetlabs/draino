@@ -178,12 +178,10 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 //       There is no other way around I could find for the moment to cleanup old series. The concurrency risk is clearly acceptable if we look at the frequency of metric poll versus the frequency and a speed of metric generation.
 //       In worst case the server will be missing series for a given scrape (not even report a bad value, just missing series). So the impact if it happens is insignificant.
 func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
-	s.logger.Info("updating gauges")
 	if err := s.metricsObjects.reset(); err != nil {
 		s.logger.Error("Unable to purger previous metrics series")
 		return
 	}
-	s.logger.Info("reset gauges done")
 	for tagsValues, count := range metrics {
 		// This list of tags must be in sync with the list of tags in the function metricsObjectsForObserver::reset()
 		allTags, _ := tag.New(context.Background(),
@@ -201,7 +199,6 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)))
 		stats.Record(allTags, s.metricsObjects.MeasureNodesWithNodeOptions.M(count))
 	}
-	s.logger.Info("metrics gauges done")
 }
 
 func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {

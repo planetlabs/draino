@@ -284,36 +284,51 @@ func TestPodWatch_ListPodsForNode(t *testing.T) {
 }
 
 func Test_GetPVForNode(t *testing.T) {
+	hostname := "ip-10-128-208-156"
+	node0 := &core.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "ip-10-128-208-156.ec2.internal",
+			Labels: map[string]string{hostNameLabelKey: hostname},
+		},
+	}
+	nodeOther := &core.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "ip-10-123-231-001.ec2.internal",
+			Labels: map[string]string{hostNameLabelKey: "ip-10-123-231-001"},
+		},
+	}
 	pv0 := &core.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   "pv0",
-			Labels: map[string]string{"kubernetes.io/hostname": "ip-10-128-208-156"},
+			Labels: map[string]string{hostNameLabelKey: "ip-10-128-208-156"},
 		},
 		Spec:   core.PersistentVolumeSpec{},
 		Status: core.PersistentVolumeStatus{},
 	}
 
 	tests := []struct {
-		name     string
-		objects  []runtime.Object
-		nodeName string
-		want     []*core.PersistentVolume
+		name    string
+		objects []runtime.Object
+		node    *core.Node
+		want    []*core.PersistentVolume
 	}{
 		{
-			name: "nothing",
-			want: []*core.PersistentVolume{},
+			name:    "nothing",
+			node:    nodeOther,
+			objects: []runtime.Object{nodeOther},
+			want:    []*core.PersistentVolume{},
 		},
 		{
-			name:     "no match",
-			nodeName: "nomatch",
-			objects:  []runtime.Object{pv0},
-			want:     []*core.PersistentVolume{},
+			name:    "no match",
+			node:    nodeOther,
+			objects: []runtime.Object{pv0, nodeOther},
+			want:    []*core.PersistentVolume{},
 		},
 		{
-			name:     "match",
-			nodeName: "ip-10-128-208-156",
-			objects:  []runtime.Object{pv0},
-			want:     []*core.PersistentVolume{pv0},
+			name:    "match",
+			node:    node0,
+			objects: []runtime.Object{pv0, node0},
+			want:    []*core.PersistentVolume{pv0},
 		},
 	}
 	for _, tt := range tests {
@@ -321,7 +336,7 @@ func Test_GetPVForNode(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
-			if got := store.PersistentVolumes().GetPVForNode(tt.nodeName); !reflect.DeepEqual(got, tt.want) {
+			if got := store.PersistentVolumes().GetPVForNode(tt.node); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("GetPVForNode() = %v, want %v", got, tt.want)
 			}
 		})

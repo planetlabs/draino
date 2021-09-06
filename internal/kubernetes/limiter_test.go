@@ -285,7 +285,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
 	tests := []struct {
 		name                 string
-		globalBlockerBuilder func(sotre RuntimeObjectStore) GlobalBlocker
+		globalBlockerBuilder func(store RuntimeObjectStore) GlobalBlocker
 		limiterfuncs         map[string]LimiterFunc
 		node                 *core.Node
 		want                 bool
@@ -369,7 +369,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			node: nodesTestMap["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, store), maxNotReadyNodePeriod)
+				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -381,7 +381,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			node: nodesTestMap["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, store), maxNotReadyNodePeriod)
+				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -393,7 +393,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			node: nodesTestMap["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, store), maxNotReadyNodePeriod)
+				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -405,7 +405,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 			node: nodesTestMap["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, store), maxNotReadyNodePeriod)
+				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -558,7 +558,7 @@ func TestNodeReplacementLimiter(t *testing.T) {
 }
 
 func TestPodLimiter(t *testing.T) {
-	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
+	maxNotReadyNodePeriod := 5 * time.Millisecond
 	tests := []struct {
 		name                 string
 		globalBlockerBuilder func(store RuntimeObjectStore) GlobalBlocker
@@ -581,7 +581,7 @@ func TestPodLimiter(t *testing.T) {
 			pods:  pods,
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-pending-pods-1", MaxPendingPodsCheckFunc(1, false, store), maxNotReadyNodePeriod)
+				g.AddBlocker("limiter-pending-pods-1", MaxPendingPodsCheckFunc(1, false, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -618,7 +618,7 @@ func TestPodLimiter(t *testing.T) {
 					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 				}
 			}
-
+			time.Sleep(2 * maxNotReadyNodePeriod) // wait for the caches to update
 			got, got1 := l.CanCordon(tt.nodes[0])
 			if got != tt.want {
 				t.Errorf("CanCordon() got = %v, want %v", got, tt.want)

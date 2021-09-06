@@ -506,10 +506,23 @@ func TestConvertLabelsToFilterExpr(t *testing.T) {
 }
 
 func TestGetPodsBoundToNodeByPV(t *testing.T) {
+	hostname := "ip-10-128-208-156"
+	node0 := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "ip-10-128-208-156.ec2.internal",
+			Labels: map[string]string{hostNameLabelKey: hostname},
+		},
+	}
+	nodeOther := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "ip-10-123-231-001.ec2.internal",
+			Labels: map[string]string{hostNameLabelKey: "ip-10-123-231-001"},
+		},
+	}
 	pv0 := &core.PersistentVolume{
 		ObjectMeta: meta.ObjectMeta{
 			Name:   "pv0",
-			Labels: map[string]string{"kubernetes.io/hostname": "ip-10-128-208-156"},
+			Labels: map[string]string{hostNameLabelKey: hostname},
 		},
 		Spec: core.PersistentVolumeSpec{
 			ClaimRef: &core.ObjectReference{
@@ -542,7 +555,7 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 			Namespace: "ns0",
 		},
 		Spec: core.PodSpec{
-			NodeName: "ip-10-128-208-156",
+			NodeName: node0.Name,
 			Volumes: []core.Volume{
 				{
 					Name: "v0",
@@ -557,33 +570,35 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		objects  []runtime.Object
-		nodeName string
-		want     []*core.Pod
-		wantErr  bool
+		name    string
+		objects []runtime.Object
+		node    *core.Node
+		want    []*core.Pod
+		wantErr bool
 	}{
 		{
-			name: "nothing",
-			want: nil,
+			name:    "nothing",
+			node:    nodeOther,
+			objects: []runtime.Object{nodeOther},
+			want:    nil,
 		},
 		{
-			name:     "no match",
-			nodeName: "nomatch",
-			objects:  []runtime.Object{pv0},
-			want:     nil,
+			name:    "no match",
+			node:    nodeOther,
+			objects: []runtime.Object{pv0, nodeOther},
+			want:    nil,
 		},
 		{
-			name:     "match",
-			nodeName: "ip-10-128-208-156",
-			objects:  []runtime.Object{pv0, pod0},
-			want:     []*core.Pod{pod0},
+			name:    "match",
+			node:    node0,
+			objects: []runtime.Object{pv0, pod0, node0},
+			want:    []*core.Pod{pod0},
 		},
 		{
-			name:     "match but scheduled",
-			nodeName: "ip-10-128-208-156",
-			objects:  []runtime.Object{pv0, podScheduled},
-			want:     nil,
+			name:    "match but scheduled",
+			node:    node0,
+			objects: []runtime.Object{pv0, podScheduled, node0},
+			want:    nil,
 		},
 	}
 	for _, tt := range tests {
@@ -591,7 +606,7 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
-			got, err := GetPodsBoundToNodeByPV(tt.nodeName, store)
+			got, err := GetPodsBoundToNodeByPV(tt.node, store, zap.NewNop())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetPodsBoundToNodeByPV() error = %v, wantErr %v", err, tt.wantErr)
 				return

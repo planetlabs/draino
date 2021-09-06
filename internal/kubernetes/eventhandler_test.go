@@ -91,7 +91,10 @@ func (d *mockCordonDrainer) HasSchedule(node *core.Node) (has, failed bool) {
 		name: "HasSchedule",
 		node: node.Name,
 	})
-	return false, false
+
+	hasSchedule := node.Annotations["hasSchedule"] == "true"
+
+	return hasSchedule, false
 }
 
 func (d *mockCordonDrainer) Schedule(node *core.Node, failedCount int32) (time.Time, error) {
@@ -197,7 +200,6 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 			},
 			expected: []mockCall{
-				{name: "HasSchedule", node: nodeName},
 				{name: "GetPodsToDrain", node: nodeName},
 				{name: "HasSchedule", node: nodeName},
 				{name: "Schedule", node: nodeName},
@@ -222,7 +224,6 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 			},
 			expected: []mockCall{
-				{name: "HasSchedule", node: nodeName},
 				{name: "GetPodsToDrain", node: nodeName},
 				{name: "ReplaceNode", node: nodeName},
 			},
@@ -240,9 +241,6 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 					}},
 				},
 			},
-			expected: []mockCall{
-				{name: "HasSchedule", node: nodeName},
-			},
 		},
 		{
 			name:       "NoBadConditionsAlreadyCordonedByDraino",
@@ -250,14 +248,21 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True,0s"},
+					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True,0s", "hasSchedule": "true"},
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{
-					Conditions: []core.NodeCondition{{
-						Type:   "KernelPanic",
-						Status: core.ConditionFalse,
-					}},
+					Conditions: []core.NodeCondition{
+						{
+							Type:   "KernelPanic",
+							Status: core.ConditionFalse,
+						},
+						{
+							Type:    ConditionDrainedScheduled,
+							Message: "[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+							Status:  core.ConditionFalse,
+						},
+					},
 				},
 			},
 			expected: []mockCall{
@@ -275,14 +280,20 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{
-					Conditions: []core.NodeCondition{{
-						Type:   "KernelPanic",
-						Status: core.ConditionTrue,
-					}},
+					Conditions: []core.NodeCondition{
+						{
+							Type:   "KernelPanic",
+							Status: core.ConditionTrue,
+						},
+						{
+							Type:    ConditionDrainedScheduled,
+							Message: "[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00",
+							Status:  core.ConditionTrue,
+						},
+					},
 				},
 			},
 			expected: []mockCall{
-				{name: "HasSchedule", node: nodeName},
 				{name: "GetPodsToDrain", node: nodeName},
 				{name: "HasSchedule", node: nodeName},
 				{name: "Schedule", node: nodeName},
