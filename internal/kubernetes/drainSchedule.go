@@ -26,8 +26,11 @@ const (
 	DefaultPreprovisioningTimeout     = 1 * time.Hour
 	DefaultPreprovisioningCheckPeriod = 30 * time.Second
 
-	CustomDrainBufferAnnotation = "draino/drain-buffer"
-	DrainGroupAnnotation        = "draino/drain-group"
+	DefaultSchedulingRetryBackoffDelay = 23 * time.Minute
+
+	CustomDrainBufferAnnotation       = "draino/drain-buffer"
+	CustomRetryBackoffDelayAnnotation = "draino/retry-delay"
+	DrainGroupAnnotation              = "draino/drain-group"
 
 	preprovisioningAnnotationKey   = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
 	preprovisioningAnnotationValue = "true"
@@ -44,6 +47,7 @@ type SchedulesGroup struct {
 	schedules      map[string]*schedule
 	schedulesChain []string
 	period         time.Duration
+	backoffDelay   time.Duration
 }
 
 type NodePreprovisioningConfiguration struct {
@@ -53,9 +57,10 @@ type NodePreprovisioningConfiguration struct {
 
 type DrainSchedules struct {
 	sync.Mutex
-	labelKeysForGroups []string
-	scheduleGroups     map[string]*SchedulesGroup
-	schedulingPeriod   time.Duration
+	labelKeysForGroups     []string
+	scheduleGroups         map[string]*SchedulesGroup
+	schedulingPeriod       time.Duration
+	schedulingBackoffDelay time.Duration
 
 	logger                       *zap.Logger
 	drainer                      DrainerNodeReplacer
@@ -65,12 +70,13 @@ type DrainSchedules struct {
 	globalLocker                 GlobalBlocker
 }
 
-func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger, locker GlobalBlocker) DrainScheduler {
+func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod, schedulingBackoffDelay time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger, locker GlobalBlocker) DrainScheduler {
 	sort.Strings(labelKeysForGroups)
 	return &DrainSchedules{
 		labelKeysForGroups:           labelKeysForGroups,
 		scheduleGroups:               map[string]*SchedulesGroup{},
 		schedulingPeriod:             schedulingPeriod,
+		schedulingBackoffDelay:       schedulingBackoffDelay,
 		logger:                       logger,
 		drainer:                      drainer,
 		preprovisioningConfiguration: preprovisioningCfg,
@@ -98,8 +104,9 @@ func (d *DrainSchedules) getScheduleGroup(node *v1.Node) *SchedulesGroup {
 		return group
 	}
 	newGroup := SchedulesGroup{
-		schedules: map[string]*schedule{},
-		period:    d.schedulingPeriod,
+		schedules:    map[string]*schedule{},
+		period:       d.schedulingPeriod,
+		backoffDelay: d.schedulingBackoffDelay,
 	}
 	d.scheduleGroups[groupKey] = &newGroup
 	return &newGroup
@@ -130,18 +137,34 @@ func (d *DrainSchedules) DeleteScheduleByName(name string) {
 	}
 }
 
-func (sg *SchedulesGroup) whenNextSchedule() time.Time {
+func (sg *SchedulesGroup) whenNextSchedule(failedCount int32) time.Time {
 	// compute drain schedule time
 	sooner := time.Now().Add(SetConditionTimeout + time.Second)
 	period := sg.period
+	backoffDelay := sg.backoffDelay
 	var when time.Time
-	if len(sg.schedulesChain) > 0 {
-		lastScheduleName := sg.schedulesChain[len(sg.schedulesChain)-1]
+	for i := len(sg.schedulesChain) - 1; i >= 0; i-- {
+		lastScheduleName := sg.schedulesChain[i]
 		if lastSchedule, ok := sg.schedules[lastScheduleName]; ok {
+			if (lastSchedule.failedCount > 0 && failedCount == 0) || (lastSchedule.failedCount == 0 && failedCount > 0) {
+				// use the retry schedules or the regular schedules
+				continue
+			}
+			// grab custom values if any
 			if lastSchedule.customDrainBuffer != nil {
 				period = *lastSchedule.customDrainBuffer
 			}
-			when = lastSchedule.when.Add(period)
+			if lastSchedule.customBackoffRetryDelay != nil {
+				backoffDelay = *lastSchedule.customBackoffRetryDelay
+			}
+
+			// compute next value
+			if failedCount > 0 {
+				when = lastSchedule.when.Add(backoffDelay)
+			} else {
+				when = lastSchedule.when.Add(period)
+			}
+			break
 		}
 	}
 	if when.Before(sooner) {
@@ -151,10 +174,7 @@ func (sg *SchedulesGroup) whenNextSchedule() time.Time {
 }
 
 func (sg *SchedulesGroup) addSchedule(node *v1.Node, failedCount int32, scheduleRunner func(node *v1.Node, when time.Time, failedCount int32) *schedule) time.Time {
-	when := sg.whenNextSchedule()
-	if failedCount > 0 {
-		when = when.Add(time.Duration(2*failedCount) * time.Hour) // add backoff delay
-	}
+	when := sg.whenNextSchedule(failedCount)
 	sg.schedulesChain = append(sg.schedulesChain, node.GetName())
 	sg.schedules[node.GetName()] = scheduleRunner(node, when, failedCount)
 	return when
@@ -203,12 +223,13 @@ func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, 
 }
 
 type schedule struct {
-	when              time.Time
-	customDrainBuffer *time.Duration
-	failed            int32
-	failedCount       int32
-	finish            time.Time
-	timer             *time.Timer
+	when                    time.Time
+	customDrainBuffer       *time.Duration
+	customBackoffRetryDelay *time.Duration
+	failed                  int32
+	failedCount             int32
+	finish                  time.Time
+	timer                   *time.Timer
 }
 
 func (s *schedule) setFailed() {
@@ -231,6 +252,13 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainConfig, "Failed to parse custom drain-buffer: %s", customDrainBuffer)
 		}
 		sched.customDrainBuffer = &durationValue
+	}
+	if customBackoffRetryDelay, ok := node.Annotations[CustomRetryBackoffDelayAnnotation]; ok {
+		durationValue, err := time.ParseDuration(customBackoffRetryDelay)
+		if err != nil {
+			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainConfig, "Failed to parse custom retry-delay: %s", customBackoffRetryDelay)
+		}
+		sched.customBackoffRetryDelay = &durationValue
 	}
 	sched.timer = time.AfterFunc(time.Until(when), func() {
 		log := LoggerForNode(node, d.logger)
