@@ -111,6 +111,7 @@ type DrainingResourceEventHandler struct {
 
 	lastDrainScheduledFor        time.Time
 	buffer                       time.Duration
+	schedulingBackoffDelay       time.Duration
 	labelsKeyForDrainGroups      []string
 	preprovisioningConfiguration NodePreprovisioningConfiguration
 
@@ -134,6 +135,13 @@ func WithLogger(l *zap.Logger) DrainingResourceEventHandlerOption {
 func WithDrainBuffer(d time.Duration) DrainingResourceEventHandlerOption {
 	return func(h *DrainingResourceEventHandler) {
 		h.buffer = d
+	}
+}
+
+// WithSchedulingBackoffDelay configures the backoff delay between retry schedules.
+func WithSchedulingBackoffDelay(d time.Duration) DrainingResourceEventHandlerOption {
+	return func(h *DrainingResourceEventHandler) {
+		h.schedulingBackoffDelay = d
 	}
 }
 
@@ -188,16 +196,17 @@ func WithPreprovisioningConfiguration(config NodePreprovisioningConfiguration) D
 // NewDrainingResourceEventHandler returns a new DrainingResourceEventHandler.
 func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
 	h := &DrainingResourceEventHandler{
-		logger:                zap.NewNop(),
-		cordonDrainer:         d,
-		eventRecorder:         e,
-		lastDrainScheduledFor: time.Now(),
-		buffer:                DefaultDrainBuffer,
+		logger:                 zap.NewNop(),
+		cordonDrainer:          d,
+		eventRecorder:          e,
+		lastDrainScheduledFor:  time.Now(),
+		buffer:                 DefaultDrainBuffer,
+		schedulingBackoffDelay: DefaultSchedulingRetryBackoffDelay,
 	}
 	for _, o := range ho {
 		o(h)
 	}
-	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.labelsKeyForDrainGroups, h.conditions, h.preprovisioningConfiguration, h.logger, h.globalLocker)
+	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.schedulingBackoffDelay, h.labelsKeyForDrainGroups, h.conditions, h.preprovisioningConfiguration, h.logger, h.globalLocker)
 	return h
 }
 
