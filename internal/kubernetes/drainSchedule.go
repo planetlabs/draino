@@ -137,11 +137,15 @@ func (d *DrainSchedules) DeleteScheduleByName(name string) {
 	}
 }
 
-func (sg *SchedulesGroup) whenNextSchedule(failedCount int32) time.Time {
+func (sg *SchedulesGroup) whenNextSchedule(failedCount int32, options *schedulingOptions) time.Time {
 	// compute drain schedule time
 	sooner := time.Now().Add(SetConditionTimeout + time.Second)
 	period := sg.period
 	backoffDelay := sg.backoffDelay
+	if options != nil && options.customBackoffRetryDelay != nil {
+		backoffDelay = *options.customBackoffRetryDelay
+	}
+
 	var when time.Time
 	for i := len(sg.schedulesChain) - 1; i >= 0; i-- {
 		lastScheduleName := sg.schedulesChain[i]
@@ -151,11 +155,8 @@ func (sg *SchedulesGroup) whenNextSchedule(failedCount int32) time.Time {
 				continue
 			}
 			// grab custom values if any
-			if lastSchedule.customDrainBuffer != nil {
+			if lastSchedule != nil && lastSchedule.customDrainBuffer != nil {
 				period = *lastSchedule.customDrainBuffer
-			}
-			if lastSchedule.customBackoffRetryDelay != nil {
-				backoffDelay = *lastSchedule.customBackoffRetryDelay
 			}
 
 			// compute next value
@@ -169,14 +170,17 @@ func (sg *SchedulesGroup) whenNextSchedule(failedCount int32) time.Time {
 	}
 	if when.Before(sooner) {
 		when = sooner
+		if failedCount > 0 {
+			when = when.Add(backoffDelay)
+		}
 	}
 	return when
 }
 
-func (sg *SchedulesGroup) addSchedule(node *v1.Node, failedCount int32, scheduleRunner func(node *v1.Node, when time.Time, failedCount int32) *schedule) time.Time {
-	when := sg.whenNextSchedule(failedCount)
+func (sg *SchedulesGroup) addSchedule(node *v1.Node, failedCount int32, options *schedulingOptions, scheduleRunner func(node *v1.Node, when time.Time, failedCount int32, options *schedulingOptions) *schedule) time.Time {
+	when := sg.whenNextSchedule(failedCount, options)
 	sg.schedulesChain = append(sg.schedulesChain, node.GetName())
-	sg.schedules[node.GetName()] = scheduleRunner(node, when, failedCount)
+	sg.schedules[node.GetName()] = scheduleRunner(node, when, failedCount, options)
 	return when
 }
 
@@ -203,8 +207,14 @@ func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, 
 		return sched.when, NewAlreadyScheduledError() // we already have a schedule planned
 	}
 
+	scheduleOptions, err := newScheduleOptions(node)
+	if err != nil {
+		nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
+		d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainConfig, err.Error())
+	}
+
 	// compute drain schedule time
-	when := scheduleGroup.addSchedule(node, failedCount, d.newSchedule)
+	when := scheduleGroup.addSchedule(node, failedCount, scheduleOptions, d.newSchedule)
 	d.Unlock()
 
 	// Mark the node with the condition stating that drain is scheduled
@@ -222,14 +232,40 @@ func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, 
 	return when, nil
 }
 
-type schedule struct {
-	when                    time.Time
+type schedulingOptions struct {
 	customDrainBuffer       *time.Duration
 	customBackoffRetryDelay *time.Duration
-	failed                  int32
-	failedCount             int32
-	finish                  time.Time
-	timer                   *time.Timer
+}
+
+func newScheduleOptions(node *v1.Node) (*schedulingOptions, error) {
+	options := &schedulingOptions{}
+	var err error
+	if customDrainBuffer, ok := node.Annotations[CustomDrainBufferAnnotation]; ok {
+		durationValue, err := time.ParseDuration(customDrainBuffer)
+		if err != nil {
+			err = fmt.Errorf("failed to parse custom drain-buffer: %s", err)
+		} else {
+			options.customDrainBuffer = &durationValue
+		}
+	}
+	if customBackoffRetryDelay, ok := node.Annotations[CustomRetryBackoffDelayAnnotation]; ok {
+		durationValue, err := time.ParseDuration(customBackoffRetryDelay)
+		if err != nil {
+			err = fmt.Errorf("failed to parse custom retry-delay: %s", err)
+		} else {
+			options.customBackoffRetryDelay = &durationValue
+		}
+	}
+	return options, err
+}
+
+type schedule struct {
+	when              time.Time
+	customDrainBuffer *time.Duration
+	failed            int32
+	failedCount       int32
+	finish            time.Time
+	timer             *time.Timer
 }
 
 func (s *schedule) setFailed() {
@@ -240,25 +276,14 @@ func (s *schedule) isFailed() bool {
 	return atomic.LoadInt32(&s.failed) == 1
 }
 
-func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount int32) *schedule {
+func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount int32, scheduleOptions *schedulingOptions) *schedule {
 	nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
 	sched := &schedule{
 		when:        when,
 		failedCount: failedCount,
 	}
-	if customDrainBuffer, ok := node.Annotations[CustomDrainBufferAnnotation]; ok {
-		durationValue, err := time.ParseDuration(customDrainBuffer)
-		if err != nil {
-			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainConfig, "Failed to parse custom drain-buffer: %s", customDrainBuffer)
-		}
-		sched.customDrainBuffer = &durationValue
-	}
-	if customBackoffRetryDelay, ok := node.Annotations[CustomRetryBackoffDelayAnnotation]; ok {
-		durationValue, err := time.ParseDuration(customBackoffRetryDelay)
-		if err != nil {
-			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainConfig, "Failed to parse custom retry-delay: %s", customBackoffRetryDelay)
-		}
-		sched.customBackoffRetryDelay = &durationValue
+	if scheduleOptions != nil && scheduleOptions.customDrainBuffer != nil {
+		sched.customDrainBuffer = scheduleOptions.customDrainBuffer
 	}
 	sched.timer = time.AfterFunc(time.Until(when), func() {
 		log := LoggerForNode(node, d.logger)

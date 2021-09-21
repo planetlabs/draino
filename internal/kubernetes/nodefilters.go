@@ -135,3 +135,31 @@ func ConvertLabelsToFilterExpr(labelsSlice []string) (*string, error) {
 	temp := strings.Join(res, " && ")
 	return &temp, nil
 }
+
+// GetPodsBoundToNodeByPV Check if there is any pod that would be bound to that node due to PV/PVC and that is not yet scheduled
+func GetPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore, logger *zap.Logger) ([]*core.Pod, error) {
+	var result []*core.Pod
+	// Is there a local PV on the node
+	pvs := store.PersistentVolumes().GetPVForNode(node)
+	LogForVerboseNode(logger, node, fmt.Sprintf("PVs found for node, count=%d", len(pvs)))
+	for _, pv := range pvs {
+		LogForVerboseNode(logger, node, fmt.Sprintf("PV found for node: "+pv.Name))
+		if pv.Spec.ClaimRef != nil {
+			// Get the pods for the PVCs
+			pods, err := store.Pods().ListPodsForClaim(pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name)
+			LogForVerboseNode(logger, node, fmt.Sprintf("Pod for claim "+pv.Spec.ClaimRef.Name+", count=%d", len(pods)))
+			if err != nil {
+				return nil, err
+			}
+			for _, pod := range pods {
+				LogForVerboseNode(logger, node, fmt.Sprintf("Pod for claim "+pv.Spec.ClaimRef.Name+", adding pod "+pod.Name))
+				if pod.Spec.NodeName == "" {
+					result = append(result, pod)
+				}
+			}
+		} else {
+			LogForVerboseNode(logger, node, fmt.Sprintf("PV found for node: "+pv.Name+", no claim reference"))
+		}
+	}
+	return result, nil
+}

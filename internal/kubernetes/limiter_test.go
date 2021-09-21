@@ -11,6 +11,8 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/util/flowcontrol"
 )
 
@@ -87,7 +89,7 @@ var nodesTestMap = map[string]*core.Node{
 	},
 	"ABC": &core.Node{
 		ObjectMeta: v1.ObjectMeta{
-			Name: "ABC-cordon",
+			Name: "ABC",
 			Labels: map[string]string{
 				"A": "A", "B": "B", "C": "C",
 			},
@@ -105,7 +107,7 @@ var nodesTestMap = map[string]*core.Node{
 	},
 	"ABC-Cordon": &core.Node{
 		ObjectMeta: v1.ObjectMeta{
-			Name: "AB-cordon",
+			Name: "ABC-cordon",
 			Labels: map[string]string{
 				"A": "A", "B": "B", "C": "C",
 			},
@@ -178,46 +180,6 @@ func NodesMapAsSlice() []*core.Node {
 	}
 	return list
 }
-
-type testNodeLister struct{}
-
-func (t *testNodeLister) ListNodes() []*core.Node {
-	return NodesMapAsSlice()
-}
-
-type testNodestore struct{}
-
-func (f testNodestore) HasSynced() bool                     { return true }
-func (f testNodestore) Get(name string) (*core.Node, error) { return nil, nil }
-func (f testNodestore) ListNodes() []*core.Node {
-	return NodesMapAsSlice()
-}
-
-var nodeStore = &testNodestore{}
-
-type testPodstore struct{}
-
-var podStore = &testPodstore{}
-
-func (f testPodstore) HasSynced() bool { return true }
-func (f testPodstore) ListPodsForNode(nodeName string) ([]*core.Pod, error) {
-	return pods, nil
-}
-func (f testPodstore) ListPodsByStatus(podStatus string) ([]*core.Pod, error) {
-	return pods, nil
-}
-func (f testPodstore) GetPodCount() (int, error) {
-	return len(pods), nil
-}
-
-type testRuntimeObjectStore struct{}
-
-func (r *testRuntimeObjectStore) Nodes() NodeStore               { return nodeStore }
-func (r *testRuntimeObjectStore) Pods() PodStore                 { return podStore }
-func (r *testRuntimeObjectStore) StatefulSets() StatefulSetStore { return nil }
-func (r *testRuntimeObjectStore) HasSynced() bool                { return true }
-
-var runtimeObjectStore = &testRuntimeObjectStore{}
 
 func Test_getMatchingNodesForTaintCount(t *testing.T) {
 	tests := []struct {
@@ -323,7 +285,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
 	tests := []struct {
 		name                 string
-		globalBlockerBuilder func() GlobalBlocker
+		globalBlockerBuilder func(store RuntimeObjectStore) GlobalBlocker
 		limiterfuncs         map[string]LimiterFunc
 		node                 *core.Node
 		want                 bool
@@ -405,9 +367,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "limit on 15% of nodes NotReady with threshold at max=10%", // 15% = 1/7 nodes
 			node: nodesTestMap["D"],
-			globalBlockerBuilder: func() GlobalBlocker {
+			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -417,9 +379,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "limit on 1 nodes NotReady with threshold at max=1",
 			node: nodesTestMap["D"],
-			globalBlockerBuilder: func() GlobalBlocker {
+			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -429,9 +391,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "no limit on 15% nodes NotReady with threshold max=20%",
 			node: nodesTestMap["D"],
-			globalBlockerBuilder: func() GlobalBlocker {
+			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -441,9 +403,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "no limit on 1 nodes NotReady with threshold max=20",
 			node: nodesTestMap["D"],
-			globalBlockerBuilder: func() GlobalBlocker {
+			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -453,16 +415,23 @@ func TestLimiter_CanCordon(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var objects []runtime.Object
+			for _, n := range NodesMapAsSlice() {
+				objects = append(objects, n)
+			}
+			kclient := fake.NewSimpleClientset(objects...)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
 			l := &Limiter{
 				logger:      zap.NewNop(),
 				rateLimiter: flowcontrol.NewTokenBucketRateLimiter(200, 200),
 			}
-			l.SetNodeLister(&testNodeLister{})
+			l.SetNodeLister(store.Nodes())
 			for k, v := range tt.limiterfuncs {
 				l.AddLimiter(k, v)
 			}
 			if tt.globalBlockerBuilder != nil {
-				gl := tt.globalBlockerBuilder()
+				gl := tt.globalBlockerBuilder(store)
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
 					localFunc := blockStateFunc
 					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
@@ -589,10 +558,10 @@ func TestNodeReplacementLimiter(t *testing.T) {
 }
 
 func TestPodLimiter(t *testing.T) {
-	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
+	maxNotReadyNodePeriod := 5 * time.Millisecond
 	tests := []struct {
 		name                 string
-		globalBlockerBuilder func() GlobalBlocker
+		globalBlockerBuilder func(store RuntimeObjectStore) GlobalBlocker
 		limiterfuncs         map[string]LimiterFunc
 		nodes                []*core.Node
 		pods                 []*core.Pod
@@ -610,9 +579,9 @@ func TestPodLimiter(t *testing.T) {
 			name:  "limit on 1 pending pods with threshold at max=1",
 			nodes: NodesMapAsSlice(),
 			pods:  pods,
-			globalBlockerBuilder: func() GlobalBlocker {
+			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-pending-pods-1", MaxPendingPodsCheckFunc(1, false, runtimeObjectStore), maxNotReadyNodePeriod)
+				g.AddBlocker("limiter-pending-pods-1", MaxPendingPodsCheckFunc(1, false, store, zap.NewNop()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -623,22 +592,33 @@ func TestPodLimiter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var objects []runtime.Object
+			for _, p := range tt.pods {
+				objects = append(objects, p)
+			}
+			for _, n := range tt.nodes {
+				objects = append(objects, n)
+			}
+			kclient := fake.NewSimpleClientset(objects...)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
+
 			l := &Limiter{
 				logger:      zap.NewNop(),
 				rateLimiter: flowcontrol.NewTokenBucketRateLimiter(200, 200),
 			}
-			l.SetNodeLister(&testNodeLister{})
+			l.SetNodeLister(store.Nodes())
 			for k, v := range tt.limiterfuncs {
 				l.AddLimiter(k, v)
 			}
 			if tt.globalBlockerBuilder != nil {
-				gl := tt.globalBlockerBuilder()
+				gl := tt.globalBlockerBuilder(store)
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
 					localFunc := blockStateFunc
 					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 				}
 			}
-
+			time.Sleep(2 * maxNotReadyNodePeriod) // wait for the caches to update
 			got, got1 := l.CanCordon(tt.nodes[0])
 			if got != tt.want {
 				t.Errorf("CanCordon() got = %v, want %v", got, tt.want)

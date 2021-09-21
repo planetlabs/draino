@@ -144,9 +144,10 @@ func (g *GlobalBlocksRunner) IsBlocked() (bool, string) {
 	return false, ""
 }
 
-func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore) ComputeBlockStateFunction {
+func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore, logger *zap.Logger) ComputeBlockStateFunction {
 	return func() bool {
 		if !store.HasSynced() {
+			logger.Warn("MaxNotReadyNodesCheckFunc: blocking due to informer not synched")
 			return true // better block till we know exactly the state of the system
 		}
 		if store.Nodes() == nil {
@@ -169,9 +170,10 @@ func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore) 
 	}
 }
 
-func MaxPendingPodsCheckFunc(max int, percent bool, store RuntimeObjectStore) ComputeBlockStateFunction {
+func MaxPendingPodsCheckFunc(max int, percent bool, store RuntimeObjectStore, logger *zap.Logger) ComputeBlockStateFunction {
 	return func() bool {
 		if !store.HasSynced() {
+			logger.Warn("MaxPendingPodsCheckFunc: blocking due to informer not synched")
 			return true // better block till we know exactly the state of the system
 		}
 		if store.Pods() == nil {

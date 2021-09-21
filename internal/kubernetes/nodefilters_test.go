@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -498,6 +500,119 @@ func TestConvertLabelsToFilterExpr(t *testing.T) {
 			got := *actual
 			if !reflect.DeepEqual(tc.expected, got) {
 				t.Errorf("expect %v, got: %v", tc.expected, got)
+			}
+		})
+	}
+}
+
+func TestGetPodsBoundToNodeByPV(t *testing.T) {
+	hostname := "ip-10-128-208-156"
+	node0 := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "ip-10-128-208-156.ec2.internal",
+			Labels: map[string]string{hostNameLabelKey: hostname},
+		},
+	}
+	nodeOther := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "ip-10-123-231-001.ec2.internal",
+			Labels: map[string]string{hostNameLabelKey: "ip-10-123-231-001"},
+		},
+	}
+	pv0 := &core.PersistentVolume{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "pv0",
+			Labels: map[string]string{hostNameLabelKey: hostname},
+		},
+		Spec: core.PersistentVolumeSpec{
+			ClaimRef: &core.ObjectReference{
+				Name:      "claim0",
+				Namespace: "ns0",
+			},
+		},
+	}
+	pod0 := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "pod0",
+			Namespace: "ns0",
+		},
+		Spec: core.PodSpec{
+			Volumes: []core.Volume{
+				{
+					Name: "v0",
+					VolumeSource: core.VolumeSource{
+						PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+							ClaimName: "claim0",
+						},
+					},
+				},
+			},
+		},
+	}
+	podScheduled := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "pod0",
+			Namespace: "ns0",
+		},
+		Spec: core.PodSpec{
+			NodeName: node0.Name,
+			Volumes: []core.Volume{
+				{
+					Name: "v0",
+					VolumeSource: core.VolumeSource{
+						PersistentVolumeClaim: &core.PersistentVolumeClaimVolumeSource{
+							ClaimName: "claim0",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		objects []runtime.Object
+		node    *core.Node
+		want    []*core.Pod
+		wantErr bool
+	}{
+		{
+			name:    "nothing",
+			node:    nodeOther,
+			objects: []runtime.Object{nodeOther},
+			want:    nil,
+		},
+		{
+			name:    "no match",
+			node:    nodeOther,
+			objects: []runtime.Object{pv0, nodeOther},
+			want:    nil,
+		},
+		{
+			name:    "match",
+			node:    node0,
+			objects: []runtime.Object{pv0, pod0, node0},
+			want:    []*core.Pod{pod0},
+		},
+		{
+			name:    "match but scheduled",
+			node:    node0,
+			objects: []runtime.Object{pv0, podScheduled, node0},
+			want:    nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kclient := fake.NewSimpleClientset(tt.objects...)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
+			got, err := GetPodsBoundToNodeByPV(tt.node, store, zap.NewNop())
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetPodsBoundToNodeByPV() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetPodsBoundToNodeByPV() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

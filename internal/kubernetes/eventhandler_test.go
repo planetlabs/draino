@@ -19,7 +19,6 @@ package kubernetes
 import (
 	"fmt"
 	"reflect"
-	"sync"
 	"testing"
 	"time"
 
@@ -92,7 +91,10 @@ func (d *mockCordonDrainer) HasSchedule(node *core.Node) (has, failed bool) {
 		name: "HasSchedule",
 		node: node.Name,
 	})
-	return false, false
+
+	hasSchedule := node.Annotations["hasSchedule"] == "true"
+
+	return hasSchedule, false
 }
 
 func (d *mockCordonDrainer) Schedule(node *core.Node, failedCount int32) (time.Time, error) {
@@ -136,7 +138,7 @@ func (d *mockCordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatu
 func TestDrainingResourceEventHandler(t *testing.T) {
 	cases := []struct {
 		name       string
-		obj        interface{}
+		obj        runtime.Object
 		conditions []string
 		expected   []mockCall
 	}{
@@ -246,14 +248,21 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True,0s"},
+					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True,0s", "hasSchedule": "true"},
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{
-					Conditions: []core.NodeCondition{{
-						Type:   "KernelPanic",
-						Status: core.ConditionFalse,
-					}},
+					Conditions: []core.NodeCondition{
+						{
+							Type:   "KernelPanic",
+							Status: core.ConditionFalse,
+						},
+						{
+							Type:    ConditionDrainedScheduled,
+							Message: "[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00",
+							Status:  core.ConditionFalse,
+						},
+					},
 				},
 			},
 			expected: []mockCall{
@@ -271,10 +280,17 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{
-					Conditions: []core.NodeCondition{{
-						Type:   "KernelPanic",
-						Status: core.ConditionTrue,
-					}},
+					Conditions: []core.NodeCondition{
+						{
+							Type:   "KernelPanic",
+							Status: core.ConditionTrue,
+						},
+						{
+							Type:    ConditionDrainedScheduled,
+							Message: "[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00",
+							Status:  core.ConditionTrue,
+						},
+					},
 				},
 			},
 			expected: []mockCall{
@@ -287,8 +303,11 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			kclient := fake.NewSimpleClientset(tc.obj)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
 			cordonDrainer := &mockCordonDrainer{}
-			h := NewDrainingResourceEventHandler(cordonDrainer, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
+			h := NewDrainingResourceEventHandler(cordonDrainer, store, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
 			h.drainScheduler = cordonDrainer
 			h.OnUpdate(nil, tc.obj)
 
@@ -354,26 +373,14 @@ func TestDrainingResourceEventHandler_checkCordonFilters(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Prepare podStore
-			w := NewPodWatch(fake.NewSimpleClientset(tt.pods...))
-			stop := make(chan struct{})
-			defer close(stop)
-			go w.SharedIndexInformer.Run(stop)
-			// Wait for the informer to sync
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for !w.HasSynced() {
-					time.Sleep(100 * time.Millisecond)
-				}
-			}()
-			wg.Wait()
+			kclient := fake.NewSimpleClientset(tt.pods...)
+			store, closeCh := RunStoreForTest(kclient)
+			defer closeCh()
 
 			h := &DrainingResourceEventHandler{
 				logger:        zap.NewNop(),
 				eventRecorder: &record.FakeRecorder{},
-				podStore:      w,
+				objectsStore:  store,
 				cordonFilter:  tt.cordonFilter,
 			}
 			if got := h.checkCordonFilters(node); got != tt.want {

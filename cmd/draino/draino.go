@@ -211,9 +211,11 @@ func main() {
 
 	pods := kubernetes.NewPodWatch(cs)
 	statefulSets := kubernetes.NewStatefulsetWatch(cs)
+	persistentVolumes := kubernetes.NewPersistentVolumeWatch(cs)
 	runtimeObjectStoreImpl := &kubernetes.RuntimeObjectStoreImpl{
-		StatefulSetsStore: statefulSets,
-		PodsStore:         pods,
+		StatefulSetsStore:     statefulSets,
+		PodsStore:             pods,
+		PersistentVolumeStore: persistentVolumes,
 	}
 
 	// Sanitize user input
@@ -294,7 +296,7 @@ func main() {
 		if parseErr != nil {
 			kingpin.FatalIfError(parseErr, "cannot parse 'max-notready-nodes' argument")
 		}
-		globalLocker.AddBlocker("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesCheckFunc(max, percent, runtimeObjectStoreImpl), *maxNotReadyNodesPeriod)
+		globalLocker.AddBlocker("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesCheckFunc(max, percent, runtimeObjectStoreImpl, log), *maxNotReadyNodesPeriod)
 	}
 	for _, p := range *maxPendingPods {
 		max, percent, parseErr := kubernetes.ParseCordonMax(p)
@@ -302,7 +304,7 @@ func main() {
 			kingpin.FatalIfError(parseErr, "cannot parse 'max-pending-pods' argument")
 		}
 		fmt.Println(max, percent)
-		globalLocker.AddBlocker("MaxPendingPods:"+p, kubernetes.MaxPendingPodsCheckFunc(max, percent, runtimeObjectStoreImpl), *maxPendingPodsPeriod)
+		globalLocker.AddBlocker("MaxPendingPods:"+p, kubernetes.MaxPendingPodsCheckFunc(max, percent, runtimeObjectStoreImpl, log), *maxPendingPodsPeriod)
 	}
 
 	for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {
@@ -334,6 +336,7 @@ func main() {
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		cordonDrainer,
+		runtimeObjectStoreImpl,
 		eventRecorder,
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
@@ -341,7 +344,7 @@ func main() {
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
 		kubernetes.WithConditionsFilter(*conditions),
-		kubernetes.WithCordonPodFilter(podFilteringFunc, pods),
+		kubernetes.WithCordonPodFilter(podFilteringFunc),
 		kubernetes.WithGlobalBlocking(globalLocker),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
 
@@ -350,6 +353,7 @@ func main() {
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
 				&kubernetes.NoopCordonDrainer{},
+				runtimeObjectStoreImpl,
 				eventRecorder,
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer),
@@ -382,6 +386,8 @@ func main() {
 	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
 	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
 	runtimeObjectStoreImpl.NodesStore = nodes
+	//storeCloserFunc := runtimeObjectStoreImpl.Run(log)
+	//defer storeCloserFunc()
 	cordonLimiter.SetNodeLister(nodes)
 	cordonDrainer.SetRuntimeObjectStore(runtimeObjectStoreImpl)
 
@@ -420,7 +426,7 @@ func main() {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Info("watchers are running")
-				kingpin.FatalIfError(kubernetes.Await(nodes, pods, statefulSets, globalLocker), "error watching")
+				kingpin.FatalIfError(kubernetes.Await(nodes, pods, statefulSets, persistentVolumes, globalLocker), "error watching")
 			},
 			OnStoppedLeading: func() {
 				kingpin.Fatalf("lost leader election")
