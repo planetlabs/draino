@@ -142,8 +142,10 @@ type Drainer interface {
 	// Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 	Drain(n *core.Node) error
 	MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error
+	MarkDrainDelete(n *core.Node) error
 	GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error)
 	GetMaxDrainAttemptsBeforeFail() int32
+	ResetRetryAnnotation(n *core.Node) error
 }
 
 type NodeReplacementStatus string
@@ -189,8 +191,16 @@ func (d *NoopCordonDrainer) Uncordon(_ *core.Node, _ ...nodeMutatorFn) error { r
 // Drain does nothing.
 func (d *NoopCordonDrainer) Drain(_ *core.Node) error { return nil }
 
+// ResetRetryAnnotation does nothing.
+func (d *NoopCordonDrainer) ResetRetryAnnotation(n *core.Node) error { return nil }
+
 // MarkDrain does nothing.
 func (d *NoopCordonDrainer) MarkDrain(_ *core.Node, _, _ time.Time, _ bool, _ int32) error {
+	return nil
+}
+
+// MarkDrainDelete does nothing.
+func (d *NoopCordonDrainer) MarkDrainDelete(_ *core.Node) error {
 	return nil
 }
 
@@ -381,58 +391,112 @@ func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) err
 	return nil
 }
 
-// MarkDrain set a condition on the node to mark that the drain is scheduled.
-func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
-	nodeName := n.Name
-	// Refresh the node object
-	freshNode, err := d.c.CoreV1().Nodes().Get(nodeName, meta.GetOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return err
-		}
-		return nil
+func (d *APICordonDrainer) ResetRetryAnnotation(n *core.Node) error {
+	// Till we are done with the annotation migration to the new key we have to deal with the 2 keys. Later we can remove that first block.
+	if n.Annotations[drainRetryAnnotationKey] == drainRetryFailedAnnotationValue {
+		PatchNodeAnnotationKey(d.c, n.Name, drainRetryAnnotationKey, drainRetryAnnotationValue)
 	}
+	return PatchDeleteNodeAnnotationKey(d.c, n.Name, drainRetryFailedAnnotationKey)
+}
 
-	msgSuffix := ""
-	conditionStatus := core.ConditionTrue
-	if !finish.IsZero() {
-		if failed {
-			msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
-			if failCount >= d.maxDrainAttemptsBeforeFail {
-				freshNode.Annotations[drainRetryFailedAnnotationKey] = drainRetryFailedAnnotationValue
+// MarkDrainDelete removes the condition on the node to mark the current drain schedule.
+func (d *APICordonDrainer) MarkDrainDelete(n *core.Node) error {
+	if err := RetryWithTimeout(
+		func() error {
+			nodeName := n.Name
+			// Refresh the node object
+			freshNode, err := d.c.CoreV1().Nodes().Get(nodeName, meta.GetOptions{})
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return err
+				}
+				return nil
 			}
-		} else {
-			msgSuffix = fmt.Sprintf(" | %s: %s", CompletedStr, finish.Format(time.RFC3339))
-		}
-		conditionStatus = core.ConditionFalse
+			newConditions := []core.NodeCondition{}
+			for _, condition := range freshNode.Status.Conditions {
+				if string(condition.Type) == ConditionDrainedScheduled {
+					continue
+				}
+				newConditions = append(newConditions, condition)
+			}
+			if len(newConditions) == len(freshNode.Status.Conditions) {
+				return nil
+			}
+			freshNode.Status.Conditions = newConditions
+			if _, err := d.c.CoreV1().Nodes().UpdateStatus(freshNode); err != nil {
+				return err
+			}
+			return nil
+		},
+		SetConditionRetryPeriod,
+		SetConditionTimeout,
+	); err != nil {
+		return err
 	}
+	return nil
+}
 
-	// Create or update the condition associated to the monitor
-	now := meta.Time{Time: time.Now()}
-	conditionUpdated := false
-	for i, condition := range freshNode.Status.Conditions {
-		if string(condition.Type) != ConditionDrainedScheduled {
-			continue
-		}
-		msgPrefix := fmt.Sprintf("[%d] | ", failCount)
-		freshNode.Status.Conditions[i].LastHeartbeatTime = now
-		freshNode.Status.Conditions[i].Message = msgPrefix + "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
-		freshNode.Status.Conditions[i].Status = conditionStatus
-		conditionUpdated = true
-	}
-	if !conditionUpdated { // There was no condition found, let's create one
-		freshNode.Status.Conditions = append(freshNode.Status.Conditions,
-			core.NodeCondition{
-				Type:               ConditionDrainedScheduled,
-				Status:             conditionStatus,
-				LastHeartbeatTime:  now,
-				LastTransitionTime: now,
-				Reason:             "Draino",
-				Message:            "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix,
-			},
-		)
-	}
-	if _, err := d.c.CoreV1().Nodes().UpdateStatus(freshNode); err != nil {
+// MarkDrain set a condition on the node to mark that the drain is scheduled. (retry internally in case of failure)
+func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
+	if err := RetryWithTimeout(
+		func() error {
+			nodeName := n.Name
+			// Refresh the node object
+			freshNode, err := d.c.CoreV1().Nodes().Get(nodeName, meta.GetOptions{})
+			if err != nil {
+				if !apierrors.IsNotFound(err) {
+					return err
+				}
+				return nil
+			}
+
+			msgSuffix := ""
+			conditionStatus := core.ConditionTrue
+			if !finish.IsZero() {
+				if failed {
+					msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
+					if failCount >= d.maxDrainAttemptsBeforeFail {
+						freshNode.Annotations[drainRetryFailedAnnotationKey] = drainRetryFailedAnnotationValue
+					}
+				} else {
+					msgSuffix = fmt.Sprintf(" | %s: %s", CompletedStr, finish.Format(time.RFC3339))
+				}
+				conditionStatus = core.ConditionFalse
+			}
+
+			// Create or update the condition associated to the monitor
+			now := meta.Time{Time: time.Now()}
+			conditionUpdated := false
+			for i, condition := range freshNode.Status.Conditions {
+				if string(condition.Type) != ConditionDrainedScheduled {
+					continue
+				}
+				msgPrefix := fmt.Sprintf("[%d] | ", failCount)
+				freshNode.Status.Conditions[i].LastHeartbeatTime = now
+				freshNode.Status.Conditions[i].Message = msgPrefix + "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
+				freshNode.Status.Conditions[i].Status = conditionStatus
+				conditionUpdated = true
+			}
+			if !conditionUpdated { // There was no condition found, let's create one
+				freshNode.Status.Conditions = append(freshNode.Status.Conditions,
+					core.NodeCondition{
+						Type:               ConditionDrainedScheduled,
+						Status:             conditionStatus,
+						LastHeartbeatTime:  now,
+						LastTransitionTime: now,
+						Reason:             "Draino",
+						Message:            "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix,
+					},
+				)
+			}
+			if _, err := d.c.CoreV1().Nodes().UpdateStatus(freshNode); err != nil {
+				return err
+			}
+			return nil
+		},
+		SetConditionRetryPeriod,
+		SetConditionTimeout,
+	); err != nil {
 		return err
 	}
 	return nil

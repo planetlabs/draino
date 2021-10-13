@@ -337,6 +337,7 @@ func main() {
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
+		cs,
 		cordonDrainer,
 		runtimeObjectStoreImpl,
 		eventRecorder,
@@ -354,6 +355,7 @@ func main() {
 		h = cache.FilteringResourceEventHandler{
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
+				cs,
 				&kubernetes.NoopCordonDrainer{},
 				runtimeObjectStoreImpl,
 				eventRecorder,

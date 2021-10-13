@@ -58,6 +58,14 @@ func (d *mockCordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) er
 	return nil
 }
 
+func (d *mockCordonDrainer) ResetRetryAnnotation(n *core.Node) error {
+	d.calls = append(d.calls, mockCall{
+		name: "ResetRetryAnnotation",
+		node: n.Name,
+	})
+	return nil
+}
+
 func (d *mockCordonDrainer) Drain(n *core.Node) error {
 	d.calls = append(d.calls, mockCall{
 		name: "Drain",
@@ -73,6 +81,14 @@ func (d *mockCordonDrainer) GetMaxDrainAttemptsBeforeFail() int32 {
 func (d *mockCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	d.calls = append(d.calls, mockCall{
 		name: "MarkDrain",
+		node: n.Name,
+	})
+	return nil
+}
+
+func (d *mockCordonDrainer) MarkDrainDelete(n *core.Node) error {
+	d.calls = append(d.calls, mockCall{
+		name: "MarkDrainDelete",
 		node: n.Name,
 	})
 	return nil
@@ -299,6 +315,63 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				{name: "Schedule", node: nodeName},
 			},
 		},
+		{
+			name:       "WithBadConditionsAlreadyCordonedByDrainoAndMaxRetryFailed",
+			conditions: []string{"KernelPanic"},
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True,0s", drainRetryFailedAnnotationKey: drainRetryFailedAnnotationValue},
+				},
+				Spec: core.NodeSpec{Unschedulable: true},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:   "KernelPanic",
+							Status: core.ConditionTrue,
+						},
+						{
+							Type:    ConditionDrainedScheduled,
+							Message: "[7] | Drain activity scheduled 2020-03-20T15:50:34+01:00",
+							Status:  core.ConditionTrue,
+						},
+					},
+				},
+			},
+			expected: []mockCall{
+				{name: "DeleteSchedule", node: nodeName},
+				{name: "Uncordon", node: nodeName},
+			},
+		},
+		{
+			name:       "WithBadConditionsAlreadyCordonedByDrainoAndMaxRetryRestart",
+			conditions: []string{"KernelPanic"},
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True,0s", drainRetryFailedAnnotationKey: drainRetryRestartAnnotationValue},
+				},
+				Spec: core.NodeSpec{Unschedulable: true},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:   "KernelPanic",
+							Status: core.ConditionTrue,
+						},
+						{
+							Type:    ConditionDrainedScheduled,
+							Message: "[7] | Drain activity scheduled 2020-03-20T15:50:34+01:00",
+							Status:  core.ConditionTrue,
+						},
+					},
+				},
+			},
+			expected: []mockCall{
+				{name: "DeleteSchedule", node: nodeName},
+				{name: "Uncordon", node: nodeName},
+				{name: "ResetRetryAnnotation", node: nodeName},
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -307,7 +380,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
 			cordonDrainer := &mockCordonDrainer{}
-			h := NewDrainingResourceEventHandler(cordonDrainer, store, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
+			h := NewDrainingResourceEventHandler(kclient, cordonDrainer, store, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
 			h.drainScheduler = cordonDrainer
 			h.OnUpdate(nil, tc.obj)
 
