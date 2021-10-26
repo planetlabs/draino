@@ -399,7 +399,7 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 		if failed {
 			msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
 			if failCount >= d.maxDrainAttemptsBeforeFail {
-				freshNode.Annotations[drainRetryAnnotationKey] = drainRetryAnnotationFailedValue
+				freshNode.Annotations[drainRetryFailedAnnotationKey] = drainRetryFailedAnnotationValue
 			}
 		} else {
 			msgSuffix = fmt.Sprintf(" | %s: %s", CompletedStr, finish.Format(time.RFC3339))

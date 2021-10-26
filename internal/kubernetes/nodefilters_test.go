@@ -531,6 +531,20 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 			},
 		},
 	}
+	pvc0 := &core.PersistentVolumeClaim{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "claim0",
+			Namespace: "ns0",
+		},
+	}
+	pvc1Deleted := &core.PersistentVolumeClaim{
+		ObjectMeta: meta.ObjectMeta{
+			Name:              "claim0",
+			Namespace:         "ns0",
+			DeletionTimestamp: &meta.Time{Time: time.Now()},
+		},
+	}
+
 	pod0 := &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
 			Name:      "pod0",
@@ -585,19 +599,25 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 		{
 			name:    "no match",
 			node:    nodeOther,
-			objects: []runtime.Object{pv0, nodeOther},
+			objects: []runtime.Object{pv0, pvc0, nodeOther},
 			want:    nil,
 		},
 		{
 			name:    "match",
 			node:    node0,
-			objects: []runtime.Object{pv0, pod0, node0},
+			objects: []runtime.Object{pv0, pvc0, pod0, node0},
 			want:    []*core.Pod{pod0},
+		},
+		{
+			name:    "match but deleted PVC",
+			node:    node0,
+			objects: []runtime.Object{pv0, pvc1Deleted, pod0, node0},
+			want:    nil,
 		},
 		{
 			name:    "match but scheduled",
 			node:    node0,
-			objects: []runtime.Object{pv0, podScheduled, node0},
+			objects: []runtime.Object{pv0, pvc0, podScheduled, node0},
 			want:    nil,
 		},
 	}
@@ -606,13 +626,13 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
-			got, err := GetPodsBoundToNodeByPV(tt.node, store, zap.NewNop())
+			got, err := GetUnscheduledPodsBoundToNodeByPV(tt.node, store, zap.NewNop())
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GetPodsBoundToNodeByPV() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("GetUnscheduledPodsBoundToNodeByPV() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("GetPodsBoundToNodeByPV() got = %v, want %v", got, tt.want)
+				t.Errorf("GetUnscheduledPodsBoundToNodeByPV() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

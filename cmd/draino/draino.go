@@ -212,10 +212,12 @@ func main() {
 	pods := kubernetes.NewPodWatch(cs)
 	statefulSets := kubernetes.NewStatefulsetWatch(cs)
 	persistentVolumes := kubernetes.NewPersistentVolumeWatch(cs)
+	persistentVolumeClaims := kubernetes.NewPersistentVolumeClaimWatch(cs)
 	runtimeObjectStoreImpl := &kubernetes.RuntimeObjectStoreImpl{
-		StatefulSetsStore:     statefulSets,
-		PodsStore:             pods,
-		PersistentVolumeStore: persistentVolumes,
+		StatefulSetsStore:          statefulSets,
+		PodsStore:                  pods,
+		PersistentVolumeStore:      persistentVolumes,
+		PersistentVolumeClaimStore: persistentVolumeClaims,
 	}
 
 	// Sanitize user input
