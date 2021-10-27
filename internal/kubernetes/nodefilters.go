@@ -25,6 +25,7 @@ import (
 	"github.com/antonmedv/expr"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -136,8 +137,8 @@ func ConvertLabelsToFilterExpr(labelsSlice []string) (*string, error) {
 	return &temp, nil
 }
 
-// GetPodsBoundToNodeByPV Check if there is any pod that would be bound to that node due to PV/PVC and that is not yet scheduled
-func GetPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore, logger *zap.Logger) ([]*core.Pod, error) {
+// GetUnscheduledPodsBoundToNodeByPV Check if there is any pod that would be bound to that node due to PV/PVC and that is not yet scheduled
+func GetUnscheduledPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore, logger *zap.Logger) ([]*core.Pod, error) {
 	var result []*core.Pod
 	// Is there a local PV on the node
 	pvs := store.PersistentVolumes().GetPVForNode(node)
@@ -145,6 +146,20 @@ func GetPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore, logger *z
 	for _, pv := range pvs {
 		LogForVerboseNode(logger, node, fmt.Sprintf("PV found for node: "+pv.Name))
 		if pv.Spec.ClaimRef != nil {
+			// Check that the PVC is not being terminated (already deleted)
+			pvc, err := store.PersistentVolumeClaims().Get(pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name)
+			if apierrors.IsNotFound(err) {
+				LogForVerboseNode(logger, node, fmt.Sprintf("PVC does not exist anymore %s/%s", pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name))
+				continue
+			}
+			if err != nil {
+				logger.Error("Failed to get PVC", zap.String("PVC", pv.Spec.ClaimRef.Namespace+"/"+pv.Spec.ClaimRef.Name), zap.Error(err))
+				return nil, err
+			}
+			if pvc.DeletionTimestamp != nil {
+				LogForVerboseNode(logger, node, fmt.Sprintf("Ignoring PVC that is terminating %s/%s", pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name))
+				continue
+			}
 			// Get the pods for the PVCs
 			pods, err := store.Pods().ListPodsForClaim(pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name)
 			LogForVerboseNode(logger, node, fmt.Sprintf("Pod for claim "+pv.Spec.ClaimRef.Name+", count=%d", len(pods)))

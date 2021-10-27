@@ -65,7 +65,8 @@ const (
 
 	drainRetryAnnotationKey         = "draino/drain-retry"
 	drainRetryAnnotationValue       = "true"
-	drainRetryAnnotationFailedValue = "failed"
+	drainRetryFailedAnnotationKey   = "draino/drain-retry-failed"
+	drainRetryFailedAnnotationValue = "failed"
 
 	drainoConditionsAnnotationKey = "draino.planet.com/conditions"
 )
@@ -297,7 +298,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	// First cordon the node if it is not yet cordoned
 	if !n.Spec.Unschedulable {
 		// Check if the node is not needed due to a local PV and a pending pod trying to land on that node
-		podsWithPVCBoundToThatNode, err := GetPodsBoundToNodeByPV(n, h.objectsStore, logger)
+		podsWithPVCBoundToThatNode, err := GetUnscheduledPodsBoundToNodeByPV(n, h.objectsStore, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -446,7 +447,7 @@ func (h *DrainingResourceEventHandler) shouldUncordon(n *core.Node) (bool, error
 	}
 
 	// Check if the node need to be uncordon because a pod is bound to it due to a PV/PVC (local volume)
-	pods, err := GetPodsBoundToNodeByPV(n, h.objectsStore, logger)
+	pods, err := GetUnscheduledPodsBoundToNodeByPV(n, h.objectsStore, logger)
 	if err != nil {
 		return false, err
 	}
@@ -574,5 +575,5 @@ func HasDrainRetryAnnotation(n *core.Node) bool {
 }
 
 func HasDrainRetryFailedAnnotation(n *core.Node) bool {
-	return n.GetAnnotations()[drainRetryAnnotationKey] == drainRetryAnnotationFailedValue
+	return n.GetAnnotations()[drainRetryFailedAnnotationKey] == drainRetryFailedAnnotationValue
 }
