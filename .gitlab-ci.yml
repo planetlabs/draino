@@ -1,0 +1,64 @@
+variables:
+  CI_APP: draino
+  CURRENT_CI_IMAGE: 1
+
+include: https://gitlab-templates.ddbuild.io/compute-delivery/v1/compute-delivery.yml
+
+.ci-variables: &ci-variables
+  variables:
+    GOPRIVATE: github.com/DataDog/*
+    GO111MODULE: "on"
+
+.app-ci: &app-ci
+  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/$CI_APP:$CURRENT_CI_IMAGE
+  <<: *ci-variables
+
+ci-image:
+  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:18.03.1
+  stage: ci-image
+  when: manual
+  except: [ tags, schedules ]
+  tags: [ "runner:docker" ]
+  script:
+    - docker build --tag 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/$CI_APP:$CURRENT_CI_IMAGE ci
+    - docker push 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/$CI_APP:$CURRENT_CI_IMAGE
+
+.export-github-token: &export-github-token export GITHUB_TOKEN=$(aws ssm get-parameter --region us-east-1 --name github.user.datadog-compute-robot --with-decryption --query "Parameter.Value" --out text) && git config --global url."https://${GITHUB_TOKEN}@github.com/DataDog".insteadOf https://github.com/DataDog
+
+goreleaser-snapshot:
+  <<: *ci-variables
+  extends: .compute-ci.goreleaser-snapshot
+  before_script:
+    - *export-github-token
+    - aws ssm get-parameter --region us-east-1 --name prod.gcr.push.key --with-decryption --query "Parameter.Value" --out text > /google-application-credentials.json
+    - export GOOGLE_APPLICATION_CREDENTIALS=/google-application-credentials.json
+
+goreleaser:
+  <<: *ci-variables
+  extends: .compute-ci.goreleaser
+  before_script:
+    - *export-github-token
+    - aws ssm get-parameter --region us-east-1 --name prod.gcr.push.key --with-decryption --query "Parameter.Value" --out text > /google-application-credentials.json
+    - export GOOGLE_APPLICATION_CREDENTIALS=/google-application-credentials.json
+
+build:
+  <<: *app-ci
+  tags: ["runner:main"]
+  artifacts:
+    name: "$CI_JOB_NAME-$CI_JOB_STAGE-$CI_COMMIT_REF_NAME"
+    untracked: true
+    paths:
+    - bin
+    expire_in: 20 min
+  stage: build
+  script:
+    - *export-github-token
+    - make build
+
+test:
+  <<: *app-ci
+  tags: ["runner:main"]
+  stage: verify
+  script:
+    - *export-github-token
+    - make test
