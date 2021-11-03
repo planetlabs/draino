@@ -784,3 +784,112 @@ func TestSerializePolicy(t *testing.T) {
 
 	assert.Equal(t, "{\"kind\":\"Eviction\",\"apiVersion\":\"policy/v1beta1\",\"metadata\":{\"name\":\"test-pod\",\"namespace\":\"test-namespace\",\"creationTimestamp\":null},\"deleteOptions\":{\"gracePeriodSeconds\":30}}\n", string(GetEvictionJsonPayload(evictionPayload).Bytes()))
 }
+
+func TestAPICordonDrainer_MarkDrainDelete(t *testing.T) {
+	someTimeAgo := meta.NewTime(time.Date(1978, time.April, 12, 22, 00, 00, 00, time.UTC))
+	tests := []struct {
+		name         string
+		node         *core.Node
+		expectedNode *core.Node
+		wantErr      bool
+	}{
+		{
+			name: "Remove drain schedule condition",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  someTimeAgo,
+							LastTransitionTime: someTimeAgo,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled",
+						},
+					},
+				},
+			},
+			expectedNode: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{},
+				},
+			},
+		},
+		{
+			name: "Keep other condition than drain schedule",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType("Ready"),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  someTimeAgo,
+							LastTransitionTime: someTimeAgo,
+							Reason:             "Whatever",
+							Message:            "Message",
+						},
+						{
+							Type:               core.NodeConditionType(ConditionDrainedScheduled),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  someTimeAgo,
+							LastTransitionTime: someTimeAgo,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled",
+						},
+						{
+							Type:               core.NodeConditionType("DifferentType"),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  someTimeAgo,
+							LastTransitionTime: someTimeAgo,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled",
+						},
+					},
+				},
+			},
+			expectedNode: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{
+						{
+							Type:               core.NodeConditionType("Ready"),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  someTimeAgo,
+							LastTransitionTime: someTimeAgo,
+							Reason:             "Whatever",
+							Message:            "Message",
+						},
+						{
+							Type:               core.NodeConditionType("DifferentType"),
+							Status:             core.ConditionTrue,
+							LastHeartbeatTime:  someTimeAgo,
+							LastTransitionTime: someTimeAgo,
+							Reason:             "Draino",
+							Message:            "Drain activity scheduled",
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &APICordonDrainer{
+				c: fake.NewSimpleClientset(tt.node),
+			}
+			if err := d.MarkDrainDelete(tt.node); (err != nil) != tt.wantErr {
+				t.Errorf("MarkDrainDelete() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			newNode, err := d.c.CoreV1().Nodes().Get(tt.node.Name, meta.GetOptions{})
+			if err != nil {
+				t.Errorf("MarkDrainDelete(), can't retrieve node error = %v", err)
+			}
+			if !reflect.DeepEqual(newNode, tt.expectedNode) {
+				t.Errorf("node comparison:\n======= want\n%#v\n======= got\n%#v", *tt.expectedNode, *newNode)
+			}
+		})
+	}
+}

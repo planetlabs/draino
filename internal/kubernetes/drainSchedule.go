@@ -48,6 +48,7 @@ type SchedulesGroup struct {
 	schedulesChain []string
 	period         time.Duration
 	backoffDelay   time.Duration
+	lastSchedule   * schedule
 }
 
 type NodePreprovisioningConfiguration struct {
@@ -127,6 +128,13 @@ func (d *DrainSchedules) DeleteSchedule(node *v1.Node) {
 	d.Lock()
 	defer d.Unlock()
 	d.getScheduleGroup(node).removeSchedule(node.Name)
+
+	// Remove the Mark on the node
+	if err := d.drainer.MarkDrainDelete(node); err != nil {
+		// if we cannot mark the node, let's remove the schedule
+		d.logger.Error("Failed to remove mark of schedule", zap.String("node", node.Name))
+	}
+	return
 }
 
 func (d *DrainSchedules) DeleteScheduleByName(name string) {
@@ -147,27 +155,37 @@ func (sg *SchedulesGroup) whenNextSchedule(failedCount int32, options *schedulin
 	}
 
 	var when time.Time
+	var lastSchedule * schedule
 	for i := len(sg.schedulesChain) - 1; i >= 0; i-- {
 		lastScheduleName := sg.schedulesChain[i]
-		if lastSchedule, ok := sg.schedules[lastScheduleName]; ok {
-			if (lastSchedule.failedCount > 0 && failedCount == 0) || (lastSchedule.failedCount == 0 && failedCount > 0) {
+		var ok bool
+		if lastSchedule, ok = sg.schedules[lastScheduleName]; ok {
+			if (lastSchedule.failedCount > 0 && failedCount > 0) || (lastSchedule.failedCount == 0 && failedCount == 0) {
 				// use the retry schedules or the regular schedules
-				continue
+				break
 			}
-			// grab custom values if any
-			if lastSchedule != nil && lastSchedule.customDrainBuffer != nil {
-				period = *lastSchedule.customDrainBuffer
-			}
-
-			// compute next value
-			if failedCount > 0 {
-				when = lastSchedule.when.Add(backoffDelay)
-			} else {
-				when = lastSchedule.when.Add(period)
-			}
-			break
+			lastSchedule = nil
 		}
 	}
+
+	// If there was no schedule in the schedule chain, use the historical known last schedule in the group
+	if lastSchedule==nil && sg.lastSchedule!=nil {
+		lastSchedule= sg.lastSchedule
+	}
+
+	// grab custom values if any
+	if lastSchedule != nil {
+		if lastSchedule.customDrainBuffer != nil {
+			period = *lastSchedule.customDrainBuffer
+		}
+		// compute next value
+		if failedCount > 0 {
+			when = lastSchedule.when.Add(backoffDelay)
+		} else {
+			when = lastSchedule.when.Add(period)
+		}
+	}
+
 	if when.Before(sooner) {
 		when = sooner
 		if failedCount > 0 {
@@ -180,12 +198,15 @@ func (sg *SchedulesGroup) whenNextSchedule(failedCount int32, options *schedulin
 func (sg *SchedulesGroup) addSchedule(node *v1.Node, failedCount int32, options *schedulingOptions, scheduleRunner func(node *v1.Node, when time.Time, failedCount int32, options *schedulingOptions) *schedule) time.Time {
 	when := sg.whenNextSchedule(failedCount, options)
 	sg.schedulesChain = append(sg.schedulesChain, node.GetName())
-	sg.schedules[node.GetName()] = scheduleRunner(node, when, failedCount, options)
+	s := scheduleRunner(node, when, failedCount, options)
+	sg.schedules[node.GetName()] = s
+	sg.lastSchedule = s
 	return when
 }
 
 func (sg *SchedulesGroup) removeSchedule(name string) {
-	if s, ok := sg.schedules[name]; ok {
+	s, ok := sg.schedules[name]
+	if ok {
 		s.timer.Stop()
 		delete(sg.schedules, name)
 	}
@@ -197,6 +218,10 @@ func (sg *SchedulesGroup) removeSchedule(name string) {
 		newScheduleChain = append(newScheduleChain, scheduleName)
 	}
 	sg.schedulesChain = newScheduleChain
+
+	if len(sg.schedulesChain)==0 {
+		sg.lastSchedule = s
+	}
 }
 
 func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, error) {
@@ -218,13 +243,7 @@ func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, 
 	d.Unlock()
 
 	// Mark the node with the condition stating that drain is scheduled
-	if err := RetryWithTimeout(
-		func() error {
-			return d.drainer.MarkDrain(node, when, time.Time{}, false, failedCount)
-		},
-		SetConditionRetryPeriod,
-		SetConditionTimeout,
-	); err != nil {
+	if err := d.drainer.MarkDrain(node, when, time.Time{}, false, failedCount); err != nil {
 		// if we cannot mark the node, let's remove the schedule
 		d.DeleteSchedule(node)
 		return time.Time{}, err
@@ -344,13 +363,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 		StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
 		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainSucceeded, "Drained node")
-		if err := RetryWithTimeout(
-			func() error {
-				return d.drainer.MarkDrain(node, when, sched.finish, false, failedCount)
-			},
-			SetConditionRetryPeriod,
-			SetConditionTimeout,
-		); err != nil {
+		if err := d.drainer.MarkDrain(node, when, sched.finish, false, failedCount); err != nil {
 			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Failed to place drain condition: %v", err)
 			log.Error(fmt.Sprintf("Failed to place condition following drain success : %v", err))
 		}
@@ -367,13 +380,7 @@ func (d *DrainSchedules) handleDrainFailure(sched *schedule, log *zap.Logger, dr
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
 	StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
 	d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Draining failed: %v", drainError)
-	if err := RetryWithTimeout(
-		func() error {
-			return d.drainer.MarkDrain(node, sched.when, sched.finish, true, sched.failedCount)
-		},
-		SetConditionRetryPeriod,
-		SetConditionTimeout,
-	); err != nil {
+	if err := d.drainer.MarkDrain(node, sched.when, sched.finish, true, sched.failedCount); err != nil {
 		log.Error("Failed to place condition following drain failure")
 	}
 	return tags

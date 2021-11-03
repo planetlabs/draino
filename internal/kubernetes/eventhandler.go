@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 )
@@ -63,10 +64,11 @@ const (
 	newNodeRequestReasonPreprovisioning = "preprovisioning"
 	newNodeRequestReasonReplacement     = "replacement"
 
-	drainRetryAnnotationKey         = "draino/drain-retry"
-	drainRetryAnnotationValue       = "true"
-	drainRetryFailedAnnotationKey   = "draino/drain-retry-failed"
-	drainRetryFailedAnnotationValue = "failed"
+	drainRetryAnnotationKey          = "draino/drain-retry"
+	drainRetryAnnotationValue        = "true"
+	drainRetryFailedAnnotationKey    = "draino/drain-retry-failed"
+	drainRetryFailedAnnotationValue  = "failed"
+	drainRetryRestartAnnotationValue = "restart"
 
 	drainoConditionsAnnotationKey = "draino.planet.com/conditions"
 )
@@ -104,6 +106,7 @@ var (
 // A DrainingResourceEventHandler cordons and drains any added or updated nodes.
 type DrainingResourceEventHandler struct {
 	logger         *zap.Logger
+	kubeClient     kubernetes.Interface
 	cordonDrainer  CordonDrainer
 	eventRecorder  record.EventRecorder
 	drainScheduler DrainScheduler
@@ -196,9 +199,10 @@ func WithPreprovisioningConfiguration(config NodePreprovisioningConfiguration) D
 }
 
 // NewDrainingResourceEventHandler returns a new DrainingResourceEventHandler.
-func NewDrainingResourceEventHandler(d CordonDrainer, store RuntimeObjectStore, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
+func NewDrainingResourceEventHandler(kubeClient kubernetes.Interface, d CordonDrainer, store RuntimeObjectStore, e record.EventRecorder, ho ...DrainingResourceEventHandlerOption) *DrainingResourceEventHandler {
 	h := &DrainingResourceEventHandler{
 		logger:                 zap.NewNop(),
+		kubeClient:             kubeClient,
 		cordonDrainer:          d,
 		eventRecorder:          e,
 		lastDrainScheduledFor:  time.Now(),
@@ -278,6 +282,17 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 			logger.Info("Uncordon, Drain still failing after multiple retries.")
+		}
+		return
+	}
+
+	if HasDrainRetryRestartAnnotation(n) {
+		LogForVerboseNode(h.logger, n, "Restart Retry Annotation")
+		h.drainScheduler.DeleteSchedule(n)
+		h.uncordon(n)
+		// Let's go back to initial state for the retry annotation
+		if err := h.cordonDrainer.ResetRetryAnnotation(n); err != nil {
+			logger.Error("Failed to reset retry annotation", zap.Error(err))
 		}
 		return
 	}
@@ -372,12 +387,17 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		return
 	}
 
-	// Let's ensure that a drain is scheduled
-	hasSchedule, failedSched := h.drainScheduler.HasSchedule(n)
-	LogForVerboseNode(h.logger, n, "hasSchedule", zap.Bool("hasSchedule", hasSchedule), zap.Bool("failedSchedule", failedSched))
-	if !hasSchedule {
-		h.scheduleDrain(n, drainStatus.FailedCount)
-		return
+	// The node may have been cordon by a user. Let's check if the cordon filters of draino are valid before doing any schedule
+	if h.checkCordonFilters(n) {
+		// Let's ensure that a drain is scheduled
+		hasSchedule, failedSched := h.drainScheduler.HasSchedule(n)
+		LogForVerboseNode(h.logger, n, "hasSchedule", zap.Bool("hasSchedule", hasSchedule), zap.Bool("failedSchedule", failedSched))
+		if !hasSchedule {
+			h.scheduleDrain(n, drainStatus.FailedCount)
+			return
+		}
+	} else {
+		logger.Info("Node is cordon but it is not passing cordon filters. Not scheduling any drain.")
 	}
 }
 
@@ -575,5 +595,10 @@ func HasDrainRetryAnnotation(n *core.Node) bool {
 }
 
 func HasDrainRetryFailedAnnotation(n *core.Node) bool {
-	return n.GetAnnotations()[drainRetryFailedAnnotationKey] == drainRetryFailedAnnotationValue
+	// the second part of the OR is needed while we are migrating this annotation to the  new key. At some point we can remove it.
+	return n.GetAnnotations()[drainRetryFailedAnnotationKey] == drainRetryFailedAnnotationValue || n.GetAnnotations()[drainRetryAnnotationKey] == drainRetryFailedAnnotationValue
+}
+
+func HasDrainRetryRestartAnnotation(n *core.Node) bool {
+	return n.GetAnnotations()[drainRetryFailedAnnotationKey] == drainRetryRestartAnnotationValue
 }
