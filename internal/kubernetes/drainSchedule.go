@@ -48,7 +48,7 @@ type SchedulesGroup struct {
 	schedulesChain []string
 	period         time.Duration
 	backoffDelay   time.Duration
-	lastSchedule   * schedule
+	lastSchedule   *schedule
 }
 
 type NodePreprovisioningConfiguration struct {
@@ -155,7 +155,7 @@ func (sg *SchedulesGroup) whenNextSchedule(failedCount int32, options *schedulin
 	}
 
 	var when time.Time
-	var lastSchedule * schedule
+	var lastSchedule *schedule
 	for i := len(sg.schedulesChain) - 1; i >= 0; i-- {
 		lastScheduleName := sg.schedulesChain[i]
 		var ok bool
@@ -169,8 +169,8 @@ func (sg *SchedulesGroup) whenNextSchedule(failedCount int32, options *schedulin
 	}
 
 	// If there was no schedule in the schedule chain, use the historical known last schedule in the group
-	if lastSchedule==nil && sg.lastSchedule!=nil {
-		lastSchedule= sg.lastSchedule
+	if lastSchedule == nil && sg.lastSchedule != nil {
+		lastSchedule = sg.lastSchedule
 	}
 
 	// grab custom values if any
@@ -219,7 +219,7 @@ func (sg *SchedulesGroup) removeSchedule(name string) {
 	}
 	sg.schedulesChain = newScheduleChain
 
-	if len(sg.schedulesChain)==0 {
+	if len(sg.schedulesChain) == 0 {
 		sg.lastSchedule = s
 	}
 }

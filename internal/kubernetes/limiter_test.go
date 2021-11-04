@@ -16,132 +16,142 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
-var nodesTestMap = map[string]*core.Node{
-	"A": &core.Node{
-		ObjectMeta: v1.ObjectMeta{
-			Name:   "A",
-			Labels: map[string]string{"A": "A"},
-		},
-		Spec: core.NodeSpec{
-			Taints: []core.Taint{
-				{Key: "A", Value: "A"},
+func getNodesTestSlice() []*core.Node {
+	return []*core.Node{
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Name:   "A",
+				Labels: map[string]string{"A": "A"},
+			},
+			Spec: core.NodeSpec{
+				Taints: []core.Taint{
+					{Key: "A", Value: "A"},
+				},
+			},
+			Status: core.NodeStatus{
+				Conditions: []core.NodeCondition{
+					{Type: core.NodeReady, Status: core.ConditionTrue},
+				},
 			},
 		},
-		Status: core.NodeStatus{
-			Conditions: []core.NodeCondition{
-				{Type: core.NodeReady, Status: core.ConditionTrue},
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Name:   "A-cordon",
+				Labels: map[string]string{"A": "A"},
+			},
+			Spec: core.NodeSpec{
+				Taints: []core.Taint{
+					{Key: "A", Value: "A"},
+				},
+				Unschedulable: true,
+			},
+			Status: core.NodeStatus{
+				Conditions: []core.NodeCondition{
+					{Type: core.NodeReady, Status: core.ConditionTrue},
+				},
 			},
 		},
-	},
-	"A-cordon": &core.Node{
-		ObjectMeta: v1.ObjectMeta{
-			Name:   "A-cordon",
-			Labels: map[string]string{"A": "A"},
-		},
-		Spec: core.NodeSpec{
-			Taints: []core.Taint{
-				{Key: "A", Value: "A"},
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "AB",
+				Labels: map[string]string{
+					"A": "A", "B": "B",
+				},
 			},
-			Unschedulable: true,
-		},
-		Status: core.NodeStatus{
-			Conditions: []core.NodeCondition{
-				{Type: core.NodeReady, Status: core.ConditionTrue},
+			Spec: core.NodeSpec{
+				Taints: []core.Taint{
+					{Key: "A", Value: "A"}, {Key: "B", Value: "B"},
+				},
 			},
-		},
-	},
-	"AB": &core.Node{
-		ObjectMeta: v1.ObjectMeta{
-			Name: "AB",
-			Labels: map[string]string{
-				"A": "A", "B": "B",
+			Status: core.NodeStatus{
+				Conditions: []core.NodeCondition{
+					{Type: core.NodeReady, Status: core.ConditionTrue},
+				},
 			},
 		},
-		Spec: core.NodeSpec{
-			Taints: []core.Taint{
-				{Key: "A", Value: "A"}, {Key: "B", Value: "B"},
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "AB-cordon",
+				Labels: map[string]string{
+					"A": "A", "B": "B",
+				},
+			},
+			Spec: core.NodeSpec{
+				Taints: []core.Taint{
+					{Key: "A", Value: "A"}, {Key: "B", Value: "B"},
+				},
+				Unschedulable: true,
+			},
+			Status: core.NodeStatus{
+				Conditions: []core.NodeCondition{
+					{Type: core.NodeReady, Status: core.ConditionTrue},
+				},
 			},
 		},
-		Status: core.NodeStatus{
-			Conditions: []core.NodeCondition{
-				{Type: core.NodeReady, Status: core.ConditionTrue},
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "ABC",
+				Labels: map[string]string{
+					"A": "A", "B": "B", "C": "C",
+				},
+			},
+			Spec: core.NodeSpec{
+				Taints: []core.Taint{
+					{Key: "A", Value: "A"}, {Key: "B", Value: "B"}, {Key: "C", Value: "C"},
+				},
+			},
+			Status: core.NodeStatus{
+				Conditions: []core.NodeCondition{
+					{Type: core.NodeReady, Status: core.ConditionTrue},
+				},
 			},
 		},
-	},
-	"AB-Cordon": &core.Node{
-		ObjectMeta: v1.ObjectMeta{
-			Name: "AB-cordon",
-			Labels: map[string]string{
-				"A": "A", "B": "B",
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "ABC-cordon",
+				Labels: map[string]string{
+					"A": "A", "B": "B", "C": "C",
+				},
+			},
+			Spec: core.NodeSpec{
+				Taints: []core.Taint{
+					{Key: "A", Value: "A"}, {Key: "B", Value: "B"}, {Key: "C", Value: "C"},
+				},
+				Unschedulable: true,
+			},
+			Status: core.NodeStatus{
+				Conditions: []core.NodeCondition{
+					{Type: core.NodeReady, Status: core.ConditionTrue},
+				},
 			},
 		},
-		Spec: core.NodeSpec{
-			Taints: []core.Taint{
-				{Key: "A", Value: "A"}, {Key: "B", Value: "B"},
+		{
+			ObjectMeta: v1.ObjectMeta{
+				Name: "D",
+				Labels: map[string]string{
+					"D": "D",
+				},
 			},
-			Unschedulable: true,
-		},
-		Status: core.NodeStatus{
-			Conditions: []core.NodeCondition{
-				{Type: core.NodeReady, Status: core.ConditionTrue},
+			Spec: core.NodeSpec{
+				Taints: []core.Taint{
+					{Key: "D", Value: "D"}, {Key: TaintNodeNotReady, Value: "NotReady"},
+				},
 			},
-		},
-	},
-	"ABC": &core.Node{
-		ObjectMeta: v1.ObjectMeta{
-			Name: "ABC",
-			Labels: map[string]string{
-				"A": "A", "B": "B", "C": "C",
-			},
-		},
-		Spec: core.NodeSpec{
-			Taints: []core.Taint{
-				{Key: "A", Value: "A"}, {Key: "B", Value: "B"}, {Key: "C", Value: "C"},
+			Status: core.NodeStatus{
+				Conditions: []core.NodeCondition{
+					{Type: core.NodeNetworkUnavailable, Status: core.ConditionTrue},
+				},
 			},
 		},
-		Status: core.NodeStatus{
-			Conditions: []core.NodeCondition{
-				{Type: core.NodeReady, Status: core.ConditionTrue},
-			},
-		},
-	},
-	"ABC-Cordon": &core.Node{
-		ObjectMeta: v1.ObjectMeta{
-			Name: "ABC-cordon",
-			Labels: map[string]string{
-				"A": "A", "B": "B", "C": "C",
-			},
-		},
-		Spec: core.NodeSpec{
-			Taints: []core.Taint{
-				{Key: "A", Value: "A"}, {Key: "B", Value: "B"}, {Key: "C", Value: "C"},
-			},
-			Unschedulable: true,
-		},
-		Status: core.NodeStatus{
-			Conditions: []core.NodeCondition{
-				{Type: core.NodeReady, Status: core.ConditionTrue},
-			},
-		},
-	},
-	"D": &core.Node{
-		ObjectMeta: v1.ObjectMeta{
-			Name: "D",
-			Labels: map[string]string{
-				"D": "D",
-			},
-		},
-		Spec: core.NodeSpec{
-			Taints: []core.Taint{
-				{Key: "D", Value: "D"}, {Key: TaintNodeNotReady, Value: "NotReady"},
-			},
-		},
-		Status: core.NodeStatus{
-			Conditions: []core.NodeCondition{
-				{Type: core.NodeNetworkUnavailable, Status: core.ConditionTrue},
-			},
-		},
-	},
+	}
+}
+
+func getNodesTestMap() map[string]*core.Node {
+	ret := map[string]*core.Node{}
+	for _, node := range getNodesTestSlice() {
+		ret[node.Name] = node
+	}
+	return ret
 }
 
 var pods = []*core.Pod{
@@ -156,8 +166,8 @@ var pods = []*core.Pod{
 			Name: "HasLocalStorage"},
 		Spec: core.PodSpec{
 			Volumes: []core.Volume{
-				core.Volume{VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{}}},
-				core.Volume{VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{}}},
+				{VolumeSource: core.VolumeSource{HostPath: &core.HostPathVolumeSource{}}},
+				{VolumeSource: core.VolumeSource{EmptyDir: &core.EmptyDirVolumeSource{}}},
 			},
 		},
 	},
@@ -171,16 +181,6 @@ var pods = []*core.Pod{
 	},
 }
 
-func NodesMapAsSlice() []*core.Node {
-	list := make([]*core.Node, len(nodesTestMap))
-	i := 0
-	for _, v := range nodesTestMap {
-		list[i] = v
-		i++
-	}
-	return list
-}
-
 func Test_getMatchingNodesForTaintCount(t *testing.T) {
 	tests := []struct {
 		name                 string
@@ -192,28 +192,28 @@ func Test_getMatchingNodesForTaintCount(t *testing.T) {
 		{
 			name:                 "Nothing selected",
 			selector:             map[string]string{"Other": "Value"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 0,
 			wantTotalMatchCount:  0,
 		},
 		{
 			name:                 "A=A Selection",
 			selector:             map[string]string{"A": "A"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 3,
 			wantTotalMatchCount:  6,
 		},
 		{
 			name:                 "C=C Selection",
 			selector:             map[string]string{"C": "C"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 1,
 			wantTotalMatchCount:  2,
 		},
 		{
 			name:                 "A=A,B=B Selection",
 			selector:             map[string]string{"A": "A", "B": "B"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 2,
 			wantTotalMatchCount:  4,
 		},
@@ -242,28 +242,28 @@ func Test_getMatchingNodesForLabelsCount(t *testing.T) {
 		{
 			name:                 "Nothing selected",
 			selector:             map[string]string{"Other": "Value"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 0,
 			wantTotalMatchCount:  0,
 		},
 		{
 			name:                 "A=A Selection",
 			selector:             map[string]string{"A": "A"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 3,
 			wantTotalMatchCount:  6,
 		},
 		{
 			name:                 "C=C Selection",
 			selector:             map[string]string{"C": "C"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 1,
 			wantTotalMatchCount:  2,
 		},
 		{
 			name:                 "A=A,B=B Selection",
 			selector:             map[string]string{"A": "A", "B": "B"},
-			nodes:                NodesMapAsSlice(),
+			nodes:                getNodesTestSlice(),
 			wantCordonMatchCount: 2,
 			wantTotalMatchCount:  4,
 		},
@@ -293,40 +293,40 @@ func TestLimiter_CanCordon(t *testing.T) {
 	}{
 		{
 			name:  "not limited",
-			node:  nodesTestMap["AB"],
+			node:  getNodesTestMap()["AB"],
 			want:  true,
 			want1: "",
 		},
 		{
 			name:  "already-cordon",
-			node:  nodesTestMap["AB-Cordon"],
+			node:  getNodesTestMap()["AB-cordon"],
 			want:  true,
 			want1: "",
 		},
 		{
 			name:         "global limit 3",
-			node:         nodesTestMap["AB"],
+			node:         getNodesTestMap()["AB"],
 			limiterfuncs: map[string]LimiterFunc{"limiter3": MaxSimultaneousCordonLimiterFunc(3, false)},
 			want:         false,
 			want1:        "limiter3",
 		},
 		{
 			name:         "global limit 75% not met",
-			node:         nodesTestMap["AB"],
+			node:         getNodesTestMap()["AB"],
 			limiterfuncs: map[string]LimiterFunc{"limiter75%": MaxSimultaneousCordonLimiterFunc(75, true)},
 			want:         true,
 			want1:        "",
 		},
 		{
 			name:         "global limit 40% met",
-			node:         nodesTestMap["AB"],
+			node:         getNodesTestMap()["AB"],
 			limiterfuncs: map[string]LimiterFunc{"limiter40%": MaxSimultaneousCordonLimiterFunc(40, true)},
 			want:         false,
 			want1:        "limiter40%",
 		},
 		{
 			name: "global limit ok, but limit on taint block",
-			node: nodesTestMap["AB"],
+			node: getNodesTestMap()["AB"],
 			limiterfuncs: map[string]LimiterFunc{
 				"limiter75%":       MaxSimultaneousCordonLimiterFunc(75, true),
 				"limiter40%-taint": MaxSimultaneousCordonLimiterForTaintsFunc(40, true, []string{"B"}),
@@ -337,7 +337,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		},
 		{
 			name: "limit on taint ok, but limit on labels block",
-			node: nodesTestMap["AB"],
+			node: getNodesTestMap()["AB"],
 			limiterfuncs: map[string]LimiterFunc{
 				"limiter75%-taint":   MaxSimultaneousCordonLimiterForTaintsFunc(75, true, []string{"A"}),
 				"limiter-label-A3":   MaxSimultaneousCordonLimiterForLabelsFunc(3, false, []string{"A"}),
@@ -348,7 +348,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		},
 		{
 			name: "limit on %labels ok",
-			node: nodesTestMap["AB"],
+			node: getNodesTestMap()["AB"],
 			limiterfuncs: map[string]LimiterFunc{
 				"limiter-label-B80%": MaxSimultaneousCordonLimiterForLabelsFunc(80, true, []string{"B"}),
 			},
@@ -357,7 +357,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		},
 		{
 			name: "allow first node of the group",
-			node: nodesTestMap["D"],
+			node: getNodesTestMap()["D"],
 			limiterfuncs: map[string]LimiterFunc{
 				"limiter75%-taint": MaxSimultaneousCordonLimiterForTaintsFunc(75, true, []string{"D"}),
 			},
@@ -366,7 +366,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		},
 		{
 			name: "limit on 15% of nodes NotReady with threshold at max=10%", // 15% = 1/7 nodes
-			node: nodesTestMap["D"],
+			node: getNodesTestMap()["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
 				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, store, zap.NewNop()), maxNotReadyNodePeriod)
@@ -378,7 +378,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		},
 		{
 			name: "limit on 1 nodes NotReady with threshold at max=1",
-			node: nodesTestMap["D"],
+			node: getNodesTestMap()["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
 				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, store, zap.NewNop()), maxNotReadyNodePeriod)
@@ -390,7 +390,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		},
 		{
 			name: "no limit on 15% nodes NotReady with threshold max=20%",
-			node: nodesTestMap["D"],
+			node: getNodesTestMap()["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
 				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, store, zap.NewNop()), maxNotReadyNodePeriod)
@@ -402,7 +402,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		},
 		{
 			name: "no limit on 1 nodes NotReady with threshold max=20",
-			node: nodesTestMap["D"],
+			node: getNodesTestMap()["D"],
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())
 				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, store, zap.NewNop()), maxNotReadyNodePeriod)
@@ -416,7 +416,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var objects []runtime.Object
-			for _, n := range NodesMapAsSlice() {
+			for _, n := range getNodesTestSlice() {
 				objects = append(objects, n)
 			}
 			kclient := fake.NewSimpleClientset(objects...)
@@ -570,14 +570,14 @@ func TestPodLimiter(t *testing.T) {
 	}{
 		{
 			name:  "not limited",
-			nodes: NodesMapAsSlice(),
+			nodes: getNodesTestSlice(),
 			pods:  pods,
 			want:  true,
 			want1: "",
 		},
 		{
 			name:  "limit on 1 pending pods with threshold at max=1",
-			nodes: NodesMapAsSlice(),
+			nodes: getNodesTestSlice(),
 			pods:  pods,
 			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
 				g := NewGlobalBlocker(zap.NewNop())

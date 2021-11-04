@@ -15,7 +15,7 @@ import (
 func TestDrainSchedules_LastSchedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
-	node1:=&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node1",Annotations: map[string]string{CustomDrainBufferAnnotation: "10m"}}} // Using 10m in initNode ... that should be respected even if the schedule is removed.
+	node1 := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node1", Annotations: map[string]string{CustomDrainBufferAnnotation: "10m"}}} // Using 10m in initNode ... that should be respected even if the schedule is removed.
 	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	whenFirstSched, _ := scheduler.Schedule(node1, 0)
 	scheduler.DeleteSchedule(node1)
@@ -25,16 +25,16 @@ func TestDrainSchedules_LastSchedule(t *testing.T) {
 		t.Errorf("DrainSchedules.Schedule() error = %v", err)
 		return
 	}
-	from:= whenFirstSched.Add(10*time.Minute - 2*time.Second)
-	to:=   whenFirstSched.Add(10*time.Minute + 2*time.Second)
+	from := whenFirstSched.Add(10*time.Minute - 2*time.Second)
+	to := whenFirstSched.Add(10*time.Minute + 2*time.Second)
 
 	// Check that scheduled are place in the good time window
 	if when.Before(from) || when.After(to) {
 		t.Errorf("Schedule out of timeWindow (1)")
 	}
 	scheduler.DeleteScheduleByName(nodeName)
-	node2:=&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node2Failed",Annotations: map[string]string{CustomDrainBufferAnnotation: "30m"}}}
-	node3:=&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node3",Annotations: map[string]string{CustomDrainBufferAnnotation: "20m"}}}
+	node2 := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node2Failed", Annotations: map[string]string{CustomDrainBufferAnnotation: "30m"}}}
+	node3 := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node3", Annotations: map[string]string{CustomDrainBufferAnnotation: "20m"}}}
 	whenFirstSched, _ = scheduler.Schedule(node1, 0)
 	scheduler.Schedule(node2, 3)
 	whenThirdSched, _ := scheduler.Schedule(node3, 0)
@@ -43,8 +43,8 @@ func TestDrainSchedules_LastSchedule(t *testing.T) {
 		t.Errorf("DrainSchedules.Schedule() error(2) = %v", err)
 		return
 	}
-	from= whenThirdSched.Add(20*time.Minute - 2*time.Second)
-	to=   whenThirdSched.Add(20*time.Minute + 2*time.Second)
+	from = whenThirdSched.Add(20*time.Minute - 2*time.Second)
+	to = whenThirdSched.Add(20*time.Minute + 2*time.Second)
 	// Check that scheduled are place in the good time window
 	if when.Before(from) || when.After(to) {
 		t.Errorf("Schedule out of timeWindow (3)")
