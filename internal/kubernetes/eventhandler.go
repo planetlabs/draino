@@ -46,6 +46,8 @@ const (
 	eventReasonUncordonSucceeded = "UncordonSucceeded"
 	eventReasonUncordonFailed    = "UncordonFailed"
 
+	eventReasonConditionFiltered = "ConditionFiltered"
+
 	eventReasonUncordonDueToPendingPodWithLocalPV = "PodBoundToNodeViaLocalPV"
 
 	eventReasonDrainScheduled        = "DrainScheduled"
@@ -84,23 +86,24 @@ var (
 	MeasureNodesReplacementRequest = stats.Int64("draino/nodes_replacement_request", "Number of nodes replacement requested.", stats.UnitDimensionless)
 	MeasurePreprovisioningLatency  = stats.Float64("draino/nodes_preprovisioning_latency", "Latency to get a node preprovisioned", stats.UnitMilliseconds)
 
-	TagNodeName, _                   = tag.NewKey("node_name")
-	TagConditions, _                 = tag.NewKey("conditions")
-	TagTeam, _                       = tag.NewKey("team")
-	TagNodegroupName, _              = tag.NewKey("nodegroup_name")
-	TagNodegroupNamespace, _         = tag.NewKey("nodegroup_namespace")
-	TagResult, _                     = tag.NewKey("result")
-	TagReason, _                     = tag.NewKey("reason")
-	TagFailureCause, _               = tag.NewKey("failure_cause")
-	TagInScope, _                    = tag.NewKey("in_scope")
-	TagDrainStatus, _                = tag.NewKey("drain_status")
-	TagPreprovisioning, _            = tag.NewKey("preprovisioning")
-	TagPVCManagement, _              = tag.NewKey("pvc_management")
-	TagDrainRetry, _                 = tag.NewKey("drain_retry")
-	TagDrainRetryFailed, _           = tag.NewKey("drain_retry_failed")
-	TagUserOptOutViaPodAnnotation, _ = tag.NewKey("user_opt_out_via_pod_annotation")
-	TagUserOptInViaPodAnnotation, _  = tag.NewKey("user_opt_in_via_pod_annotation")
-	TagUserEvictionURL, _            = tag.NewKey("eviction_url")
+	TagNodeName, _                        = tag.NewKey("node_name")
+	TagConditions, _                      = tag.NewKey("conditions")
+	TagTeam, _                            = tag.NewKey("team")
+	TagNodegroupName, _                   = tag.NewKey("nodegroup_name")
+	TagNodegroupNamespace, _              = tag.NewKey("nodegroup_namespace")
+	TagResult, _                          = tag.NewKey("result")
+	TagReason, _                          = tag.NewKey("reason")
+	TagFailureCause, _                    = tag.NewKey("failure_cause")
+	TagInScope, _                         = tag.NewKey("in_scope")
+	TagDrainStatus, _                     = tag.NewKey("drain_status")
+	TagPreprovisioning, _                 = tag.NewKey("preprovisioning")
+	TagPVCManagement, _                   = tag.NewKey("pvc_management")
+	TagDrainRetry, _                      = tag.NewKey("drain_retry")
+	TagDrainRetryFailed, _                = tag.NewKey("drain_retry_failed")
+	TagUserOptOutViaPodAnnotation, _      = tag.NewKey("user_opt_out_via_pod_annotation")
+	TagUserOptInViaPodAnnotation, _       = tag.NewKey("user_opt_in_via_pod_annotation")
+	TagUserAllowedConditionsAnnotation, _ = tag.NewKey("user_allowed_conditions_annotation")
+	TagUserEvictionURL, _                 = tag.NewKey("eviction_url")
 )
 
 // A DrainingResourceEventHandler cordons and drains any added or updated nodes.
@@ -307,6 +310,13 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	badConditions := GetNodeOffendingConditions(n, h.conditions)
 	LogForVerboseNode(h.logger, n, fmt.Sprintf("Offending conditions count %d", len(badConditions)))
 	if len(badConditions) == 0 {
+		return
+	}
+	badConditionsStr := GetConditionsTypes(badConditions)
+	if !atLeastOneConditionAcceptedByTheNode(badConditionsStr, n) {
+		LogForVerboseNode(h.logger, n, "Conditions filter rejects that node")
+		nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
+		h.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonConditionFiltered, fmt.Sprintf("Proposed condition(s) {%s} are not eligible for that node.", strings.Join(badConditionsStr, ",")))
 		return
 	}
 
