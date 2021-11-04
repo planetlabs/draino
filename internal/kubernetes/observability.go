@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 
 const (
 	ConfigurationAnnotationKey = "node-lifecycle.datadoghq.com/draino-configuration"
+	OutOfScopeAnnotationValue  = "out-of-scope"
 	nodeOptionsMetricName      = "node_options_nodes_total"
 )
 
@@ -135,7 +137,10 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 		case <-ticker.C:
 			// Let's update the nodes metadata
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
-				if s.IsAnnotationUpdateNeeded(node) {
+				_, outOfDate, err := s.getAnnotationUpdate(node)
+				if err != nil {
+					s.logger.Error("Failed to check if config annotation was out of date", zap.Error(err), zap.String("node", node.Name))
+				} else if outOfDate {
 					s.addNodeToQueue(node)
 				}
 			}
@@ -150,7 +155,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				t := inScopeTags{
 					NodeTagsValues:                  nodeTags,
 					DrainStatus:                     getDrainStatusStr(node),
-					InScope:                         len(node.Annotations[ConfigurationAnnotationKey]) > 0,
+					InScope:                         len(node.Annotations[ConfigurationAnnotationKey]) > 0 || node.Annotations[ConfigurationAnnotationKey] != OutOfScopeAnnotationValue,
 					PreprovisioningEnabled:          node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
 					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
 					DrainRetry:                      HasDrainRetryAnnotation(node),
@@ -206,28 +211,33 @@ func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
 	s.queueNodeToBeUpdated.AddRateLimited(node.Name)
 }
 
-func (s *DrainoConfigurationObserverImpl) IsAnnotationUpdateNeeded(node *v1.Node) bool {
-	configs := strings.Split(node.Annotations[ConfigurationAnnotationKey], ",")
+// getAnnotationUpdate returns the annotation value the node should have and whether or not the annotation value is currently out of date (not equal to first return value)
+func (s *DrainoConfigurationObserverImpl) getAnnotationUpdate(node *v1.Node) (string, bool, error) {
+	valueOriginal := node.Annotations[ConfigurationAnnotationKey]
+	configsOriginal := strings.Split(valueOriginal, ",")
+	var configs []string
+	for _, config := range configsOriginal {
+		// TODO delete empty string check once out of scope value has gone to all applicable nodes' annotation value in the fleet
+		if config == "" || config == OutOfScopeAnnotationValue || config == s.configName {
+			continue
+		}
+		configs = append(configs, config)
+	}
 	inScope, reason, err := s.IsInScope(node)
 	if err != nil {
-		s.logger.Error("Can't check if node is in scope", zap.Error(err), zap.String("node", node.Name))
-		return false
+		return "", false, err
 	}
 	LogForVerboseNode(s.logger, node, "InScope information", zap.Bool("inScope", inScope), zap.String("reason", reason))
 	if inScope {
-		for _, c := range configs {
-			if c == s.configName {
-				return false
-			}
-		}
-		return true
+		configs = append(configs, s.configName)
 	}
-	for _, c := range configs {
-		if c == s.configName {
-			return true
-		}
+	if len(configs) == 0 {
+		// add out of scope value for user visibility
+		configs = append(configs, OutOfScopeAnnotationValue)
 	}
-	return false
+	sort.Strings(configs)
+	valueDesired := strings.Join(configs, ",")
+	return valueDesired, valueDesired != valueOriginal, nil
 }
 
 // IsInScope return if the node is in scope of the running configuration. If not it also return the reason for not being in scope.
@@ -296,48 +306,16 @@ func (s *DrainoConfigurationObserverImpl) updateNodeAnnotations(nodeName string)
 		}
 		return err
 	}
-	var configs []string
-	configsFromAnnotation := strings.Split(node.Annotations[ConfigurationAnnotationKey], ",")
-	for _, c := range configsFromAnnotation {
-		if c == "" { // remove empty annotation that reflect no scope.
-			continue
-		}
-		configs = append(configs, c)
-	}
-	initialConfigCount := len(configs)
-
-	inScope, _, err := s.IsInScope(node)
+	desiredValue, outOfDate, err := s.getAnnotationUpdate(node)
 	if err != nil {
-		s.logger.Error("Can't check if node is in scope", zap.Error(err), zap.String("node", node.Name))
 		return err
 	}
-	if inScope {
-		found := false
-		for _, c := range configs {
-			if c == s.configName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			configs = append(configs, s.configName)
-		}
-	} else {
-		toKeep := []string{}
-		for _, c := range configs {
-			if c != s.configName {
-				toKeep = append(toKeep, c)
-			}
-		}
-		configs = toKeep
-	}
 
-	if len(configs) != initialConfigCount {
-		newConfig := strings.Join(configs, ",")
+	if outOfDate {
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
 		}
-		return PatchNodeAnnotationKey(s.kclient, nodeName, ConfigurationAnnotationKey, newConfig)
+		return PatchNodeAnnotationKey(s.kclient, nodeName, ConfigurationAnnotationKey, desiredValue)
 	}
 	return nil
 }

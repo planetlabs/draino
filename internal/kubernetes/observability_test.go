@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,106 +15,145 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestScopeObserverImpl_IsAnnotationUpdateNeeded(t *testing.T) {
+func TestScopeObserverImpl_GetAnnotationUpdate(t *testing.T) {
+	getNode := func(annotationValue string) *v1.Node {
+		return &v1.Node{
+			ObjectMeta: meta.ObjectMeta{Annotations: map[string]string{ConfigurationAnnotationKey: annotationValue}},
+		}
+	}
 	tests := []struct {
-		name           string
-		configName     string
-		nodeFilterFunc func(obj interface{}) bool
-		podFilterFunc  PodFilterFunc
-		objects        []runtime.Object
-		node           *v1.Node
-		want           bool
+		name              string
+		configName        string
+		nodeFilterFunc    func(obj interface{}) bool
+		podFilterFunc     PodFilterFunc
+		objects           []runtime.Object
+		node              *v1.Node
+		expectedValue     string
+		expectedOutOfDate bool
+		expectedError     string
 	}{
 		{
-			name:           "no annotation - not in-scope --> no update",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:  NewPodFilters(),
-			objects:        []runtime.Object{},
-			node:           &v1.Node{},
-			want:           false,
+			name:              "no annotation - not in-scope --> update to out of scope",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode(""),
+			expectedValue:     OutOfScopeAnnotationValue,
+			expectedOutOfDate: true,
 		},
 		{
-			name:           "no annotation - not in-scope (pod) --> no update",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return true }, // in scope for node
-			podFilterFunc:  func(p v1.Pod) (pass bool, reason string, err error) { return false, "test", nil },
-			objects:        []runtime.Object{&v1.Pod{}},
-			node:           &v1.Node{},
-			want:           false,
+			name:              "out of scope annotation - not in-scope --> no update",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode(OutOfScopeAnnotationValue),
+			expectedValue:     OutOfScopeAnnotationValue,
+			expectedOutOfDate: false,
 		},
 		{
-			name:           "no annotation - not in-scope (pod with error) --> no update",
+			name:              "out of scope annotation - not in-scope (pod) --> no update",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope for node
+			podFilterFunc:     func(p v1.Pod) (pass bool, reason string, err error) { return false, "test", nil },
+			objects:           []runtime.Object{&v1.Pod{}},
+			node:              getNode(OutOfScopeAnnotationValue),
+			expectedValue:     OutOfScopeAnnotationValue,
+			expectedOutOfDate: false,
+		},
+		{
+			name:           "out of scope annotation - not in-scope (pod with error) --> error",
 			configName:     "draino1",
 			nodeFilterFunc: func(obj interface{}) bool { return true }, // in scope for node
 			podFilterFunc: func(p v1.Pod) (pass bool, reason string, err error) {
 				return true, "test", fmt.Errorf("error path test")
 			},
-			objects: []runtime.Object{&v1.Pod{}},
-			node:    &v1.Node{},
-			want:    false,
+			objects:           []runtime.Object{&v1.Pod{}},
+			node:              getNode(OutOfScopeAnnotationValue),
+			expectedValue:     OutOfScopeAnnotationValue,
+			expectedOutOfDate: false,
+			expectedError:     "error path test",
 		},
 		{
-			name:           "no annotation - in-scope --> update needed",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:  NewPodFilters(),
-			objects:        []runtime.Object{},
-			node:           &v1.Node{},
-			want:           true,
+			name:              "no annotation - in-scope --> update needed",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode(""),
+			expectedValue:     "draino1",
+			expectedOutOfDate: true,
 		},
 		{
-			name:           "no annotation - in-scope (node and pod) --> update needed",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return true },                                        // in scope node
-			podFilterFunc:  func(p v1.Pod) (pass bool, reason string, err error) { return true, "test", nil }, // in scope pod
-			objects:        []runtime.Object{&v1.Pod{}},
-			node:           &v1.Node{},
-			want:           true,
+			name:              "out of scope annotation - in-scope --> update needed",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode(OutOfScopeAnnotationValue),
+			expectedValue:     "draino1",
+			expectedOutOfDate: true,
 		},
 		{
-			name:           "annotation present - in-scope --> no update needed",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:  NewPodFilters(),
-			objects:        []runtime.Object{},
-			node: &v1.Node{
-				ObjectMeta: meta.ObjectMeta{Annotations: map[string]string{ConfigurationAnnotationKey: "draino1"}},
-			},
-			want: false,
+			name:              "out of scope annotation - in-scope (node and pod) --> update needed",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return true },                                        // in scope node
+			podFilterFunc:     func(p v1.Pod) (pass bool, reason string, err error) { return true, "test", nil }, // in scope pod
+			objects:           []runtime.Object{&v1.Pod{}},
+			node:              getNode(OutOfScopeAnnotationValue),
+			expectedValue:     "draino1",
+			expectedOutOfDate: true,
 		},
 		{
-			name:           "other annotation present - in-scope --> update needed",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:  NewPodFilters(),
-			objects:        []runtime.Object{},
-			node: &v1.Node{
-				ObjectMeta: meta.ObjectMeta{Annotations: map[string]string{ConfigurationAnnotationKey: "draino-other"}},
-			},
-			want: true,
+			name:              "annotation present - in-scope --> no update needed",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode("draino1"),
+			expectedValue:     "draino1",
+			expectedOutOfDate: false,
 		},
 		{
-			name:           "annotation present - not in-scope --> update needed",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:  NewPodFilters(),
-			objects:        []runtime.Object{},
-			node: &v1.Node{
-				ObjectMeta: meta.ObjectMeta{Annotations: map[string]string{ConfigurationAnnotationKey: "draino1"}},
-			},
-			want: true,
+			name:              "other annotation present - in-scope --> update needed",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode("draino2"),
+			expectedValue:     "draino1,draino2",
+			expectedOutOfDate: true,
 		},
 		{
-			name:           "annotation present with other - not in-scope --> update needed",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:  NewPodFilters(),
-			objects:        []runtime.Object{},
-			node: &v1.Node{
-				ObjectMeta: meta.ObjectMeta{Annotations: map[string]string{ConfigurationAnnotationKey: "draino1,other-draino"}},
-			},
-			want: true,
+			name:              "annotation present - not in-scope --> update needed",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode("draino1"),
+			expectedValue:     OutOfScopeAnnotationValue,
+			expectedOutOfDate: true,
+		},
+		{
+			name:              "annotation present with other - not in-scope --> update needed",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode("draino1,other-draino"),
+			expectedValue:     "other-draino",
+			expectedOutOfDate: true,
+		},
+		{
+			name:              "sorts values",
+			configName:        "draino1",
+			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
+			podFilterFunc:     NewPodFilters(),
+			objects:           []runtime.Object{},
+			node:              getNode("draino2,draino1"),
+			expectedValue:     "draino1,draino2",
+			expectedOutOfDate: true,
 		},
 	}
 	for _, tt := range tests {
@@ -133,8 +174,14 @@ func TestScopeObserverImpl_IsAnnotationUpdateNeeded(t *testing.T) {
 				return s.runtimeObjectStore.HasSynced(), nil
 			})
 
-			if got := s.IsAnnotationUpdateNeeded(tt.node); got != tt.want {
-				t.Errorf("IsAnnotationUpdateNeeded() = %v, want %v", got, tt.want)
+			actualValue, actualOutOfDate, err := s.getAnnotationUpdate(tt.node)
+			if tt.expectedError != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedValue, actualValue)
+				assert.Equal(t, tt.expectedOutOfDate, actualOutOfDate)
 			}
 		})
 	}
@@ -149,16 +196,13 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 		configName     string
 		conditions     []SuppliedCondition
 		nodeFilterFunc func(obj interface{}) bool
-		podFilterFunc  PodFilterFunc
 		objects        []runtime.Object
 		validationFunc func(node *v1.Node) bool
-		wantErr        bool
 	}{
 		{
-			name:           "no annotation - in-scope --> update",
+			name:           "updates when out of date",
 			configName:     "draino1",
 			nodeFilterFunc: func(obj interface{}) bool { return true },
-			podFilterFunc:  NewPodFilters(),
 			objects: []runtime.Object{
 				&v1.Node{
 					ObjectMeta: meta.ObjectMeta{
@@ -170,46 +214,6 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 			validationFunc: func(node *v1.Node) bool {
 				return node.Annotations[ConfigurationAnnotationKey] == "draino1"
 			},
-			wantErr: false,
-		},
-		{
-			name:           "other annotation - in-scope --> update",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return true },
-			podFilterFunc:  NewPodFilters(),
-			objects: []runtime.Object{
-				&v1.Node{
-					ObjectMeta: meta.ObjectMeta{
-						Name:        "node1",
-						Annotations: map[string]string{ConfigurationAnnotationKey: "other"},
-					},
-				},
-			},
-			nodeName: "node1",
-			validationFunc: func(node *v1.Node) bool {
-				v := node.Annotations[ConfigurationAnnotationKey]
-				return v == "draino1,other" || v == "other,draino1"
-			},
-			wantErr: false,
-		},
-		{
-			name:           "contain annotation - not-in-scope --> update",
-			configName:     "draino1",
-			nodeFilterFunc: func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:  NewPodFilters(),
-			objects: []runtime.Object{
-				&v1.Node{
-					ObjectMeta: meta.ObjectMeta{
-						Name:        "node1",
-						Annotations: map[string]string{ConfigurationAnnotationKey: "other,draino1"},
-					},
-				},
-			},
-			nodeName: "node1",
-			validationFunc: func(node *v1.Node) bool {
-				return node.Annotations[ConfigurationAnnotationKey] == "other"
-			},
-			wantErr: false,
 		},
 	}
 
@@ -224,13 +228,11 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 				configName:         tt.configName,
 				conditions:         tt.conditions,
 				nodeFilterFunc:     tt.nodeFilterFunc,
-				podFilterFunc:      tt.podFilterFunc,
+				podFilterFunc:      NewPodFilters(),
 				logger:             zap.NewNop(),
 			}
-			if err := s.updateNodeAnnotations(tt.nodeName); (err != nil) != tt.wantErr {
-				t.Errorf("updateNodeAnnotations() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+			err := s.updateNodeAnnotations(tt.nodeName)
+			require.NoError(t, err)
 			if err := wait.PollImmediate(50*time.Millisecond, 5*time.Second,
 				func() (bool, error) {
 					n, err := kclient.CoreV1().Nodes().Get(tt.nodeName, meta.GetOptions{})

@@ -565,15 +565,15 @@ func TestPodLimiter(t *testing.T) {
 		limiterfuncs         map[string]LimiterFunc
 		nodes                []*core.Node
 		pods                 []*core.Pod
-		want                 bool
-		want1                string
+		wantCanCordon        bool
+		wantReason           string
 	}{
 		{
-			name:  "not limited",
-			nodes: getNodesTestSlice(),
-			pods:  pods,
-			want:  true,
-			want1: "",
+			name:          "not limited",
+			nodes:         getNodesTestSlice(),
+			pods:          pods,
+			wantCanCordon: true,
+			wantReason:    "",
 		},
 		{
 			name:  "limit on 1 pending pods with threshold at max=1",
@@ -585,8 +585,8 @@ func TestPodLimiter(t *testing.T) {
 				g.blockers[0].updateBlockState()
 				return g
 			},
-			want:  false,
-			want1: "limiter-pending-pods-1",
+			wantCanCordon: false,
+			wantReason:    "limiter-pending-pods-1",
 		},
 	}
 
@@ -619,12 +619,12 @@ func TestPodLimiter(t *testing.T) {
 				}
 			}
 			time.Sleep(2 * maxNotReadyNodePeriod) // wait for the caches to update
-			got, got1 := l.CanCordon(tt.nodes[0])
-			if got != tt.want {
-				t.Errorf("CanCordon() got = %v, want %v", got, tt.want)
+			gotCanCordon, gotReason := l.CanCordon(tt.nodes[0])
+			if gotCanCordon != tt.wantCanCordon {
+				t.Errorf("CanCordon() got = %v, want %v", gotCanCordon, tt.wantCanCordon)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("CanCordon() got1 = %v, want %v", got1, tt.want1)
+			if gotReason != tt.wantReason {
+				t.Errorf("CanCordon() got1 = %v, want %v", gotReason, tt.wantReason)
 			}
 		})
 	}
