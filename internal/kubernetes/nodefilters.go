@@ -178,3 +178,29 @@ func GetUnscheduledPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore
 	}
 	return result, nil
 }
+
+const (
+	allowedConditionAnnotationKey = "node-lifecycle.datadoghq.com/allowed-conditions"
+)
+
+// atLeastOneConditionAcceptedByTheNode check if at least one of the condition in the list is allowed. If the list of conditions is empty, but at least one allowed-condition is specified it returns false!
+func atLeastOneConditionAcceptedByTheNode(conditions []string, n *core.Node) bool {
+	allowedConditions, ok := n.Annotations[allowedConditionAnnotationKey]
+	if !ok {
+		// no condition specify means "all accepted"
+		return true
+	}
+	for _, allowedCondition := range strings.Split(allowedConditions, ",") {
+		for _, c := range conditions {
+			if c == allowedCondition {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasAllowConditionList(n *core.Node) bool {
+	_,ok:=n.Annotations[allowedConditionAnnotationKey]
+	return ok
+}

@@ -54,7 +54,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureNodesWithNodeOptions,
 		Description: "Number of nodes for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagDrainRetry, TagDrainRetryFailed, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
+		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagUserAllowedConditionsAnnotation, TagDrainRetry, TagDrainRetryFailed, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
 	}
 
 	view.Register(g.previousMeasureNodesWithNodeOptions)
@@ -114,6 +114,7 @@ type inScopeTags struct {
 	DrainRetryFailed                bool
 	UserOptOutViaPodAnnotation      bool
 	UserOptInViaPodAnnotation       bool
+	UserAllowedConditionsAnnotation bool
 	TagUserEvictionURLViaAnnotation bool
 	Condition                       string
 }
@@ -155,13 +156,14 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				t := inScopeTags{
 					NodeTagsValues:                  nodeTags,
 					DrainStatus:                     getDrainStatusStr(node),
-					InScope:                         len(node.Annotations[ConfigurationAnnotationKey]) > 0 || node.Annotations[ConfigurationAnnotationKey] != OutOfScopeAnnotationValue,
+					InScope:                         NodeInScopeWithConditionCheck(conditions, node),
 					PreprovisioningEnabled:          node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
 					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
 					DrainRetry:                      HasDrainRetryAnnotation(node),
 					DrainRetryFailed:                HasDrainRetryFailedAnnotation(node),
 					UserOptOutViaPodAnnotation:      s.HasPodWithUserOptOutAnnotation(node),
 					UserOptInViaPodAnnotation:       s.HasPodWithUserOptInAnnotation(node),
+					UserAllowedConditionsAnnotation: hasAllowConditionList(node),
 					TagUserEvictionURLViaAnnotation: s.HasEvictionUrlViaAnnotation(node),
 				}
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
@@ -174,6 +176,11 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			s.updateGauges(newMetricsValue)
 		}
 	}
+}
+
+func NodeInScopeWithConditionCheck(conditions []SuppliedCondition, node *v1.Node) bool {
+	conditionsStr := GetConditionsTypes(conditions)
+	return (len(node.Annotations[ConfigurationAnnotationKey]) > 0 || node.Annotations[ConfigurationAnnotationKey] != OutOfScopeAnnotationValue) && atLeastOneConditionAcceptedByTheNode(conditionsStr, node)
 }
 
 //updateGauges is in charge of updating the gauges values and purging the series that do not exist anymore
@@ -201,7 +208,8 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 			tag.Upsert(TagDrainRetryFailed, strconv.FormatBool(tagsValues.DrainRetryFailed)),
 			tag.Upsert(TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
 			tag.Upsert(TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
-			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)))
+			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)),
+			tag.Upsert(TagUserAllowedConditionsAnnotation, strconv.FormatBool(tagsValues.UserAllowedConditionsAnnotation)))
 		stats.Record(allTags, s.metricsObjects.MeasureNodesWithNodeOptions.M(count))
 	}
 }
