@@ -201,6 +201,6 @@ func atLeastOneConditionAcceptedByTheNode(conditions []string, n *core.Node) boo
 }
 
 func hasAllowConditionList(n *core.Node) bool {
-	_,ok:=n.Annotations[allowedConditionAnnotationKey]
+	_, ok := n.Annotations[allowedConditionAnnotationKey]
 	return ok
 }
