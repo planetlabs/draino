@@ -180,7 +180,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 
 func NodeInScopeWithConditionCheck(conditions []SuppliedCondition, node *v1.Node) bool {
 	conditionsStr := GetConditionsTypes(conditions)
-	return (len(node.Annotations[ConfigurationAnnotationKey]) > 0 || node.Annotations[ConfigurationAnnotationKey] != OutOfScopeAnnotationValue) && atLeastOneConditionAcceptedByTheNode(conditionsStr, node)
+	return (len(node.Annotations[ConfigurationAnnotationKey]) > 0 && node.Annotations[ConfigurationAnnotationKey] != OutOfScopeAnnotationValue) && atLeastOneConditionAcceptedByTheNode(conditionsStr, node)
 }
 
 //updateGauges is in charge of updating the gauges values and purging the series that do not exist anymore
