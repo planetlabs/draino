@@ -518,7 +518,7 @@ func GetDrainConditionStatus(n *core.Node) (DrainConditionStatus, error) {
 		}
 		drainStatus.Marked = true
 		drainStatus.LastTransition = condition.LastTransitionTime.Time
-		drainStatus.FailedCount = 1
+		drainStatus.FailedCount = 0
 		msg := strings.Split(condition.Message, " | ")
 		msgPrefix := msg[0]
 		if len(msgPrefix) > 0 && msgPrefix[0] == '[' { //Detect new prefix format
