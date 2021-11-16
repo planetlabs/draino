@@ -79,7 +79,8 @@ func (r *RuntimeObjectStoreImpl) HasSynced() bool {
 	return r.NodesStore.HasSynced() &&
 		r.StatefulSetsStore.HasSynced() &&
 		r.PodsStore.HasSynced() &&
-		r.PersistentVolumeStore.HasSynced()
+		r.PersistentVolumeStore.HasSynced() &&
+		r.PersistentVolumeClaimStore.HasSynced()
 }
 
 // An NodeStore is a cache of node resources.
