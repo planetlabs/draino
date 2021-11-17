@@ -148,6 +148,11 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			newMetricsValue := inScopeMetrics{}
 			// Let's update the metrics
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
+				// skip the node if it is too recent... it does not have all the required labels/annotations yet to have relevant metrics
+				if time.Now().Sub(node.CreationTimestamp.Time) < time.Minute {
+					continue
+				}
+
 				nodeTags := GetNodeTagsValues(node)
 				conditions := GetNodeOffendingConditions(node, s.conditions)
 				if node.Annotations == nil {
@@ -294,7 +299,7 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 					s.logger.Info("Failed attempt to update annotation", zap.String("node", nodeName), zap.Error(err))
 				}
 				return err
-			}, 500*time.Millisecond, 10); err != nil {
+			}, 500*time.Millisecond, 10*time.Second); err != nil {
 				s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount))
 				s.queueNodeToBeUpdated.AddRateLimited(obj)
 				return
@@ -351,7 +356,7 @@ func (s *DrainoConfigurationObserverImpl) Reset() {
 					s.logger.Info("Failed attempt to reset annotation", zap.String("node", node.Name), zap.Error(err))
 				}
 				return err
-			}, 500*time.Millisecond, 10); err != nil {
+			}, 500*time.Millisecond, 10*time.Second); err != nil {
 				s.logger.Error("Failed to reset annotations", zap.String("node", node.Name), zap.Error(err))
 				continue
 			}
