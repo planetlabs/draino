@@ -129,8 +129,8 @@ func (w *NodeWatch) Get(name string) (*core.Node, error) {
 func (w *NodeWatch) ListNodes() []*core.Node {
 	list := w.GetStore().List()
 	nodes := make([]*core.Node, len(list))
-	for i, o := range list {
-		nodes[i] = o.(*core.Node)
+	for i := range list {
+		nodes[i] = list[i].(*core.Node)
 	}
 	return nodes
 }
@@ -205,8 +205,8 @@ func (w *PodWatch) ListPodsForNode(nodeName string) ([]*core.Pod, error) {
 		return nil, err
 	}
 	pods := make([]*core.Pod, len(objs))
-	for i, obj := range objs {
-		p, ok := obj.(*core.Pod)
+	for i := range objs {
+		p, ok := objs[i].(*core.Pod)
 		if !ok {
 			return nil, errors.New("unexpected object type in Pod store")
 		}
@@ -225,8 +225,8 @@ func (w *PodWatch) ListPodsByStatus(podStatus string) ([]*core.Pod, error) {
 		return nil, err
 	}
 	pods := make([]*core.Pod, len(objs))
-	for i, obj := range objs {
-		p, ok := obj.(*core.Pod)
+	for i := range objs {
+		p, ok := objs[i].(*core.Pod)
 		if !ok {
 			return nil, errors.New("unexpected object type in Pod store")
 		}
@@ -253,8 +253,8 @@ func (w *PodWatch) ListPodsForClaim(namespace, claimName string) ([]*core.Pod, e
 		return nil, err
 	}
 	pods := make([]*core.Pod, len(objs))
-	for i, obj := range objs {
-		p, ok := obj.(*core.Pod)
+	for i := range objs {
+		p, ok := objs[i].(*core.Pod)
 		if !ok {
 			return nil, errors.New("unexpected object type in Pod store")
 		}
