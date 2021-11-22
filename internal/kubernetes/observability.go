@@ -164,7 +164,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					InScope:                         NodeInScopeWithConditionCheck(conditions, node),
 					PreprovisioningEnabled:          node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
 					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
-					DrainRetry:                      HasDrainRetryAnnotation(node),
+					DrainRetry:                      DrainRetryEnabled(node),
 					DrainRetryFailed:                HasDrainRetryFailedAnnotation(node),
 					UserOptOutViaPodAnnotation:      s.HasPodWithUserOptOutAnnotation(node),
 					UserOptInViaPodAnnotation:       s.HasPodWithUserOptInAnnotation(node),

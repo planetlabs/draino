@@ -68,6 +68,7 @@ const (
 
 	drainRetryAnnotationKey          = "draino/drain-retry"
 	drainRetryAnnotationValue        = "true"
+	drainRetryOptOutAnnotationValue  = "false"
 	drainRetryFailedAnnotationKey    = "draino/drain-retry-failed"
 	drainRetryFailedAnnotationValue  = "failed"
 	drainRetryRestartAnnotationValue = "restart"
@@ -382,7 +383,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 
 	if drainStatus.Failed {
 		// Is there a request to retry a failed drain activity. If yes reschedule drain
-		if HasDrainRetryAnnotation(n) {
+		if DrainRetryEnabled(n) {
 			h.drainScheduler.DeleteSchedule(n)
 			if drainStatus.FailedCount >= h.cordonDrainer.GetMaxDrainAttemptsBeforeFail() {
 				logger.Warn("Drain Failed: MaxDrainAttempts reached")
@@ -600,8 +601,10 @@ func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node, failedCount i
 	h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", when.Format(time.RFC3339Nano))
 }
 
-func HasDrainRetryAnnotation(n *core.Node) bool {
-	return n.GetAnnotations()[drainRetryAnnotationKey] == drainRetryAnnotationValue
+func DrainRetryEnabled(n *core.Node) bool {
+	// The default is now that retry is opt-in by default. The opt-out must be explicit
+	// The second part of the condition can be removed in the future when the migration to the new `draino/drain-retry-failed` is done on all nodes.
+	return n.GetAnnotations()[drainRetryAnnotationKey] != drainRetryOptOutAnnotationValue && n.GetAnnotations()[drainRetryAnnotationKey] != drainRetryFailedAnnotationValue
 }
 
 func HasDrainRetryFailedAnnotation(n *core.Node) bool {
