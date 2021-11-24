@@ -54,7 +54,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureNodesWithNodeOptions,
 		Description: "Number of nodes for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagUserAllowedConditionsAnnotation, TagDrainRetry, TagDrainRetryFailed, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
+		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagUserAllowedConditionsAnnotation, TagDrainRetry, TagDrainRetryFailed, TagDrainRetryCustomMaxAttempt, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
 	}
 
 	view.Register(g.previousMeasureNodesWithNodeOptions)
@@ -112,6 +112,7 @@ type inScopeTags struct {
 	PVCManagementEnabled            bool
 	DrainRetry                      bool
 	DrainRetryFailed                bool
+	DrainRetryCustomMaxAttempts     bool
 	UserOptOutViaPodAnnotation      bool
 	UserOptInViaPodAnnotation       bool
 	UserAllowedConditionsAnnotation bool
@@ -158,6 +159,9 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				if node.Annotations == nil {
 					node.Annotations = map[string]string{}
 				}
+
+				_, useDefaultRetryMaxAttempt, _ := GetNodeRetryMaxAttempt(node)
+
 				t := inScopeTags{
 					NodeTagsValues:                  nodeTags,
 					DrainStatus:                     getDrainStatusStr(node),
@@ -166,6 +170,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
 					DrainRetry:                      DrainRetryEnabled(node),
 					DrainRetryFailed:                HasDrainRetryFailedAnnotation(node),
+					DrainRetryCustomMaxAttempts:     !useDefaultRetryMaxAttempt,
 					UserOptOutViaPodAnnotation:      s.HasPodWithUserOptOutAnnotation(node),
 					UserOptInViaPodAnnotation:       s.HasPodWithUserOptInAnnotation(node),
 					UserAllowedConditionsAnnotation: hasAllowConditionList(node),
@@ -211,6 +216,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 			tag.Upsert(TagPVCManagement, strconv.FormatBool(tagsValues.PVCManagementEnabled)),
 			tag.Upsert(TagDrainRetry, strconv.FormatBool(tagsValues.DrainRetry)),
 			tag.Upsert(TagDrainRetryFailed, strconv.FormatBool(tagsValues.DrainRetryFailed)),
+			tag.Upsert(TagDrainRetryCustomMaxAttempt, strconv.FormatBool(tagsValues.DrainRetryCustomMaxAttempts)),
 			tag.Upsert(TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
 			tag.Upsert(TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
 			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)),
@@ -286,12 +292,6 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 		func(obj interface{}) {
 			defer s.queueNodeToBeUpdated.Done(obj)
 			nodeName := obj.(string)
-			requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
-			if requeueCount > 10 {
-				s.queueNodeToBeUpdated.Forget(nodeName)
-				s.logger.Error("retrying count exceeded", zap.String("node", nodeName))
-				return
-			}
 
 			if err := RetryWithTimeout(func() error {
 				err := s.updateNodeAnnotations(nodeName)
@@ -300,8 +300,14 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 				}
 				return err
 			}, 500*time.Millisecond, 10*time.Second); err != nil {
+				requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
 				s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount))
-				s.queueNodeToBeUpdated.AddRateLimited(obj)
+				if requeueCount > 10 {
+					// let's retry later
+					s.queueNodeToBeUpdated.Add(obj)
+					return
+				}
+				s.queueNodeToBeUpdated.AddAfter(obj, time.Minute)
 				return
 			}
 			// Remove the nodeName from the queue

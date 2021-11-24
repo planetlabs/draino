@@ -30,6 +30,7 @@ const (
 
 	CustomDrainBufferAnnotation       = "draino/drain-buffer"
 	CustomRetryBackoffDelayAnnotation = "draino/retry-delay"
+	CustomRetryMaxAttemptAnnotation   = "draino/retry-max-attempt"
 	DrainGroupAnnotation              = "draino/drain-group"
 
 	preprovisioningAnnotationKey   = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"

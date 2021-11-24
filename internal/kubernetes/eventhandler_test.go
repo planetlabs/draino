@@ -74,7 +74,7 @@ func (d *mockCordonDrainer) Drain(n *core.Node) error {
 	return nil
 }
 
-func (d *mockCordonDrainer) GetMaxDrainAttemptsBeforeFail() int32 {
+func (d *mockCordonDrainer) GetMaxDrainAttemptsBeforeFail(_ *core.Node) int32 {
 	return 0
 }
 

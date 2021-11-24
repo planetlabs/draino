@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,7 +145,7 @@ type Drainer interface {
 	MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error
 	MarkDrainDelete(n *core.Node) error
 	GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error)
-	GetMaxDrainAttemptsBeforeFail() int32
+	GetMaxDrainAttemptsBeforeFail(n *core.Node) int32
 	ResetRetryAnnotation(n *core.Node) error
 }
 
@@ -204,7 +205,7 @@ func (d *NoopCordonDrainer) MarkDrainDelete(_ *core.Node) error {
 	return nil
 }
 
-func (d *NoopCordonDrainer) GetMaxDrainAttemptsBeforeFail() int32 {
+func (d *NoopCordonDrainer) GetMaxDrainAttemptsBeforeFail(_ *core.Node) int32 {
 	return 0
 }
 
@@ -339,8 +340,32 @@ func (d *APICordonDrainer) deleteTimeout() time.Duration {
 	return d.maxGracePeriod + d.evictionHeadroom
 }
 
-func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail() int32 {
-	return d.maxDrainAttemptsBeforeFail
+func GetNodeRetryMaxAttempt(n *core.Node) (customValue int32, usedDefault bool, err error) {
+	if maxStr, ok := n.Annotations[CustomRetryMaxAttemptAnnotation]; ok {
+		maxValue, err := strconv.Atoi(maxStr)
+		if err != nil {
+			return 0, true, fmt.Errorf(CustomRetryMaxAttemptAnnotation+" can't convert value. Ignoring the user value '%s' and using default instead.", maxStr)
+		}
+		if maxValue < 1 { // to disable retry the user should use annotation draino/drain-retry=false
+			return 0, true, fmt.Errorf(CustomRetryMaxAttemptAnnotation+" has a zero or negative value. Ignoring the value '%s' and using default instead.", maxStr)
+		}
+		if maxValue > 100 { // it does not make sense to have bigger value. User should play with `retry-delay` parameter at some point to increase the retry period
+			return 100, false, fmt.Errorf(CustomRetryMaxAttemptAnnotation+" has a too big value '%s'. Ignoring the value and using 100 instead.", maxStr)
+		}
+		return int32(maxValue), false, nil
+	}
+	return 0, true, nil
+}
+
+func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(n *core.Node) int32 {
+	customValue, useDefault, err := GetNodeRetryMaxAttempt(n)
+	if err != nil {
+		d.l.Error(err.Error(), zap.String("node", n.Name))
+	}
+	if useDefault {
+		return d.maxDrainAttemptsBeforeFail
+	}
+	return customValue
 }
 
 // Cordon the supplied node. Marks it unschedulable for new pods.
@@ -455,7 +480,7 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 			if !finish.IsZero() {
 				if failed {
 					msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
-					if failCount >= d.maxDrainAttemptsBeforeFail {
+					if failCount >= d.GetMaxDrainAttemptsBeforeFail(n) {
 						freshNode.Annotations[drainRetryFailedAnnotationKey] = drainRetryFailedAnnotationValue
 					}
 				} else {
