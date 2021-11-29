@@ -380,10 +380,17 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithPVCManagementEnabled(node *v
 		return false
 	}
 	for _, p := range pods {
-		valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, p, s.runtimeObjectStore)
-		if valAnnotation == PVCStorageClassCleanupAnnotationValue {
+		if PVCStorageClassCleanupEnabled(p, s.runtimeObjectStore) {
 			return true
 		}
+	}
+	return false
+}
+
+func PVCStorageClassCleanupEnabled(p *v1.Pod, store RuntimeObjectStore) bool {
+	valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, p, store)
+	if valAnnotation == PVCStorageClassCleanupAnnotationValue {
+		return true
 	}
 	return false
 }

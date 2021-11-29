@@ -48,6 +48,7 @@ const (
 	DefaultEvictionOverhead             = 30 * time.Second
 	DefaultPVCRecreateTimeout           = 3 * time.Minute
 	DefaultPodDeletePeriodWaitingForPVC = 10 * time.Second
+	awaitPVCDeletionTimeout             = time.Minute
 
 	KindDaemonSet   = "DaemonSet"
 	KindStatefulSet = "StatefulSet"
@@ -574,11 +575,21 @@ func GetDrainConditionStatus(n *core.Node) (DrainConditionStatus, error) {
 }
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
-func (d *APICordonDrainer) Drain(n *core.Node) error {
+func (d *APICordonDrainer) Drain(node *core.Node) error {
 	// Do nothing if draining is not enabled.
 	if d.skipDrain {
-		LoggerForNode(n, d.l).Debug("Skipping drain because draining is disabled")
+		LoggerForNode(node, d.l).Debug("Skipping drain because draining is disabled")
 		return nil
+	}
+
+	// retrieve a fresh version of the node
+	n, err := d.c.CoreV1().Nodes().Get(node.Name, meta.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	if !n.Spec.Unschedulable {
+		LoggerForNode(node, d.l).Info("Aborting drain because the node is not cordon")
 	}
 
 	pods, err := d.GetPodsToDrain(n.GetName(), nil)
@@ -1005,7 +1016,7 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 		d.l.Info("deleting pvc", zap.String("pvc", v.PersistentVolumeClaim.ClaimName), zap.String("namespace", pod.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
 
 		// wait for PVC complete deletion
-		if err := d.awaitPVCDeletion(pvc, time.Minute); err != nil {
+		if err := d.awaitPVCDeletion(pvc, awaitPVCDeletionTimeout); err != nil {
 			return deletedPVCs, fmt.Errorf("pvc deletion timeout %s/%s: %w", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName, err)
 		}
 		deletedPVCs = append(deletedPVCs, pvc)

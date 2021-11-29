@@ -168,7 +168,14 @@ func GetUnscheduledPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore
 			}
 			for _, pod := range pods {
 				LogForVerboseNode(logger, node, fmt.Sprintf("Pod for claim "+pv.Spec.ClaimRef.Name+", adding pod "+pod.Name))
-				if pod.Spec.NodeName == "" {
+
+				var pendingPodDelay time.Duration
+				if PVCStorageClassCleanupEnabled(pod, store) {
+					// The pod must be long (enough) pending to be sure that we are not looking at the fresh STS while we are performing the PVC cleanup
+					// Adding a 10s delay on top of PVC deletion timeout to be sure that we have time to perform the PVC cleanup
+					pendingPodDelay = 10*time.Second + awaitPVCDeletionTimeout
+				}
+				if pod.Spec.NodeName == "" && time.Now().Sub(pod.CreationTimestamp.Time) > pendingPodDelay {
 					result = append(result, pod)
 				}
 			}
