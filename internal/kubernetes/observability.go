@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -302,12 +303,9 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 			}, 500*time.Millisecond, 10*time.Second); err != nil {
 				requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
 				s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount))
-				if requeueCount > 10 {
-					// let's retry later
-					s.queueNodeToBeUpdated.Add(obj)
-					return
-				}
-				s.queueNodeToBeUpdated.AddAfter(obj, time.Minute)
+				// let's retry later
+				jitter := time.Duration(rand.Int63n(int64(60*requeueCount))) * time.Second
+				s.queueNodeToBeUpdated.AddAfter(obj, time.Minute+jitter)
 				return
 			}
 			// Remove the nodeName from the queue

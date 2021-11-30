@@ -73,6 +73,8 @@ const (
 	eventReasonEvictionSucceeded = "EvictionSucceeded"
 	eventReasonEvictionFailed    = "EvictionFailed"
 
+	eventReasonBadValueForAnnotation = "BadValueForAnnotation"
+
 	EvictionAPIURLAnnotationKey = "draino/eviction-api-url"
 )
 
@@ -344,7 +346,7 @@ func GetNodeRetryMaxAttempt(n *core.Node) (customValue int32, usedDefault bool, 
 	if maxStr, ok := n.Annotations[CustomRetryMaxAttemptAnnotation]; ok {
 		maxValue, err := strconv.Atoi(maxStr)
 		if err != nil {
-			return 0, true, fmt.Errorf(CustomRetryMaxAttemptAnnotation+" can't convert value. Ignoring the user value '%s' and using default instead.", maxStr)
+			return 0, true, fmt.Errorf(CustomRetryMaxAttemptAnnotation+" can't convert value. Ignoring the user value '%s' and using default instead. Error: %w", maxStr, err)
 		}
 		if maxValue < 1 { // to disable retry the user should use annotation draino/drain-retry=false
 			return 0, true, fmt.Errorf(CustomRetryMaxAttemptAnnotation+" has a zero or negative value. Ignoring the value '%s' and using default instead.", maxStr)
@@ -360,7 +362,9 @@ func GetNodeRetryMaxAttempt(n *core.Node) (customValue int32, usedDefault bool, 
 func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(n *core.Node) int32 {
 	customValue, useDefault, err := GetNodeRetryMaxAttempt(n)
 	if err != nil {
-		d.l.Error(err.Error(), zap.String("node", n.Name))
+		d.l.Warn(err.Error(), zap.String("node", n.Name))
+		nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
+		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonBadValueForAnnotation, err.Error())
 	}
 	if useDefault {
 		return d.maxDrainAttemptsBeforeFail
