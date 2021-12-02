@@ -18,6 +18,7 @@ package kubernetes
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -135,7 +136,7 @@ func (l *Limiter) CanCordon(node *core.Node) (can bool, reason string) {
 		canCordon, err := limiterFunc(node, cordonNodes, allNodes)
 		if err != nil {
 			l.logger.Error("cordon limiter failure", zap.Error(err))
-			return false, "error"
+			return false, fmt.Sprintf("Failed to determine if node can be cordoned: %s", err)
 		}
 		if !canCordon {
 			return false, limiterName
@@ -144,7 +145,7 @@ func (l *Limiter) CanCordon(node *core.Node) (can bool, reason string) {
 
 	// if all functional limiters are ok, let's ensure that we are not cordoning too fast
 	if l.rateLimiter != nil && !l.rateLimiter.TryAccept() {
-		return false, "rateLimit"
+		return false, fmt.Sprintf("Global internal rate limiter for cordoning nodes reached, will retry")
 	}
 
 	return true, ""

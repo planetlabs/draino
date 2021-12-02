@@ -283,7 +283,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		LogForVerboseNode(h.logger, n, "Failed Retry Annotation")
 		if n.Spec.Unschedulable {
 			nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
-			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain still failing after multiple retries. Uncordoning and ignoring the node.")
+			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain still failing after multiple retries; uncordoning and ignoring the node")
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 			logger.Info("Uncordon, Drain still failing after multiple retries.")
@@ -318,7 +318,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	if !atLeastOneConditionAcceptedByTheNode(badConditionsStr, n) {
 		LogForVerboseNode(h.logger, n, "Conditions filter rejects that node")
 		nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
-		h.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonConditionFiltered, fmt.Sprintf("Proposed condition(s) {%s} are not eligible for that node.", strings.Join(badConditionsStr, ",")))
+		h.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonConditionFiltered, fmt.Sprintf("Proposed condition(s) {%s} are not eligible for that node", strings.Join(badConditionsStr, ",")))
 		return
 	}
 
@@ -334,7 +334,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		if len(podsWithPVCBoundToThatNode) > 0 {
 			LogForVerboseNode(logger, n, "Cordon Skip: Pod"+podsWithPVCBoundToThatNode[0].ResourceVersion+" need to be scheduled on node")
 			nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
-			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+podsWithPVCBoundToThatNode[0].Name+" needs that node due to local PV. Not cordoning the node.")
+			h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+podsWithPVCBoundToThatNode[0].Name+" needs that node due to local PV, not cordoning the node")
 			return
 		}
 
@@ -486,7 +486,7 @@ func (h *DrainingResourceEventHandler) shouldUncordon(n *core.Node) (bool, error
 	if len(pods) > 0 {
 		logger.Info("Pod needs to be scheduled on node", zap.String("pod", pods[0].Name))
 		nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
-		h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+pods[0].Name+" needs that node due to local PV. Uncordoning the node.")
+		h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+pods[0].Name+" needs that node due to local PV, uncordoning the node")
 		return true, nil
 	}
 
@@ -562,7 +562,7 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 	log.Info("Cordoned")
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 	StatRecordForEachCondition(tags, n, badConditions, MeasureNodesCordoned.M(1))
-	h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
+	h.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonCordonSucceeded, "Cordoned node")
 	return true, nil
 }
 
@@ -599,7 +599,7 @@ func (h *DrainingResourceEventHandler) scheduleDrain(n *core.Node, failedCount i
 	log.Info("Drain scheduled ", zap.Time("after", when))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 	StatRecordForEachCondition(tags, n, GetNodeOffendingConditions(n, h.conditions), MeasureNodesDrainScheduled.M(1))
-	h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainScheduled, "Will drain node after %s", when.Format(time.RFC3339Nano))
+	h.eventRecorder.Eventf(nr, core.EventTypeNormal, eventReasonDrainScheduled, "Will drain node after %s, in %s", when.Format(time.RFC3339Nano), when.Sub(time.Now()))
 }
 
 func DrainRetryEnabled(n *core.Node) bool {
