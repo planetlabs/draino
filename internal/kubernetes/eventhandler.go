@@ -101,6 +101,7 @@ var (
 	TagPVCManagement, _                   = tag.NewKey("pvc_management")
 	TagDrainRetry, _                      = tag.NewKey("drain_retry")
 	TagDrainRetryFailed, _                = tag.NewKey("drain_retry_failed")
+	TagDrainRetryCustomMaxAttempt, _      = tag.NewKey("drain_retry_custom_max_attempt")
 	TagUserOptOutViaPodAnnotation, _      = tag.NewKey("user_opt_out_via_pod_annotation")
 	TagUserOptInViaPodAnnotation, _       = tag.NewKey("user_opt_in_via_pod_annotation")
 	TagUserAllowedConditionsAnnotation, _ = tag.NewKey("user_allowed_conditions_annotation")
@@ -385,7 +386,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		// Is there a request to retry a failed drain activity. If yes reschedule drain
 		if DrainRetryEnabled(n) {
 			h.drainScheduler.DeleteSchedule(n)
-			if drainStatus.FailedCount >= h.cordonDrainer.GetMaxDrainAttemptsBeforeFail() {
+			if drainStatus.FailedCount >= h.cordonDrainer.GetMaxDrainAttemptsBeforeFail(n) {
 				logger.Warn("Drain Failed: MaxDrainAttempts reached")
 				// the uncordoning is done earlier in that sequence if it makes sense because we want to be before the global locker.
 				return
