@@ -14,9 +14,7 @@ import (
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/record"
 )
 
 const (
@@ -67,12 +65,12 @@ type DrainSchedules struct {
 	logger                       *zap.Logger
 	drainer                      DrainerNodeReplacer
 	preprovisioningConfiguration NodePreprovisioningConfiguration
-	eventRecorder                record.EventRecorder
+	eventRecorder                EventRecorder
 	suppliedConditions           []SuppliedCondition
 	globalLocker                 GlobalBlocker
 }
 
-func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder record.EventRecorder, schedulingPeriod, schedulingBackoffDelay time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger, locker GlobalBlocker) DrainScheduler {
+func NewDrainSchedules(drainer DrainerNodeReplacer, eventRecorder EventRecorder, schedulingPeriod, schedulingBackoffDelay time.Duration, labelKeysForGroups []string, suppliedConditions []SuppliedCondition, preprovisioningCfg NodePreprovisioningConfiguration, logger *zap.Logger, locker GlobalBlocker) DrainScheduler {
 	sort.Strings(labelKeysForGroups)
 	return &DrainSchedules{
 		labelKeysForGroups:           labelKeysForGroups,
@@ -235,8 +233,7 @@ func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, 
 
 	scheduleOptions, err := newScheduleOptions(node)
 	if err != nil {
-		nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
-		d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainConfig, "Failed to get schedule options: %v", err)
+		d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainConfig, "Failed to get schedule options: %v", err)
 	}
 
 	// compute drain schedule time
@@ -297,7 +294,6 @@ func (s *schedule) isFailed() bool {
 }
 
 func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount int32, scheduleOptions *schedulingOptions) *schedule {
-	nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
 	sched := &schedule{
 		when:        when,
 		failedCount: failedCount,
@@ -311,7 +307,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 		if d.globalLocker != nil {
 			if locked, reason := d.globalLocker.IsBlocked(); locked {
 				log.Info("Drain cancelled due to globalLock", zap.String("reason", reason), zap.String("node", node.GetName()))
-				d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
+				d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
 				return
 			}
 		}
@@ -332,11 +328,11 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 						return false, nil
 					}
 					if !replacementRequestEventDone {
-						d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done")
+						d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done")
 						replacementRequestEventDone = true
 					}
 					if replacementStatus == NodeReplacementStatusDone {
-						d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonNodePreprovisioningCompleted, "Node pre-provisioning before drain: completed")
+						d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonNodePreprovisioningCompleted, "Node pre-provisioning before drain: completed")
 						return true, nil
 					}
 					return false, nil
@@ -354,7 +350,7 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 		}
 
 		// Node drain
-		d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonDrainStarting, "Draining node")
+		d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonDrainStarting, "Draining node")
 		if err := d.drainer.Drain(node); err != nil {
 			d.handleDrainFailure(sched, log, err, tags, node)
 			return
@@ -363,9 +359,9 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 		log.Info("Drained")
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 		StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
-		d.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonDrainSucceeded, "Drained node")
+		d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonDrainSucceeded, "Drained node")
 		if err := d.drainer.MarkDrain(node, when, sched.finish, false, failedCount); err != nil {
-			d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Failed to place drain condition following success: %v", err)
+			d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainFailed, "Failed to place drain condition following success: %v", err)
 			log.Error(fmt.Sprintf("Failed to place condition following drain success : %v", err))
 		}
 	})
@@ -373,14 +369,13 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 }
 
 func (d *DrainSchedules) handleDrainFailure(sched *schedule, log *zap.Logger, drainError error, tags context.Context, node *v1.Node) context.Context {
-	nr := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
 	sched.finish = time.Now()
 	sched.setFailed()
 	sched.failedCount++
 	log.Info("Failed to drain", zap.Error(drainError))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
 	StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
-	d.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonDrainFailed, "Drain failed: %v", drainError)
+	d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainFailed, "Drain failed: %v", drainError)
 	if err := d.drainer.MarkDrain(node, sched.when, sched.finish, true, sched.failedCount); err != nil {
 		log.Error("Failed to place condition following drain failure")
 	}

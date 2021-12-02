@@ -176,7 +176,7 @@ func TestCordon(t *testing.T) {
 			for _, r := range tc.reactions {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, WithCordonLimiter(&fakeLimiter{}))
+			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}), WithCordonLimiter(&fakeLimiter{}))
 			if err := d.Cordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
@@ -263,7 +263,7 @@ func TestUncordon(t *testing.T) {
 			for _, r := range tc.reactions {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{})
+			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
 			if err := d.Uncordon(tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
@@ -536,7 +536,7 @@ func TestDrain(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newFakeClientSet(tc.reactions...)
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{}, tc.options...)
+			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}), tc.options...)
 			if err := d.Drain(tc.node); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
@@ -742,7 +742,7 @@ func TestMarkDrain(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fake.NewSimpleClientset(tc.node)
-			d := NewAPICordonDrainer(c, &record.FakeRecorder{})
+			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
 			{
 				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
 				if err != nil {

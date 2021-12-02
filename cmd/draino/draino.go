@@ -19,6 +19,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/kubernetes/scheme"
+	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/record"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -316,7 +319,10 @@ func main() {
 
 	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
 
-	eventRecorder := kubernetes.NewEventRecorder(cs)
+	b := record.NewBroadcaster()
+	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")})
+	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: kubernetes.Component})
+	eventRecorder := kubernetes.NewEventRecorder(k8sEventRecorder)
 
 	cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 		eventRecorder,
@@ -417,7 +423,7 @@ func main() {
 		cs.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      id,
-			EventRecorder: eventRecorder,
+			EventRecorder: k8sEventRecorder,
 		},
 	)
 	kingpin.FatalIfError(err, "cannot create lock")

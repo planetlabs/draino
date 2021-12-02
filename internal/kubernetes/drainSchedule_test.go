@@ -16,7 +16,7 @@ func TestDrainSchedules_LastSchedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
 	node1 := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node1", Annotations: map[string]string{CustomDrainBufferAnnotation: "10m"}}} // Using 10m in initNode ... that should be respected even if the schedule is removed.
-	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
+	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, NewEventRecorder(&record.FakeRecorder{}), period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	whenFirstSched, _ := scheduler.Schedule(node1, 0)
 	scheduler.DeleteSchedule(node1)
 
@@ -55,7 +55,7 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
 	var failedCount int32 = 0
-	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
+	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, NewEventRecorder(&record.FakeRecorder{}), period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
 	whenFirstSchedSpecificGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeGrp", Annotations: map[string]string{DrainGroupAnnotation: "grp1"}}}, failedCount)
 
@@ -145,7 +145,7 @@ func (d *failDrainer) Drain(n *v1.Node) error { return errors.New("myerr") }
 // Test to ensure there are no races when calling HasSchedule while the
 // scheduler is draining a node.
 func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
-	scheduler := NewDrainSchedules(&failDrainer{}, &record.FakeRecorder{}, 0, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
+	scheduler := NewDrainSchedules(&failDrainer{}, NewEventRecorder(&record.FakeRecorder{}), 0, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	node := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}
 	var failedCount int32 = 0
 	when, err := scheduler.Schedule(node, failedCount)
@@ -182,7 +182,7 @@ func TestDrainSchedules_DeleteSchedule(t *testing.T) {
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
 	var failedCount int32 = 0
-	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, &record.FakeRecorder{}, period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
+	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, NewEventRecorder(&record.FakeRecorder{}), period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
 
 	type timeWindow struct {

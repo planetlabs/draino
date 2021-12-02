@@ -38,10 +38,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	runtimejson "k8s.io/apimachinery/pkg/runtime/serializer/json"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
 )
 
 // Default pod eviction settings.
@@ -227,7 +225,7 @@ var _ CordonDrainer = &APICordonDrainer{}
 type APICordonDrainer struct {
 	c                  kubernetes.Interface
 	l                  *zap.Logger
-	eventRecorder      record.EventRecorder
+	eventRecorder      EventRecorder
 	runtimeObjectStore RuntimeObjectStore
 
 	filter                 PodFilterFunc
@@ -318,7 +316,7 @@ func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) APICordonDra
 
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
-func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder record.EventRecorder, ao ...APICordonDrainerOption) *APICordonDrainer {
+func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder EventRecorder, ao ...APICordonDrainerOption) *APICordonDrainer {
 	d := &APICordonDrainer{
 		c:                c,
 		l:                zap.NewNop(),
@@ -363,8 +361,7 @@ func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(n *core.Node) int32 {
 	customValue, useDefault, err := GetNodeRetryMaxAttempt(n)
 	if err != nil {
 		d.l.Warn(err.Error(), zap.String("node", n.Name))
-		nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
-		d.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonBadValueForAnnotation, err.Error())
+		d.eventRecorder.NodeEventf(n, core.EventTypeWarning, eventReasonBadValueForAnnotation, err.Error())
 	}
 	if useDefault {
 		return d.maxDrainAttemptsBeforeFail
@@ -593,13 +590,13 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	for i := range pods {
 		pod := pods[i]
 		go func() {
-			d.eventRecorder.Eventf(pod, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod to drain node %s", n.GetName())
+			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod to drain node %s", n.GetName())
 			if err := d.evict(pod, abort); err != nil {
-				d.eventRecorder.Eventf(pod, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed: %v", err)
+				d.eventRecorder.PodEventf(pod, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed: %v", err)
 				errs <- fmt.Errorf("cannot evict pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
 				return
 			}
-			d.eventRecorder.Event(pod, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod evicted")
+			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod evicted")
 			errs <- nil // the for range pods below expects to receive one value per pod from the errs channel
 		}()
 	}
@@ -900,8 +897,8 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(pod *core.Pod, pvcDe
 			continue // This PV was already deleted
 		}
 
-		d.eventRecorder.Event(pv, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pvc %s/%s and pod %s/%s", claim.Namespace, claim.Name, pod.Namespace, pod.Name))
-		d.eventRecorder.Event(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PV %s", pv.Name))
+		d.eventRecorder.PersistentVolumeEventf(pv, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pvc %s/%s and pod %s/%s", claim.Namespace, claim.Name, pod.Namespace, pod.Name))
+		d.eventRecorder.PodEventf(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PV %s", pv.Name))
 
 		err = d.c.CoreV1().PersistentVolumes().Delete(pv.Name, nil)
 		if apierrors.IsNotFound(err) {
@@ -909,8 +906,8 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(pod *core.Pod, pvcDe
 			continue // This PV was already deleted
 		}
 		if err != nil {
-			d.eventRecorder.Event(pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV: %v", err))
-			d.eventRecorder.Event(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV %s: %v", pv.Name, err))
+			d.eventRecorder.PersistentVolumeEventf(pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV: %v", err))
+			d.eventRecorder.PodEventf(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV %s: %v", pv.Name, err))
 			return fmt.Errorf("cannot delete pv %s: %w", pv.Name, err)
 		}
 		d.l.Info("deleting pv", zap.String("pv", pv.Name))
@@ -975,8 +972,8 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 			continue
 		}
 
-		d.eventRecorder.Event(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PVC %s/%s", pvc.Namespace, pvc.Name))
-		d.eventRecorder.Event(pvc, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pod %s/%s", pod.Namespace, pod.Name))
+		d.eventRecorder.PodEventf(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PVC %s/%s", pvc.Namespace, pvc.Name))
+		d.eventRecorder.PersistentVolumeClaimEventf(pvc, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pod %s/%s", pod.Namespace, pod.Name))
 
 		err = d.c.CoreV1().PersistentVolumeClaims(pod.GetNamespace()).Delete(v.PersistentVolumeClaim.ClaimName, nil)
 		if apierrors.IsNotFound(err) {
@@ -984,8 +981,8 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 			continue // This PVC was already deleted
 		}
 		if err != nil {
-			d.eventRecorder.Event(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PVC %s/%s: %v", pvc.Namespace, pvc.Name, err))
-			d.eventRecorder.Event(pvc, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete: %v", err))
+			d.eventRecorder.PodEventf(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PVC %s/%s: %v", pvc.Namespace, pvc.Name, err))
+			d.eventRecorder.PersistentVolumeClaimEventf(pvc, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete: %v", err))
 			return deletedPVCs, fmt.Errorf("cannot delete pvc %s/%s: %w", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName, err)
 		}
 		d.l.Info("deleting pvc", zap.String("pvc", v.PersistentVolumeClaim.ClaimName), zap.String("namespace", pod.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
@@ -1028,8 +1025,7 @@ func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, w
 	replacementValue, ok := nodeFromStore.Labels[NodeLabelKeyReplaceRequest]
 	if !ok {
 		if withRateLimiting && !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
-			nr := &core.ObjectReference{Kind: "Node", Name: n.GetName(), UID: types.UID(n.GetName())}
-			d.eventRecorder.Event(nr, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
+			d.eventRecorder.NodeEventf(n, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
 			return NodeReplacementStatusBlockedByLimiter, nil
 		}
 
