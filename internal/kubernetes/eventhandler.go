@@ -293,10 +293,9 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	// If the node was uncordoned (by user or other system) but it still has a schedule we should remove the schedule
 	if !n.Spec.Unschedulable && drainStatus.Marked {
 		hasSchedule, _ := h.drainScheduler.HasSchedule(n)
-		if hasSchedule && (!drainStatus.Completed || !drainStatus.Failed) {
-			logger.Info("Removing schedule for the node that is not cordon")
-			nr := &core.ObjectReference{Kind: "Node", Name: n.Name, UID: types.UID(n.Name)}
-			h.eventRecorder.Event(nr, core.EventTypeNormal, eventReasonDrainScheduleDeleted, "Deleting schedule because the node was not cordon.")
+		if hasSchedule && (!drainStatus.Completed && !drainStatus.Failed) {
+			logger.Info("Removing schedule for the node that is not cordoned")
+			h.eventRecorder.NodeEventf(n, core.EventTypeNormal, eventReasonDrainScheduleDeleted, "Deleting schedule because the node was not cordoned")
 			h.drainScheduler.DeleteSchedule(n)
 			return
 		}

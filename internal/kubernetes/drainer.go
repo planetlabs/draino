@@ -98,6 +98,15 @@ func (e NodePreprovisioningTimeoutError) Error() string {
 	return "timed out waiting for node pre-provisioning"
 }
 
+type NodeIsNotCordonError struct {
+	NodeName string
+}
+
+func (e NodeIsNotCordonError) Error() string {
+	return "the node "+e.NodeName+" is not cordoned"
+}
+
+
 type PodEvictionTimeoutError struct {
 }
 
@@ -589,7 +598,8 @@ func (d *APICordonDrainer) Drain(node *core.Node) error {
 	}
 
 	if !n.Spec.Unschedulable {
-		LoggerForNode(node, d.l).Info("Aborting drain because the node is not cordon")
+		LoggerForNode(node, d.l).Info("Aborting drain because the node is not cordoned")
+		return NodeIsNotCordonError{NodeName:node.Name}
 	}
 
 	pods, err := d.GetPodsToDrain(n.GetName(), nil)
