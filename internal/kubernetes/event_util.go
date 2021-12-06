@@ -34,17 +34,17 @@ func (e *eventRecorder) NodeEventf(node *core.Node, eventType, reason, messageFm
 	// way that command is implemented.
 	// https://github.com/kubernetes/kubernetes/blob/17740a2/pkg/printers/internalversion/describe.go#L2711
 	nodeReference := &core.ObjectReference{Kind: "Node", Name: node.GetName(), UID: types.UID(node.GetName())}
-	e.eventRecorder.Eventf(nodeReference, eventType, reason, messageFmt, args)
+	e.eventRecorder.Eventf(nodeReference, eventType, reason, messageFmt, args...)
 }
 
 func (e *eventRecorder) PodEventf(obj *core.Pod, eventType, reason, messageFmt string, args ...interface{}) {
-	e.eventRecorder.Eventf(obj, eventType, reason, messageFmt, args)
+	e.eventRecorder.Eventf(obj, eventType, reason, messageFmt, args...)
 }
 
 func (e *eventRecorder) PersistentVolumeEventf(obj *core.PersistentVolume, eventType, reason, messageFmt string, args ...interface{}) {
-	e.eventRecorder.Eventf(obj, eventType, reason, messageFmt, args)
+	e.eventRecorder.Eventf(obj, eventType, reason, messageFmt, args...)
 }
 
 func (e *eventRecorder) PersistentVolumeClaimEventf(obj *core.PersistentVolumeClaim, eventType, reason, messageFmt string, args ...interface{}) {
-	e.eventRecorder.Eventf(obj, eventType, reason, messageFmt, args)
+	e.eventRecorder.Eventf(obj, eventType, reason, messageFmt, args...)
 }
