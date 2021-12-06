@@ -91,6 +91,7 @@ var (
 	TagConditions, _                      = tag.NewKey("conditions")
 	TagTeam, _                            = tag.NewKey("team")
 	TagNodegroupName, _                   = tag.NewKey("nodegroup_name")
+	TagNodegroupNamePrefix, _             = tag.NewKey("nodegroup_name_prefix")
 	TagNodegroupNamespace, _              = tag.NewKey("nodegroup_namespace")
 	TagResult, _                          = tag.NewKey("result")
 	TagReason, _                          = tag.NewKey("reason")

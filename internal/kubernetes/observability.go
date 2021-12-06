@@ -55,7 +55,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureNodesWithNodeOptions,
 		Description: "Number of nodes for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagUserAllowedConditionsAnnotation, TagDrainRetry, TagDrainRetryFailed, TagDrainRetryCustomMaxAttempt, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
+		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamePrefix, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagUserAllowedConditionsAnnotation, TagDrainRetry, TagDrainRetryFailed, TagDrainRetryCustomMaxAttempt, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
 	}
 
 	view.Register(g.previousMeasureNodesWithNodeOptions)
@@ -208,7 +208,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 	for tagsValues, count := range metrics {
 		// This list of tags must be in sync with the list of tags in the function metricsObjectsForObserver::reset()
 		allTags, _ := tag.New(context.Background(),
-			tag.Upsert(TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(TagNodegroupName, tagsValues.NgName),
+			tag.Upsert(TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(TagNodegroupName, tagsValues.NgName), tag.Upsert(TagNodegroupNamePrefix, GetNodeGroupNamePrefix(tagsValues.NgName)),
 			tag.Upsert(TagTeam, tagsValues.Team),
 			tag.Upsert(TagDrainStatus, tagsValues.DrainStatus),
 			tag.Upsert(TagConditions, tagsValues.Condition),

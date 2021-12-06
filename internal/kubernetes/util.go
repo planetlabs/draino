@@ -220,9 +220,13 @@ func GetNodeTagsValues(node *core.Node) NodeTagsValues {
 	}
 }
 
+func GetNodeGroupNamePrefix(ngName string) string {
+	return strings.Split(ngName, "-")[0]
+}
+
 func nodeTags(ctx context.Context, node *core.Node) (context.Context, error) {
 	values := GetNodeTagsValues(node)
-	return tag.New(ctx, tag.Upsert(TagNodegroupNamespace, values.NgNamespace), tag.Upsert(TagNodegroupName, values.NgName), tag.Upsert(TagTeam, values.Team))
+	return tag.New(ctx, tag.Upsert(TagNodegroupNamespace, values.NgNamespace), tag.Upsert(TagNodegroupName, values.NgName), tag.Upsert(TagNodegroupNamePrefix, GetNodeGroupNamePrefix(values.NgName)), tag.Upsert(TagTeam, values.Team))
 }
 
 func StatRecordForNode(ctx context.Context, node *core.Node, m stats.Measurement) {
