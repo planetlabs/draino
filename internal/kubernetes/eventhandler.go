@@ -49,6 +49,7 @@ const (
 	eventReasonUncordonDueToPendingPodWithLocalPV = "PodBoundToNodeViaLocalPV"
 
 	eventReasonDrainScheduled        = "DrainScheduled"
+	eventReasonDrainScheduleDeleted  = "DrainScheduleDeleted"
 	eventReasonDrainSchedulingFailed = "DrainSchedulingFailed"
 	eventReasonDrainStarting         = "DrainStarting"
 	eventReasonDrainSucceeded        = "DrainSucceeded"
@@ -257,6 +258,18 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		h.logger.Warn("Waiting informer to sync")
 		return
 	}
+
+	drainStatus, err := GetDrainConditionStatus(n)
+	if err != nil {
+		logger.Error(err.Error())
+		return
+	}
+	LogForVerboseNode(h.logger, n, "drainStatus",
+		zap.Bool("marked", drainStatus.Marked),
+		zap.Bool("completed", drainStatus.Completed),
+		zap.Bool("failed", drainStatus.Failed),
+		zap.Error(err))
+
 	// If the node is already cordon we may need to check if it should be uncordon, in case:
 	// - no more bad condition
 	// - it is cordon but still hold a PV needed by a pod that is pending schedule
@@ -275,6 +288,17 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 			return
 		}
 		LogForVerboseNode(h.logger, n, "Not uncordoning")
+	}
+
+	// If the node was uncordoned (by user or other system) but it still has a schedule we should remove the schedule
+	if !n.Spec.Unschedulable && drainStatus.Marked {
+		hasSchedule, _ := h.drainScheduler.HasSchedule(n)
+		if hasSchedule && (!drainStatus.Completed && !drainStatus.Failed) {
+			logger.Info("Removing schedule for the node that is not cordoned")
+			h.eventRecorder.NodeEventf(n, core.EventTypeNormal, eventReasonDrainScheduleDeleted, "Deleting schedule because the node was not cordoned")
+			h.drainScheduler.DeleteSchedule(n)
+			return
+		}
 	}
 
 	if HasDrainRetryFailedAnnotation(n) {
@@ -354,17 +378,6 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		logger.Error(err.Error())
 		return
 	}
-
-	drainStatus, err := GetDrainConditionStatus(n)
-	if err != nil {
-		logger.Error(err.Error())
-		return
-	}
-	LogForVerboseNode(h.logger, n, "drainStatus",
-		zap.Bool("marked", drainStatus.Marked),
-		zap.Bool("completed", drainStatus.Completed),
-		zap.Bool("failed", drainStatus.Failed),
-		zap.Error(err))
 
 	// Check if empty node is blocked due to minSize. If yes request a node replacement
 	if len(pods) == 0 && drainStatus.Completed {

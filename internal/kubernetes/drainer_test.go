@@ -77,8 +77,8 @@ func (r reactor) Fn() clienttesting.ReactionFunc {
 	}
 }
 
-func newFakeClientSet(rs ...reactor) kubernetes.Interface {
-	cs := &fake.Clientset{}
+func newFakeClientSet(objects []runtime.Object,rs ...reactor) kubernetes.Interface {
+	cs := fake.NewSimpleClientset(objects...)
 	for _, r := range rs {
 		cs.AddReactor(r.verb, r.resource, r.Fn())
 	}
@@ -296,7 +296,7 @@ func TestDrain(t *testing.T) {
 	}{
 		{
 			name: "EvictOnePod",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -327,8 +327,15 @@ func TestDrain(t *testing.T) {
 			},
 		},
 		{
+			name: "NodeSchedulableDontDrain",
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: false}},
+			errFn: func(err error) bool { return errors.Is(err, NodeIsNotCordonError{
+				NodeName: nodeName,
+			}) },
+		},
+		{
 			name:    "PodDisappearsBeforeEviction",
-			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			options: []APICordonDrainerOption{MaxGracePeriod(1 * time.Second), EvictionHeadroom(1 * time.Second)},
 			reactions: []reactor{
 				reactor{
@@ -348,7 +355,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "ErrorEvictingPod",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -367,7 +374,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name:    "PodEvictionNotAllowed",
-			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			options: []APICordonDrainerOption{MaxGracePeriod(1 * time.Second), EvictionHeadroom(1 * time.Second)},
 			reactions: []reactor{
 				reactor{
@@ -388,7 +395,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "EvictedPodReplacedWithDifferentUID",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -411,7 +418,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "ErrorConfirmingPodDeletion",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -434,7 +441,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "PodDoesNotPassFilter",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
 				if p.GetName() == "lamePod" {
 					// This pod does not pass the filter.
@@ -465,7 +472,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "PodFilterErrors",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
 				if p.GetName() == "explodeyPod" {
 					return false, "explodey", errExploded
@@ -496,12 +503,12 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name:    "SkipDrain",
-			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			options: []APICordonDrainerOption{WithSkipDrain(true), WithAPICordonDrainerLogger(zap.NewNop())},
 		},
 		{
 			name: "ErrorListingPods",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -512,7 +519,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "DoNotEvictTerminatingPodButWaitForDeletion",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName},Spec: core.NodeSpec{Unschedulable: true}},
 			reactions: []reactor{{
 				verb:     "list",
 				resource: "pods",
@@ -535,7 +542,7 @@ func TestDrain(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := newFakeClientSet(tc.reactions...)
+			c := newFakeClientSet([]runtime.Object{tc.node},tc.reactions...)
 			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}), tc.options...)
 			if err := d.Drain(tc.node); err != nil {
 				for _, r := range tc.reactions {
