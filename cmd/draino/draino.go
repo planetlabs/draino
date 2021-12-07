@@ -40,9 +40,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
-	"k8s.io/klog"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/klog"
 )
 
 // Default leader election settings.
@@ -121,8 +121,6 @@ func main() {
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	// this is required to make all packages using klog write to stderr instead of tmp files
-	klog.InitFlags(nil)
-
 	var (
 		nodesCordoned = &view.View{
 			Name:        "cordoned_nodes_total",
@@ -192,6 +190,7 @@ func main() {
 	if *debug {
 		log, err = zap.NewDevelopment()
 	}
+	klog.RedirectToLogger(log)
 
 	web := &httpRunner{address: *listen, logger: log, h: map[string]http.Handler{
 		"/metrics": p,
