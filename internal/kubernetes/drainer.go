@@ -67,9 +67,10 @@ const (
 	NodeLabelValueReplaceProcessing = "processing"
 	NodeLabelValueReplaceDone       = "done"
 
-	eventReasonEvictionStarting  = "EvictionStarting"
-	eventReasonEvictionSucceeded = "EvictionSucceeded"
-	eventReasonEvictionFailed    = "EvictionFailed"
+	eventReasonEvictionStarting      = "EvictionStarting"
+	eventReasonEvictionSucceeded     = "EvictionSucceeded"
+	eventReasonEvictionFailed        = "EvictionFailed"
+	eventReasonEvictionAttemptFailed = "EvictionAttemptFailed"
 
 	eventReasonBadValueForAnnotation = "BadValueForAnnotation"
 
@@ -590,13 +591,16 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	for i := range pods {
 		pod := pods[i]
 		go func() {
-			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod to drain node %s", n.GetName())
-			if err := d.evict(pod, abort); err != nil {
+			d.eventRecorder.NodeEventf(n, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod %s/%s to drain node", pod.Namespace, pod.Name)
+			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod to drain node %s", n.Name)
+			if err := d.evict(n, pod, abort); err != nil {
+				d.eventRecorder.NodeEventf(n, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 				d.eventRecorder.PodEventf(pod, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed: %v", err)
 				errs <- fmt.Errorf("cannot evict pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
 				return
 			}
-			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod evicted")
+			d.eventRecorder.NodeEventf(n, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod %s/%s evicted from node", pod.Namespace, pod.Name)
+			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod evicted from node %s", n.Name)
 			errs <- nil // the for range pods below expects to receive one value per pod from the errs channel
 		}()
 	}
@@ -653,12 +657,12 @@ func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*co
 	return include, nil
 }
 
-func (d *APICordonDrainer) evict(pod *core.Pod, abort <-chan struct{}) error {
+func (d *APICordonDrainer) evict(node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	evictionAPIURL, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, d.runtimeObjectStore)
 	if ok {
-		return d.evictWithOperatorAPI(evictionAPIURL, pod, abort)
+		return d.evictWithOperatorAPI(evictionAPIURL, node, pod, abort)
 	}
-	return d.evictWithKubernetesAPI(pod, abort)
+	return d.evictWithKubernetesAPI(node, pod, abort)
 }
 
 func (d *APICordonDrainer) getGracePeriod(pod *core.Pod) int64 {
@@ -668,9 +672,9 @@ func (d *APICordonDrainer) getGracePeriod(pod *core.Pod) int64 {
 	}
 	return gracePeriod
 }
-func (d *APICordonDrainer) evictWithKubernetesAPI(pod *core.Pod, abort <-chan struct{}) error {
+func (d *APICordonDrainer) evictWithKubernetesAPI(node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	gracePeriod := d.getGracePeriod(pod)
-	return d.evictionSequence(pod, abort,
+	return d.evictionSequence(node, pod, abort,
 		//eviction function
 		func() error {
 			return d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
@@ -700,11 +704,11 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(pod *core.Pod, abort <-chan st
 // 404    : the pod is not found, already delete
 // 503    : the service is not able to answer now, potentially not reaching the leader, you should retry
 // 500    : server error, that could be a transient error, retry couple of times
-func (d *APICordonDrainer) evictWithOperatorAPI(url string, pod *core.Pod, abort <-chan struct{}) error {
+func (d *APICordonDrainer) evictWithOperatorAPI(url string, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
 	gracePeriod := d.getGracePeriod(pod)
 	maxRetryOn500 := 4
-	return d.evictionSequence(pod, abort,
+	return d.evictionSequence(node, pod, abort,
 		//eviction function
 		func() error {
 			evictionPayload := &policy.Eviction{
@@ -754,13 +758,21 @@ func (d *APICordonDrainer) evictWithOperatorAPI(url string, pod *core.Pod, abort
 	)
 }
 
-func (d *APICordonDrainer) evictionSequence(pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
-	deadline := time.After(d.deleteTimeout())
+func (d *APICordonDrainer) evictionSequence(node *core.Node, pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), d.deleteTimeout())
+	defer cancel()
+	backoff := wait.Backoff{
+		Duration: 10 * time.Second,
+		Factor:   1.5,
+		Jitter:   0,
+		Steps:    100, // we want the max backoff for a single step controlled by cap, not steps, so set steps arbitrarily large to effectively ignore it
+		Cap:      time.Minute,
+	}
 	for {
 		select {
 		case <-abort:
 			return errors.New("pod eviction aborted")
-		case <-deadline:
+		case <-ctx.Done():
 			return PodEvictionTimeoutError{} // this one is typed because we match it to a failure cause
 		default:
 			var err error
@@ -784,13 +796,18 @@ func (d *APICordonDrainer) evictionSequence(pod *core.Pod, abort <-chan struct{}
 			// cannot currently be evicted, for example due to a pod
 			// disruption budget.
 			case apierrors.IsTooManyRequests(err):
-				waitTime := 10 * time.Second
+				d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod %s/%s failed: %v", pod.Namespace, pod.Name, err)
+				d.eventRecorder.PodEventf(pod, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod from node %s failed: %v", node.Name, err)
+				waitTime := backoff.Step()
 				if statErr, ok := err.(apierrors.APIStatus); ok && statErr.Status().Details != nil {
 					if proposedWaitSeconds := statErr.Status().Details.RetryAfterSeconds; proposedWaitSeconds > 0 {
 						waitTime = time.Duration(proposedWaitSeconds) * time.Second
 					}
 				}
-				time.Sleep(waitTime)
+				select {
+				case <-time.After(waitTime):
+				case <-ctx.Done():
+				}
 			case apierrors.IsNotFound(err):
 				// the pod is already gone
 				// maybe we still need to perform PVC management
