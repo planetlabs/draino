@@ -127,7 +127,7 @@ func main() {
 			Measure:     kubernetes.MeasureNodesCordoned,
 			Description: "Number of nodes cordoned.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesUncordoned = &view.View{
 			Name:        "uncordoned_nodes_total",
@@ -141,42 +141,42 @@ func main() {
 			Measure:     kubernetes.MeasureNodesDrained,
 			Description: "Number of nodes drained.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagFailureCause, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagFailureCause, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesDrainScheduled = &view.View{
 			Name:        "drain_scheduled_nodes_total",
 			Measure:     kubernetes.MeasureNodesDrainScheduled,
 			Description: "Number of nodes scheduled for drain.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		limitedCordon = &view.View{
 			Name:        "limited_cordon_total",
 			Measure:     kubernetes.MeasureLimitedCordon,
 			Description: "Number of limited cordon encountered.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		skippedCordon = &view.View{
 			Name:        "skipped_cordon_total",
 			Measure:     kubernetes.MeasureSkippedCordon,
 			Description: "Number of skipped cordon encountered.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesReplacement = &view.View{
 			Name:        "node_replacement_request_total",
 			Measure:     kubernetes.MeasureNodesReplacementRequest,
 			Description: "Number of nodes replacement requested.",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagReason, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagReason, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesPreprovisioningLatency = &view.View{
 			Name:        "node_preprovisioning_latency",
 			Measure:     kubernetes.MeasurePreprovisioningLatency,
 			Description: "Latency to get preprovisioned node",
 			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagReason, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
+			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagReason, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 	)
 
