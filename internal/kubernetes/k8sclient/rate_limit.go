@@ -2,6 +2,7 @@ package k8sclient
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -38,19 +39,16 @@ func init() {
 	view.Register(v)
 }
 
-func DecorateWithRateLimiter(config *rest.Config, name string) {
-	// defaulting and inner rate imiter creation copied from
-	// https://github.com/kubernetes/kubernetes/blob/0153febd9f0098d4b8d0d484927710eaf899ef40/staging/src/k8s.io/client-go/rest/config.go#L354
-	qps := config.QPS
-	if config.QPS == 0.0 {
-		qps = rest.DefaultQPS
+func DecorateWithRateLimiter(config *rest.Config, name string) error {
+	if config.QPS == 0 {
+		return fmt.Errorf("rest.Config qps must be set")
 	}
-	burst := config.Burst
 	if config.Burst == 0 {
-		burst = rest.DefaultBurst
+		return fmt.Errorf("rest.Config burst must be set")
 	}
-	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(qps, burst)
+	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(config.QPS, config.Burst)
 	config.RateLimiter = NewRateLimiterWithMetric(name, rateLimiter)
+	return nil
 }
 
 type mutexRateLimiter struct {

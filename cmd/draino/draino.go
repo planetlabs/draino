@@ -28,6 +28,7 @@ import (
 
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
@@ -119,6 +120,9 @@ func main() {
 		scopeAnalysisPeriod  = app.Flag("scope-analysis-period", "Period to run the scope analysis and generate metric").Default((5 * time.Minute).String()).Duration()
 
 		klogVerbosity = app.Flag("klog-verbosity", "Verbosity to run klog at").Default("4").Int32()
+
+		k8sClientQPS   = app.Flag("k8s-client-qps", "Queries per second allowed by the kubernetes clientset. This qps is shared between all clients in the k8s clientset.").Default(fmt.Sprintf("%f", rest.DefaultQPS)).Float32()
+		k8sClientBurst = app.Flag("k8s-client-burst", "Burst allowed by the kubernetes clientset. This qps is shared between all clients in the k8s clientset.").Default("150").Int()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
@@ -213,7 +217,10 @@ func main() {
 	c, err := kubernetes.BuildConfigFromFlags(*apiserver, *kubecfg)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client configuration")
 
-	k8sclient.DecorateWithRateLimiter(c, "default")
+	c.QPS = *k8sClientQPS
+	c.Burst = *k8sClientBurst
+	err = k8sclient.DecorateWithRateLimiter(c, "default")
+	kingpin.FatalIfError(err, "failed to decorate kubernetes clientset config")
 
 	cs, err := client.NewForConfig(c)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
