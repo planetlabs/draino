@@ -1,10 +1,20 @@
 package klog
 
 import (
+	"flag"
+	"fmt"
+
 	"go.uber.org/zap"
 	"k8s.io/klog"
-	_ "k8s.io/klog"
 )
+
+// InitializeKlog initializes klog with a verbosity v
+func InitializeKlog(v int32) {
+	fs := flag.NewFlagSet("klog", flag.ExitOnError)
+	klog.InitFlags(fs)
+	fs.Set("v", fmt.Sprintf("%d", v))
+	fs.Set("logtostderr", "false")
+}
 
 // RedirectToLogger redirects all klog logs to a zapper logger.
 // This is useful to have a single format for all logs while also getting log messages from libraries that use klog (kubernetes).
