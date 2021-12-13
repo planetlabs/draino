@@ -56,6 +56,7 @@ const (
 	ConditionDrainedScheduled = "DrainScheduled"
 	DefaultSkipDrain          = false
 
+	EvictionNodeConditionsAnnotationKey   = "draino/node-conditions"
 	PVCStorageClassCleanupAnnotationKey   = "draino/delete-pvc-and-pv"
 	PVCStorageClassCleanupAnnotationValue = "true"
 
@@ -103,9 +104,8 @@ type NodeIsNotCordonError struct {
 }
 
 func (e NodeIsNotCordonError) Error() string {
-	return "the node "+e.NodeName+" is not cordoned"
+	return "the node " + e.NodeName + " is not cordoned"
 }
-
 
 type PodEvictionTimeoutError struct {
 }
@@ -248,6 +248,8 @@ type APICordonDrainer struct {
 	skipDrain                  bool
 	maxDrainAttemptsBeforeFail int32
 
+	conditions []SuppliedCondition
+
 	storageClassesAllowingPVDeletion map[string]struct{}
 }
 
@@ -322,6 +324,13 @@ func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDraine
 func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.maxDrainAttemptsBeforeFail = int32(maxDrainAttemptsBeforeFail)
+	}
+}
+
+// WithSuppliedConditions give the list of conditions for which draino is triggered
+func WithSuppliedConditions(conditions []string) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.conditions = ParseConditions(conditions)
 	}
 }
 
@@ -599,7 +608,7 @@ func (d *APICordonDrainer) Drain(node *core.Node) error {
 
 	if !n.Spec.Unschedulable {
 		LoggerForNode(node, d.l).Info("Aborting drain because the node is not cordoned")
-		return NodeIsNotCordonError{NodeName:node.Name}
+		return NodeIsNotCordonError{NodeName: node.Name}
 	}
 
 	pods, err := d.GetPodsToDrain(n.GetName(), nil)
@@ -726,6 +735,7 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(node *core.Node, pod *core.Pod
 // 503    : the service is not able to answer now, potentially not reaching the leader, you should retry
 // 500    : server error, that could be a transient error, retry couple of times
 func (d *APICordonDrainer) evictWithOperatorAPI(url string, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+	conditions := GetConditionsTypes(GetNodeOffendingConditions(node, d.conditions))
 	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
 	gracePeriod := d.getGracePeriod(pod)
 	maxRetryOn500 := 4
@@ -733,7 +743,8 @@ func (d *APICordonDrainer) evictWithOperatorAPI(url string, node *core.Node, pod
 		//eviction function
 		func() error {
 			evictionPayload := &policy.Eviction{
-				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
+				ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName(),
+					Annotations: map[string]string{EvictionNodeConditionsAnnotationKey: strings.Join(conditions, ",")}},
 				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
 			}
 
