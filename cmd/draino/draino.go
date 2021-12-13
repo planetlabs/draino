@@ -348,6 +348,7 @@ func main() {
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
 		kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
+		kubernetes.WithSuppliedConditions(*conditions),
 		kubernetes.WithAPICordonDrainerLogger(log),
 	)
 
