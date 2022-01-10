@@ -25,6 +25,7 @@ const (
 	ConfigurationAnnotationKey = "node-lifecycle.datadoghq.com/draino-configuration"
 	OutOfScopeAnnotationValue  = "out-of-scope"
 	nodeOptionsMetricName      = "node_options_nodes_total"
+	nodeOptionsCPUMetricName   = "node_options_cpu_total"
 )
 
 type DrainoConfigurationObserver interface {
@@ -37,6 +38,9 @@ type DrainoConfigurationObserver interface {
 type metricsObjectsForObserver struct {
 	previousMeasureNodesWithNodeOptions *view.View
 	MeasureNodesWithNodeOptions         *stats.Int64Measure
+
+	previousMeasureCPUsWithNodeOptions *view.View
+	MeasureCPUsWithNodeOptions         *stats.Int64Measure
 }
 
 // reset: replace existing gauges to eliminate obsolete series
@@ -44,12 +48,21 @@ func (g *metricsObjectsForObserver) reset() error {
 	if g.previousMeasureNodesWithNodeOptions != nil {
 		view.Unregister(g.previousMeasureNodesWithNodeOptions)
 	}
+	if g.previousMeasureCPUsWithNodeOptions != nil {
+		view.Unregister(g.previousMeasureCPUsWithNodeOptions)
+	}
 
 	if err := wait.Poll(100*time.Millisecond, 5*time.Second, func() (done bool, err error) { return view.Find(nodeOptionsMetricName) == nil, nil }); err != nil {
-		return fmt.Errorf("failed to purge previous series")
+		return fmt.Errorf("failed to purge previous [node] series")
+	} // wait for metrics engine to purge previous series
+
+	if err := wait.Poll(100*time.Millisecond, 5*time.Second, func() (done bool, err error) { return view.Find(nodeOptionsCPUMetricName) == nil, nil }); err != nil {
+		return fmt.Errorf("failed to purge previous [cpu] series")
 	} // wait for metrics engine to purge previous series
 
 	g.MeasureNodesWithNodeOptions = stats.Int64(nodeOptionsMetricName, "Number of nodes for each options", stats.UnitDimensionless)
+	g.MeasureCPUsWithNodeOptions = stats.Int64(nodeOptionsCPUMetricName, "Number of cpu for each options", stats.UnitDimensionless)
+
 	g.previousMeasureNodesWithNodeOptions = &view.View{
 		Name:        nodeOptionsMetricName,
 		Measure:     g.MeasureNodesWithNodeOptions,
@@ -58,7 +71,16 @@ func (g *metricsObjectsForObserver) reset() error {
 		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamePrefix, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagUserAllowedConditionsAnnotation, TagDrainRetry, TagDrainRetryFailed, TagDrainRetryCustomMaxAttempt, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
 	}
 
+	g.previousMeasureCPUsWithNodeOptions = &view.View{
+		Name:        nodeOptionsCPUMetricName,
+		Measure:     g.MeasureCPUsWithNodeOptions,
+		Description: "Number of cpu for each options",
+		Aggregation: view.LastValue(),
+		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamePrefix, TagNodegroupNamespace, TagTeam, TagInScope, TagConditions},
+	}
+
 	view.Register(g.previousMeasureNodesWithNodeOptions)
+	view.Register(g.previousMeasureCPUsWithNodeOptions)
 	return nil
 }
 
@@ -121,7 +143,14 @@ type inScopeTags struct {
 	Condition                       string
 }
 
+type inScopeCPUTags struct {
+	NodeTagsValues
+	InScope   bool
+	Condition string
+}
+
 type inScopeMetrics map[inScopeTags]int64
+type inScopeCPUMetrics map[inScopeCPUTags]int64
 
 func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 	ticker := time.NewTicker(s.analysisPeriod)
@@ -148,6 +177,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				}
 			}
 			newMetricsValue := inScopeMetrics{}
+			newMetricsCPUValue := inScopeCPUMetrics{}
 			// Let's update the metrics
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 				// skip the node if it is too recent... it does not have all the required labels/annotations yet to have relevant metrics
@@ -177,14 +207,23 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					UserAllowedConditionsAnnotation: hasAllowConditionList(node),
 					TagUserEvictionURLViaAnnotation: s.HasEvictionUrlViaAnnotation(node),
 				}
+
+				tCPU := inScopeCPUTags{
+					NodeTagsValues: nodeTags,
+					InScope:        NodeInScopeWithConditionCheck(conditions, node),
+				}
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
 				conditionsWithAll := append(GetConditionsTypes(conditions), "any")
 				for _, c := range conditionsWithAll {
 					t.Condition = c
 					newMetricsValue[t] = newMetricsValue[t] + 1
+
+					tCPU.Condition = c
+					newMetricsCPUValue[tCPU] = newMetricsCPUValue[tCPU] + node.Status.Capacity.Cpu().Value()
+
 				}
 			}
-			s.updateGauges(newMetricsValue)
+			s.updateGauges(newMetricsValue, newMetricsCPUValue)
 		}
 	}
 }
@@ -200,7 +239,7 @@ func NodeInScopeWithConditionCheck(conditions []SuppliedCondition, node *v1.Node
 //       As a consequence there is a risk of concurrency between the goroutine that populates the fresh registered metric and the one that expose the metric for the scape.
 //       There is no other way around I could find for the moment to cleanup old series. The concurrency risk is clearly acceptable if we look at the frequency of metric poll versus the frequency and a speed of metric generation.
 //       In worst case the server will be missing series for a given scrape (not even report a bad value, just missing series). So the impact if it happens is insignificant.
-func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
+func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, metricsCPU inScopeCPUMetrics) {
 	if err := s.metricsObjects.reset(); err != nil {
 		s.logger.Error("Unable to purger previous metrics series")
 		return
@@ -223,6 +262,16 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics) {
 			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)),
 			tag.Upsert(TagUserAllowedConditionsAnnotation, strconv.FormatBool(tagsValues.UserAllowedConditionsAnnotation)))
 		stats.Record(allTags, s.metricsObjects.MeasureNodesWithNodeOptions.M(count))
+	}
+
+	for tagsValues, count := range metricsCPU {
+		// This list of tags must be in sync with the list of tags in the function metricsObjectsForObserver::reset()
+		allTags, _ := tag.New(context.Background(),
+			tag.Upsert(TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(TagNodegroupName, tagsValues.NgName), tag.Upsert(TagNodegroupNamePrefix, GetNodeGroupNamePrefix(tagsValues.NgName)),
+			tag.Upsert(TagTeam, tagsValues.Team),
+			tag.Upsert(TagConditions, tagsValues.Condition),
+			tag.Upsert(TagInScope, strconv.FormatBool(tagsValues.InScope)))
+		stats.Record(allTags, s.metricsObjects.MeasureCPUsWithNodeOptions.M(count))
 	}
 }
 
