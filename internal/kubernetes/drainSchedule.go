@@ -29,7 +29,8 @@ const (
 	CustomDrainBufferAnnotation       = "draino/drain-buffer"
 	CustomRetryBackoffDelayAnnotation = "draino/retry-delay"
 	CustomRetryMaxAttemptAnnotation   = "draino/retry-max-attempt"
-	DrainGroupAnnotation              = "draino/drain-group"
+	DrainGroupAnnotation              = "draino/drain-group"          // this one adds subgroup to the default group (subgroup creation)
+	DrainGroupOverrideAnnotation      = "draino/drain-group-override" // this one completely overrides the default group
 
 	preprovisioningAnnotationKey   = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
 	preprovisioningAnnotationValue = "true"
@@ -97,6 +98,11 @@ func (d *DrainSchedules) getScheduleGroup(node *v1.Node) *SchedulesGroup {
 	}
 	if node.Annotations != nil {
 		values = append(values, node.Annotations[DrainGroupAnnotation])
+		if override, ok := node.Annotations[DrainGroupOverrideAnnotation]; ok && override != "" {
+			// in that case we completely replace the group, we remove the default group.
+			// for example, this allows users to define a kubernetes-cluster wide group if the default is set to namespace
+			values = strings.Split(override, ",")
+		}
 	}
 	groupKey := strings.Join(values, "#")
 

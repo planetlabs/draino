@@ -58,6 +58,7 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, NewEventRecorder(&record.FakeRecorder{}), period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
 	whenFirstSchedSpecificGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeGrp", Annotations: map[string]string{DrainGroupAnnotation: "grp1"}}}, failedCount)
+	whenFirstSchedSpecificOverrideGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeOverrideGrp", Annotations: map[string]string{DrainGroupAnnotation: "grpOverride"}}}, failedCount)
 
 	type timeWindow struct {
 		from, to time.Time
@@ -91,6 +92,14 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 			window: timeWindow{
 				from: whenFirstSchedSpecificGroup.Add(period - 2*time.Second),
 				to:   whenFirstSchedSpecificGroup.Add(period + 2*time.Second),
+			},
+		},
+		{
+			name: "a schedule in overridden group grpOverride",
+			node: &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName + "overridegrp", Annotations: map[string]string{DrainGroupOverrideAnnotation: "grpOverride"}}},
+			window: timeWindow{
+				from: whenFirstSchedSpecificOverrideGroup.Add(period - 2*time.Second),
+				to:   whenFirstSchedSpecificOverrideGroup.Add(period + 2*time.Second),
 			},
 		},
 		{
