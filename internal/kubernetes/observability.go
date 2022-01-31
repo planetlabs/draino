@@ -314,6 +314,14 @@ func (s *DrainoConfigurationObserverImpl) IsInScope(node *v1.Node) (inScope bool
 	if !s.nodeFilterFunc(node) {
 		return false, "labelSelection", nil
 	}
+
+	if hasLabel, enabled := IsNodeNLAEnableByLabel(node); hasLabel {
+		if !enabled {
+			return false, "Node label explicit opt-out", nil
+		}
+		return true, "", nil
+	}
+
 	var pods []*v1.Pod
 	if pods, err = s.runtimeObjectStore.Pods().ListPodsForNode(node.Name); err != nil {
 		return false, "", err
