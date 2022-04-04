@@ -43,6 +43,9 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
+	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
@@ -56,7 +59,12 @@ const (
 )
 
 func main() {
-	go http.ListenAndServe("localhost:8085", nil) // for go profiler
+	tracer.Start(
+		tracer.WithService("draino"),
+	)
+	defer tracer.Stop()
+	mux := httptrace.NewServeMux()
+	go http.ListenAndServe("localhost:8085", mux) // for go profiler
 	//nolint:lll // accept long lines in option declarations
 	var (
 		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()

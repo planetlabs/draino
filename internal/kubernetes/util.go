@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
+
+	kubernetestrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/k8s.io/client-go/kubernetes"
 )
 
 // Component is the name of this application.
@@ -63,12 +67,22 @@ const (
 // dependencies on glog.
 // https://godoc.org/k8s.io/client-go/tools/clientcmd#BuildConfigFromFlags
 func BuildConfigFromFlags(apiserver, kubecfg string) (*rest.Config, error) {
+	var config *rest.Config
+	var err error
+
 	if kubecfg != "" || apiserver != "" {
-		return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		config, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubecfg},
 			&clientcmd.ConfigOverrides{ClusterInfo: api.Cluster{Server: apiserver}}).ClientConfig()
+	} else {
+		config, err = rest.InClusterConfig()
 	}
-	return rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	config.WrapTransport = kubernetestrace.WrapRoundTripper
+	return config, nil
 }
 
 // RetryWithTimeout this function retries till the function f return a nil error or timeout expire
@@ -230,6 +244,16 @@ func LoggerForNode(n *core.Node, logger *zap.Logger) *zap.Logger {
 		team = n.Labels["team"]
 	}
 	return logger.With(zap.String("node", n.Name), zap.String("ng_name", n.Labels[LabelKeyNodeGroupName]), zap.String("ng_namespace", n.Labels[LabelKeyNodeGroupNamespace]), zap.String("node_team", n.Labels[LabelKeyNodeGroupNamespace]))
+}
+
+func TracedLogger(context context.Context, logger *zap.Logger) *zap.Logger {
+	if span, ok := tracer.SpanFromContext(context); ok {
+		sctx := span.Context()
+		traceID := strconv.FormatUint(sctx.TraceID(), 10)
+		spanID := strconv.FormatUint(sctx.SpanID(), 10)
+		return logger.With(zap.String("dd.trace_id", traceID), zap.String("dd.span_id", spanID))
+	}
+	return logger
 }
 
 type Runner interface {

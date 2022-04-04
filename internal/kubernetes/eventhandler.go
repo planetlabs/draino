@@ -19,6 +19,7 @@ package kubernetes
 import (
 	"context"
 	"fmt"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"strings"
 	"time"
 
@@ -131,6 +132,16 @@ type DrainingResourceEventHandler struct {
 	conditions []SuppliedCondition
 
 	durationWithCompletedStatusBeforeReplacement time.Duration
+}
+
+type NodeWithContext struct {
+	context context.Context
+	node    *core.Node
+	logger  *zap.Logger
+}
+
+func NewNodeWithContext(node *core.Node, context context.Context, logger *zap.Logger) *NodeWithContext {
+	return &NodeWithContext{context: context, node: node, logger: TracedLogger(context, LoggerForNode(node, logger))}
 }
 
 // DrainingResourceEventHandlerOption configures an DrainingResourceEventHandler.
@@ -254,11 +265,19 @@ func (h *DrainingResourceEventHandler) OnDelete(obj interface{}) {
 }
 
 func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
-	logger := LoggerForNode(n, h.logger)
+	span, ctx := tracer.StartSpanFromContext(context.Background(), "HandleNode")
+	defer span.Finish()
+
+	// TODO: Now we need to use `NodeWithContext` everywhere instead of `Node` to be able
+	//   to propagate the trace/logger/context.
+	node := NewNodeWithContext(n, ctx, h.logger)
+	logger := node.logger
+	hlogger := TracedLogger(ctx, h.logger)
+
 	LogForVerboseNode(h.logger, n, "HandleNode")
 	// Let proceed only if the informers have synced to avoid error logs at start up.
 	if h.objectsStore != nil && !h.objectsStore.HasSynced() {
-		h.logger.Warn("Waiting informer to sync")
+		hlogger.Warn("Waiting informer to sync")
 		return
 	}
 
@@ -267,7 +286,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		logger.Error(err.Error())
 		return
 	}
-	LogForVerboseNode(h.logger, n, "drainStatus",
+	LogForVerboseNode(hlogger, n, "drainStatus",
 		zap.Bool("marked", drainStatus.Marked),
 		zap.Bool("completed", drainStatus.Completed),
 		zap.Bool("failed", drainStatus.Failed),
@@ -284,13 +303,13 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 			return
 		}
 		if uncordon {
-			LogForVerboseNode(h.logger, n, "Deleting schedule and uncordoning")
+			LogForVerboseNode(hlogger, n, "Deleting schedule and uncordoning")
 			h.drainScheduler.DeleteSchedule(n)
 			h.uncordon(n)
 			logger.Info("Uncordon")
 			return
 		}
-		LogForVerboseNode(h.logger, n, "Not uncordoning")
+		LogForVerboseNode(hlogger, n, "Not uncordoning")
 	}
 
 	// If the node was uncordoned (by user or other system) but it still has a schedule we should remove the schedule
@@ -305,7 +324,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	}
 
 	if HasDrainRetryFailedAnnotation(n) {
-		LogForVerboseNode(h.logger, n, "Failed Retry Annotation")
+		LogForVerboseNode(hlogger, n, "Failed Retry Annotation")
 		if n.Spec.Unschedulable {
 			h.eventRecorder.NodeEventf(n, core.EventTypeWarning, eventReasonDrainFailed, "Drain still failing after multiple retries; uncordoning and ignoring the node")
 			h.drainScheduler.DeleteSchedule(n)
@@ -316,7 +335,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	}
 
 	if HasDrainRetryRestartAnnotation(n) {
-		LogForVerboseNode(h.logger, n, "Restart Retry Annotation")
+		LogForVerboseNode(hlogger, n, "Restart Retry Annotation")
 		h.drainScheduler.DeleteSchedule(n)
 		h.uncordon(n)
 		// Let's go back to initial state for the retry annotation
@@ -334,13 +353,13 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	}
 
 	badConditions := GetNodeOffendingConditions(n, h.conditions)
-	LogForVerboseNode(h.logger, n, fmt.Sprintf("Offending conditions count %d", len(badConditions)))
+	LogForVerboseNode(hlogger, n, fmt.Sprintf("Offending conditions count %d", len(badConditions)))
 	if len(badConditions) == 0 {
 		return
 	}
 	badConditionsStr := GetConditionsTypes(badConditions)
 	if !atLeastOneConditionAcceptedByTheNode(badConditionsStr, n) {
-		LogForVerboseNode(h.logger, n, "Conditions filter rejects that node")
+		LogForVerboseNode(hlogger, n, "Conditions filter rejects that node")
 		h.eventRecorder.NodeEventf(n, core.EventTypeNormal, eventReasonConditionFiltered, fmt.Sprintf("Proposed condition(s) {%s} are not eligible for that node", strings.Join(badConditionsStr, ",")))
 		return
 	}
@@ -353,7 +372,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 			logger.Error(err.Error())
 			return
 		}
-		LogForVerboseNode(h.logger, n, fmt.Sprintf("podsWithPVCBoundToThatNode count %d", len(podsWithPVCBoundToThatNode)))
+		LogForVerboseNode(hlogger, n, fmt.Sprintf("podsWithPVCBoundToThatNode count %d", len(podsWithPVCBoundToThatNode)))
 		if len(podsWithPVCBoundToThatNode) > 0 {
 			LogForVerboseNode(logger, n, "Cordon Skip: Pod"+podsWithPVCBoundToThatNode[0].ResourceVersion+" need to be scheduled on node")
 			h.eventRecorder.NodeEventf(n, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+podsWithPVCBoundToThatNode[0].Name+" needs that node due to local PV, not cordoning the node")
@@ -362,11 +381,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 
 		// check if the node passes filters
 		if !h.checkCordonFilters(n) {
-			LogForVerboseNode(h.logger, n, "Not passing cordon filters")
+			LogForVerboseNode(hlogger, n, "Not passing cordon filters")
 			return
 		}
 		done, err := h.cordon(n, badConditions)
-		LogForVerboseNode(h.logger, n, "Cordon attempt", zap.Bool("done", done), zap.Error(err))
+		LogForVerboseNode(hlogger, n, "Cordon attempt", zap.Bool("done", done), zap.Error(err))
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -388,7 +407,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 		if elapseSinceCompleted > h.durationWithCompletedStatusBeforeReplacement {
 			// This node probably blocked due to minSize set on the nodegroup
 			status, err := h.cordonDrainer.ReplaceNode(n)
-			LogForVerboseNode(h.logger, n, "node replacement", zap.String("status", string(status)), zap.Error(err))
+			LogForVerboseNode(hlogger, n, "node replacement", zap.String("status", string(status)), zap.Error(err))
 		}
 		return // we are waiting for that node to be removed from the cluster by the CA
 	}
@@ -403,7 +422,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 				return
 			}
 			h.scheduleDrain(n, drainStatus.FailedCount)
-			LogForVerboseNode(h.logger, n, "retry with new schedule")
+			LogForVerboseNode(hlogger, n, "retry with new schedule")
 			return
 		}
 		// Else we leave it like this
@@ -414,7 +433,7 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	if h.checkCordonFilters(n) {
 		// Let's ensure that a drain is scheduled
 		hasSchedule, failedSched := h.drainScheduler.HasSchedule(n)
-		LogForVerboseNode(h.logger, n, "hasSchedule", zap.Bool("hasSchedule", hasSchedule), zap.Bool("failedSchedule", failedSched))
+		LogForVerboseNode(hlogger, n, "hasSchedule", zap.Bool("hasSchedule", hasSchedule), zap.Bool("failedSchedule", failedSched))
 		if !hasSchedule {
 			h.scheduleDrain(n, drainStatus.FailedCount)
 			return
