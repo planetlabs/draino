@@ -40,6 +40,8 @@ import (
 	runtimejson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+
+	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
 )
 
 // Default pod eviction settings.
@@ -751,7 +753,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(url string, node *core.Node, pod
 			req, err := http.NewRequest("POST", url, GetEvictionJsonPayload(evictionPayload))
 			req.Header.Set("Content-Type", "application/json")
 
-			client := &http.Client{Timeout: 10 * time.Second}
+			client := httptrace.WrapClient(&http.Client{Timeout: 10 * time.Second})
 			resp, err := client.Do(req)
 			if err != nil {
 				d.l.Info("custom eviction endpoint response error", zap.Error(err))

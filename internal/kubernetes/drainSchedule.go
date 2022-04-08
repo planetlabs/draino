@@ -37,6 +37,7 @@ const (
 )
 
 type DrainScheduler interface {
+	// TODO: replace v1.Node by NodeWithContext here to propagate the context/trace.
 	HasSchedule(node *v1.Node) (has, failed bool)
 	Schedule(node *v1.Node, failedCount int32) (time.Time, error)
 	DeleteSchedule(node *v1.Node)
