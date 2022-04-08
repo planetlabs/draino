@@ -156,6 +156,10 @@ func GetUnscheduledPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore
 				logger.Error("Failed to get PVC", zap.String("PVC", pv.Spec.ClaimRef.Namespace+"/"+pv.Spec.ClaimRef.Name), zap.Error(err))
 				return nil, err
 			}
+			if pvc.UID != pv.Spec.ClaimRef.UID {
+				LogForVerboseNode(logger, node, fmt.Sprintf("The PV is different than the one that was bound to that node. UUID on PVC and in the claimRef do not match"))
+				continue
+			}
 			if pvc.DeletionTimestamp != nil {
 				LogForVerboseNode(logger, node, fmt.Sprintf("Ignoring PVC that is terminating %s/%s", pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name))
 				continue
