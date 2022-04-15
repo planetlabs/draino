@@ -69,6 +69,7 @@ const (
 	NodeLabelKeyReplaceRequest      = "node.datadoghq.com/replace"
 	NodeLabelValueReplaceRequested  = "requested"
 	NodeLabelValueReplaceProcessing = "processing"
+	NodeLabelValueReplaceCleanup    = "cleanup"
 	NodeLabelValueReplaceDone       = "done"
 
 	eventReasonEvictionStarting      = "EvictionStarting"
@@ -1074,7 +1075,7 @@ func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, w
 	}
 
 	replacementValue, ok := nodeFromStore.Labels[NodeLabelKeyReplaceRequest]
-	if !ok {
+	if !ok || replacementValue == NodeLabelValueReplaceCleanup {
 		if withRateLimiting && !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
 			d.eventRecorder.NodeEventf(n, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
 			return NodeReplacementStatusBlockedByLimiter, nil
@@ -1098,6 +1099,8 @@ func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, w
 		return NodeReplacementStatusRequested, nil
 	case NodeLabelValueReplaceDone:
 		return NodeReplacementStatusDone, nil
+	case NodeLabelValueReplaceCleanup:
+		return NodeLabelValueReplaceCleanup, nil
 	default:
 		return NodeReplacementStatusNone, nil
 	}
