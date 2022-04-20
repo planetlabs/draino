@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -42,7 +43,7 @@ type mockCall struct {
 	node string
 }
 
-func (d *mockCordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error {
+func (d *mockCordonDrainer) Cordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
 	d.calls = append(d.calls, mockCall{
 		name: "Cordon",
 		node: n.Name,
@@ -50,7 +51,7 @@ func (d *mockCordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) erro
 	return nil
 }
 
-func (d *mockCordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) error {
+func (d *mockCordonDrainer) Uncordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
 	d.calls = append(d.calls, mockCall{
 		name: "Uncordon",
 		node: n.Name,
@@ -58,7 +59,7 @@ func (d *mockCordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) er
 	return nil
 }
 
-func (d *mockCordonDrainer) ResetRetryAnnotation(n *core.Node) error {
+func (d *mockCordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Node) error {
 	d.calls = append(d.calls, mockCall{
 		name: "ResetRetryAnnotation",
 		node: n.Name,
@@ -66,7 +67,7 @@ func (d *mockCordonDrainer) ResetRetryAnnotation(n *core.Node) error {
 	return nil
 }
 
-func (d *mockCordonDrainer) Drain(n *core.Node) error {
+func (d *mockCordonDrainer) Drain(ctx context.Context, n *core.Node) error {
 	d.calls = append(d.calls, mockCall{
 		name: "Drain",
 		node: n.Name,
@@ -74,11 +75,11 @@ func (d *mockCordonDrainer) Drain(n *core.Node) error {
 	return nil
 }
 
-func (d *mockCordonDrainer) GetMaxDrainAttemptsBeforeFail(_ *core.Node) int32 {
+func (d *mockCordonDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32 {
 	return 0
 }
 
-func (d *mockCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
+func (d *mockCordonDrainer) MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	d.calls = append(d.calls, mockCall{
 		name: "MarkDrain",
 		node: n.Name,
@@ -86,7 +87,7 @@ func (d *mockCordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, fail
 	return nil
 }
 
-func (d *mockCordonDrainer) MarkDrainDelete(n *core.Node) error {
+func (d *mockCordonDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) error {
 	d.calls = append(d.calls, mockCall{
 		name: "MarkDrainDelete",
 		node: n.Name,
@@ -94,7 +95,7 @@ func (d *mockCordonDrainer) MarkDrainDelete(n *core.Node) error {
 	return nil
 }
 
-func (d *mockCordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error) {
+func (d *mockCordonDrainer) GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error) {
 	d.calls = append(d.calls, mockCall{
 		name: "GetPodsToDrain",
 		node: node,
@@ -102,7 +103,7 @@ func (d *mockCordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*c
 	return nil, nil
 }
 
-func (d *mockCordonDrainer) HasSchedule(node *core.Node) (has, failed bool) {
+func (d *mockCordonDrainer) HasSchedule(ctx context.Context, node *core.Node) (has, failed bool) {
 	d.calls = append(d.calls, mockCall{
 		name: "HasSchedule",
 		node: node.Name,
@@ -113,7 +114,7 @@ func (d *mockCordonDrainer) HasSchedule(node *core.Node) (has, failed bool) {
 	return hasSchedule, false
 }
 
-func (d *mockCordonDrainer) Schedule(node *core.Node, failedCount int32) (time.Time, error) {
+func (d *mockCordonDrainer) Schedule(ctx context.Context, node *core.Node, failedCount int32) (time.Time, error) {
 	d.calls = append(d.calls, mockCall{
 		name: "Schedule",
 		node: node.Name,
@@ -121,21 +122,21 @@ func (d *mockCordonDrainer) Schedule(node *core.Node, failedCount int32) (time.T
 	return time.Now(), nil
 }
 
-func (d *mockCordonDrainer) DeleteSchedule(node *core.Node) {
+func (d *mockCordonDrainer) DeleteSchedule(ctx context.Context, node *core.Node) {
 	d.calls = append(d.calls, mockCall{
 		name: "DeleteSchedule",
 		node: node.Name,
 	})
 }
 
-func (d *mockCordonDrainer) DeleteScheduleByName(name string) {
+func (d *mockCordonDrainer) DeleteScheduleByName(ctx context.Context, nodeName string) {
 	d.calls = append(d.calls, mockCall{
 		name: "DeleteSchedule",
 		node: name,
 	})
 }
 
-func (d *mockCordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
+func (d *mockCordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
 	d.calls = append(d.calls, mockCall{
 		name: "ReplaceNode",
 		node: n.Name,
@@ -143,7 +144,7 @@ func (d *mockCordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, er
 	return NodeReplacementStatusNone, nil
 }
 
-func (d *mockCordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatus, error) {
+func (d *mockCordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
 	d.calls = append(d.calls, mockCall{
 		name: "PreprovisionNode",
 		node: n.Name,
@@ -456,7 +457,7 @@ func TestDrainingResourceEventHandler_checkCordonFilters(t *testing.T) {
 				objectsStore:  store,
 				cordonFilter:  tt.cordonFilter,
 			}
-			if got := h.checkCordonFilters(node); got != tt.want {
+			if got := h.checkCordonFilters(context.Background(), node); got != tt.want {
 				t.Errorf("checkCordonFilters() = %v, want %v", got, tt.want)
 			}
 		})

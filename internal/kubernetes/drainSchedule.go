@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"sort"
 	"strings"
 	"sync"
@@ -37,11 +38,10 @@ const (
 )
 
 type DrainScheduler interface {
-	// TODO: replace v1.Node by NodeWithContext here to propagate the context/trace.
-	HasSchedule(node *v1.Node) (has, failed bool)
-	Schedule(node *v1.Node, failedCount int32) (time.Time, error)
-	DeleteSchedule(node *v1.Node)
-	DeleteScheduleByName(nodeName string)
+	HasSchedule(ctx context.Context, node *v1.Node) (has, failed bool)
+	Schedule(ctx context.Context, node *v1.Node, failedCount int32) (time.Time, error)
+	DeleteSchedule(ctx context.Context, node *v1.Node)
+	DeleteScheduleByName(ctx context.Context, nodeName string)
 }
 
 type SchedulesGroup struct {
@@ -119,7 +119,10 @@ func (d *DrainSchedules) getScheduleGroup(node *v1.Node) *SchedulesGroup {
 	return &newGroup
 }
 
-func (d *DrainSchedules) HasSchedule(node *v1.Node) (has, failed bool) {
+func (d *DrainSchedules) HasSchedule(ctx context.Context, node *v1.Node) (has, failed bool) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "HasSchedule")
+	defer span.Finish()
+
 	d.Lock()
 	defer d.Unlock()
 	grp := d.getScheduleGroup(node)
@@ -130,24 +133,30 @@ func (d *DrainSchedules) HasSchedule(node *v1.Node) (has, failed bool) {
 	return true, sched.isFailed()
 }
 
-func (d *DrainSchedules) DeleteSchedule(node *v1.Node) {
+func (d *DrainSchedules) DeleteSchedule(ctx context.Context, node *v1.Node) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "DeleteSchedule")
+	defer span.Finish()
+
 	d.Lock()
 	defer d.Unlock()
 	d.getScheduleGroup(node).removeSchedule(node.Name)
 
 	// Remove the Mark on the node
-	if err := d.drainer.MarkDrainDelete(node); err != nil {
+	if err := d.drainer.MarkDrainDelete(ctx, node); err != nil {
 		// if we cannot mark the node, let's remove the schedule
 		d.logger.Error("Failed to remove mark of schedule", zap.String("node", node.Name))
 	}
 	return
 }
 
-func (d *DrainSchedules) DeleteScheduleByName(name string) {
+func (d *DrainSchedules) DeleteScheduleByName(ctx context.Context, nodeName string) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "DeleteScheduleByName")
+	defer span.Finish()
+
 	d.Lock()
 	defer d.Unlock()
 	for _, grp := range d.scheduleGroups {
-		grp.removeSchedule(name)
+		grp.removeSchedule(nodeName)
 	}
 }
 
@@ -201,10 +210,18 @@ func (sg *SchedulesGroup) whenNextSchedule(failedCount int32, options *schedulin
 	return when
 }
 
-func (sg *SchedulesGroup) addSchedule(node *v1.Node, failedCount int32, options *schedulingOptions, scheduleRunner func(node *v1.Node, when time.Time, failedCount int32, options *schedulingOptions) *schedule) time.Time {
+func (sg *SchedulesGroup) addSchedule(ctx context.Context, node *v1.Node, failedCount int32, options *schedulingOptions, scheduleRunner func(ctx context.Context, node *v1.Node, when time.Time, failedCount int32, options *schedulingOptions) *schedule) time.Time {
+	span, ctx := tracer.StartSpanFromContext(ctx, "addSchedule")
+	defer span.Finish()
+
 	when := sg.whenNextSchedule(failedCount, options)
+
+	span.SetTag("node", node.GetName())
+	span.SetTag("when", when)
+	span.SetTag("failedCount", failedCount)
+
 	sg.schedulesChain = append(sg.schedulesChain, node.GetName())
-	s := scheduleRunner(node, when, failedCount, options)
+	s := scheduleRunner(ctx, node, when, failedCount, options)
 	sg.schedules[node.GetName()] = s
 	sg.lastSchedule = s
 	return when
@@ -230,7 +247,10 @@ func (sg *SchedulesGroup) removeSchedule(name string) {
 	}
 }
 
-func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, error) {
+func (d *DrainSchedules) Schedule(ctx context.Context, node *v1.Node, failedCount int32) (time.Time, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "Schedule")
+	defer span.Finish()
+
 	d.Lock()
 	scheduleGroup := d.getScheduleGroup(node)
 	if sched, ok := scheduleGroup.schedules[node.GetName()]; ok {
@@ -240,17 +260,17 @@ func (d *DrainSchedules) Schedule(node *v1.Node, failedCount int32) (time.Time, 
 
 	scheduleOptions, err := newScheduleOptions(node)
 	if err != nil {
-		d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainConfig, "Failed to get schedule options: %v", err)
+		d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonDrainConfig, "Failed to get schedule options: %v", err)
 	}
 
 	// compute drain schedule time
-	when := scheduleGroup.addSchedule(node, failedCount, scheduleOptions, d.newSchedule)
+	when := scheduleGroup.addSchedule(ctx, node, failedCount, scheduleOptions, d.newSchedule)
 	d.Unlock()
 
 	// Mark the node with the condition stating that drain is scheduled
-	if err := d.drainer.MarkDrain(node, when, time.Time{}, false, failedCount); err != nil {
+	if err := d.drainer.MarkDrain(ctx, node, when, time.Time{}, false, failedCount); err != nil {
 		// if we cannot mark the node, let's remove the schedule
-		d.DeleteSchedule(node)
+		d.DeleteSchedule(ctx, node)
 		return time.Time{}, err
 	}
 	return when, nil
@@ -300,7 +320,7 @@ func (s *schedule) isFailed() bool {
 	return atomic.LoadInt32(&s.failed) == 1
 }
 
-func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount int32, scheduleOptions *schedulingOptions) *schedule {
+func (d *DrainSchedules) newSchedule(ctx context.Context, node *v1.Node, when time.Time, failedCount int32, scheduleOptions *schedulingOptions) *schedule {
 	sched := &schedule{
 		when:        when,
 		failedCount: failedCount,
@@ -309,12 +329,12 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 		sched.customDrainBuffer = scheduleOptions.customDrainBuffer
 	}
 	sched.timer = time.AfterFunc(time.Until(when), func() {
-		log := LoggerForNode(node, d.logger)
+		log := TracedLoggerForNode(ctx, node, d.logger)
 		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, node.GetName())) // nolint:gosec
 		if d.globalLocker != nil {
 			if locked, reason := d.globalLocker.IsBlocked(); locked {
 				log.Info("Drain cancelled due to globalLock", zap.String("reason", reason), zap.String("node", node.GetName()))
-				d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
+				d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
 				return
 			}
 		}
@@ -329,24 +349,24 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 				d.preprovisioningConfiguration.CheckPeriod,
 				d.preprovisioningConfiguration.Timeout,
 				func() (bool, error) {
-					replacementStatus, err := d.drainer.PreprovisionNode(node)
+					replacementStatus, err := d.drainer.PreprovisionNode(ctx, node)
 					if err != nil {
 						log.Error("Failed to validate node-replacement status", zap.Error(err))
 						return false, nil
 					}
 					if !replacementRequestEventDone {
-						d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done")
+						d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done")
 						replacementRequestEventDone = true
 					}
 					if replacementStatus == NodeReplacementStatusDone {
-						d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonNodePreprovisioningCompleted, "Node pre-provisioning before drain: completed")
+						d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonNodePreprovisioningCompleted, "Node pre-provisioning before drain: completed")
 						return true, nil
 					}
 					return false, nil
 				},
 			); err != nil {
 				log.Error("Failed pre-provisioning")
-				d.handleDrainFailure(sched, log, &NodePreprovisioningTimeoutError{}, tags, node)
+				d.handleDrainFailure(ctx, sched, log, &NodePreprovisioningTimeoutError{}, tags, node)
 				tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 				StatRecordForNode(tags, node, MeasurePreprovisioningLatency.M(sinceInMilliseconds(preprovisionStartTime)))
 				return
@@ -357,33 +377,33 @@ func (d *DrainSchedules) newSchedule(node *v1.Node, when time.Time, failedCount 
 		}
 
 		// Node drain
-		d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonDrainStarting, "Draining node")
-		if err := d.drainer.Drain(node); err != nil {
-			d.handleDrainFailure(sched, log, err, tags, node)
+		d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonDrainStarting, "Draining node")
+		if err := d.drainer.Drain(ctx, node); err != nil {
+			d.handleDrainFailure(ctx, sched, log, err, tags, node)
 			return
 		}
 		sched.finish = time.Now()
 		log.Info("Drained")
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 		StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
-		d.eventRecorder.NodeEventf(node, core.EventTypeNormal, eventReasonDrainSucceeded, "Drained node")
-		if err := d.drainer.MarkDrain(node, when, sched.finish, false, failedCount); err != nil {
-			d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainFailed, "Failed to place drain condition following success: %v", err)
+		d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonDrainSucceeded, "Drained node")
+		if err := d.drainer.MarkDrain(ctx, node, when, sched.finish, false, failedCount); err != nil {
+			d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonDrainFailed, "Failed to place drain condition following success: %v", err)
 			log.Error(fmt.Sprintf("Failed to place condition following drain success : %v", err))
 		}
 	})
 	return sched
 }
 
-func (d *DrainSchedules) handleDrainFailure(sched *schedule, log *zap.Logger, drainError error, tags context.Context, node *v1.Node) context.Context {
+func (d *DrainSchedules) handleDrainFailure(ctx context.Context, sched *schedule, log *zap.Logger, drainError error, tags context.Context, node *v1.Node) context.Context {
 	sched.finish = time.Now()
 	sched.setFailed()
 	sched.failedCount++
 	log.Info("Failed to drain", zap.Error(drainError))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
 	StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
-	d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonDrainFailed, "Drain failed: %v", drainError)
-	if err := d.drainer.MarkDrain(node, sched.when, sched.finish, true, sched.failedCount); err != nil {
+	d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonDrainFailed, "Drain failed: %v", drainError)
+	if err := d.drainer.MarkDrain(ctx, node, sched.when, sched.finish, true, sched.failedCount); err != nil {
 		log.Error("Failed to place condition following drain failure")
 	}
 	return tags

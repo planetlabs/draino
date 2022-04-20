@@ -256,6 +256,10 @@ func TracedLogger(context context.Context, logger *zap.Logger) *zap.Logger {
 	return logger
 }
 
+func TracedLoggerForNode(context context.Context, n *core.Node, logger *zap.Logger) *zap.Logger {
+	return TracedLogger(context, LoggerForNode(n, logger))
+}
+
 type Runner interface {
 	Run(stop <-chan struct{})
 }
