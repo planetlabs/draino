@@ -936,6 +936,10 @@ func (d *APICordonDrainer) awaitDeletion(pod *core.Pod, timeout time.Duration) e
 }
 
 func (d *APICordonDrainer) deletePVCAndPV(ctx context.Context, pod *core.Pod) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVCAndPV")
+	defer span.Finish()
+	span.SetTag("pod", pod.GetName())
+
 	pvcDeleted, err := d.deletePVCAssociatedWithStorageClass(ctx, pod)
 	if err != nil {
 		return err
@@ -947,7 +951,7 @@ func (d *APICordonDrainer) deletePVCAndPV(ctx context.Context, pod *core.Pod) er
 			return err
 		}
 		for _, pvc := range pvcDeleted {
-			if err := d.podDeleteRetryWaitingForPVC(pod, pvc); err != nil {
+			if err := d.podDeleteRetryWaitingForPVC(ctx, pod, pvc); err != nil {
 				return err
 			}
 		}
@@ -955,7 +959,11 @@ func (d *APICordonDrainer) deletePVCAndPV(ctx context.Context, pod *core.Pod) er
 	return nil
 }
 
-func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(pod *core.Pod, pvc *core.PersistentVolumeClaim) error {
+func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(ctx context.Context, pod *core.Pod, pvc *core.PersistentVolumeClaim) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "podDeleteRetryWaitingForPVC")
+	defer span.Finish()
+	span.SetTag("pvc", pvc.GetName())
+
 	podDeleteCheckPVCFunc := func() (bool, error) {
 		// check if the PVC was created
 		gotPVC, err := d.c.CoreV1().PersistentVolumeClaims(pvc.GetNamespace()).Get(pvc.GetName(), meta.GetOptions{})
@@ -981,6 +989,9 @@ func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(pod *core.Pod, pvc *core.
 }
 
 func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context, pod *core.Pod, pvcDeleted []*core.PersistentVolumeClaim) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVAssociatedWithDeletedPVC")
+	defer span.Finish()
+
 	for _, claim := range pvcDeleted {
 		if claim.Spec.VolumeName == "" {
 			continue
@@ -1033,6 +1044,9 @@ func (d *APICordonDrainer) awaitPVDeletion(pv *core.PersistentVolume, timeout ti
 // deletePVCAssociatedWithStorageClass takes care of deleting the PVCs associated with the annotated classes
 // returns the list of deleted PVCs and the first error encountered if any
 func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(ctx context.Context, pod *core.Pod) ([]*core.PersistentVolumeClaim, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVCAssociatedWithStorageClass")
+	defer span.Finish()
+
 	if d.storageClassesAllowingPVDeletion == nil {
 		return nil, nil
 	}
@@ -1111,6 +1125,9 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 }
 
 func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.Node, reason string, withRateLimiting bool) (NodeReplacementStatus, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "performNodeReplacement")
+	defer span.Finish()
+
 	nodeFromStore, err := d.runtimeObjectStore.Nodes().Get(n.Name)
 	if err != nil {
 		return NodeReplacementStatusNone, err
@@ -1149,10 +1166,16 @@ func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.N
 }
 
 func (d *APICordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ReplaceNode")
+	defer span.Finish()
+
 	return d.performNodeReplacement(ctx, n, newNodeRequestReasonReplacement, true)
 }
 
 func (d *APICordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "PreprovisionNode")
+	defer span.Finish()
+
 	return d.performNodeReplacement(ctx, n, newNodeRequestReasonPreprovisioning, false)
 }
 
