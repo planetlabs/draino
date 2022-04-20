@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -102,6 +103,7 @@ func newFakeDynamicClient(objects ...runtime.Object) dynamic.Interface {
 }
 
 func TestCordon(t *testing.T) {
+	ctx := context.Background()
 	cases := []struct {
 		name      string
 		node      *core.Node
@@ -177,7 +179,7 @@ func TestCordon(t *testing.T) {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
 			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}), WithCordonLimiter(&fakeLimiter{}))
-			if err := d.Cordon(tc.node, tc.mutators...); err != nil {
+			if err := d.Cordon(ctx, tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
 						return
@@ -199,6 +201,7 @@ func TestCordon(t *testing.T) {
 }
 
 func TestUncordon(t *testing.T) {
+	ctx := context.Background()
 	cases := []struct {
 		name      string
 		node      *core.Node
@@ -264,7 +267,7 @@ func TestUncordon(t *testing.T) {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
 			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
-			if err := d.Uncordon(tc.node, tc.mutators...); err != nil {
+			if err := d.Uncordon(ctx, tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
 						return
@@ -286,6 +289,7 @@ func TestUncordon(t *testing.T) {
 }
 
 func TestDrain(t *testing.T) {
+	ctx := context.Background()
 	now := meta.Now()
 	cases := []struct {
 		name      string
@@ -546,7 +550,7 @@ func TestDrain(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newFakeClientSet([]runtime.Object{tc.node}, tc.reactions...)
 			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}), tc.options...)
-			if err := d.Drain(tc.node); err != nil {
+			if err := d.Drain(ctx, tc.node); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
 						return
@@ -654,6 +658,7 @@ func TestGetDrainConditionStatus(t *testing.T) {
 }
 
 func TestMarkDrain(t *testing.T) {
+	ctx := context.Background()
 	now := meta.Time{Time: time.Now()}
 	cases := []struct {
 		name        string
@@ -762,7 +767,7 @@ func TestMarkDrain(t *testing.T) {
 					t.Errorf("node %v initial drainStatus is not correct", tc.node.Name)
 				}
 				if !drainStatus.Marked {
-					if err := d.MarkDrain(tc.node, time.Now(), time.Time{}, false, 0); err != nil {
+					if err := d.MarkDrain(ctx, tc.node, time.Now(), time.Time{}, false, 0); err != nil {
 						t.Errorf("d.MarkDrain(%v): %v", tc.node.Name, err)
 					}
 					{
@@ -795,6 +800,7 @@ func TestSerializePolicy(t *testing.T) {
 }
 
 func TestAPICordonDrainer_MarkDrainDelete(t *testing.T) {
+	ctx := context.Background()
 	someTimeAgo := meta.NewTime(time.Date(1978, time.April, 12, 22, 00, 00, 00, time.UTC))
 	tests := []struct {
 		name         string
@@ -889,7 +895,7 @@ func TestAPICordonDrainer_MarkDrainDelete(t *testing.T) {
 			d := &APICordonDrainer{
 				c: fake.NewSimpleClientset(tt.node),
 			}
-			if err := d.MarkDrainDelete(tt.node); (err != nil) != tt.wantErr {
+			if err := d.MarkDrainDelete(ctx, tt.node); (err != nil) != tt.wantErr {
 				t.Errorf("MarkDrainDelete() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			newNode, err := d.c.CoreV1().Nodes().Get(tt.node.Name, meta.GetOptions{})

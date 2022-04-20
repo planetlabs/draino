@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -13,14 +14,15 @@ import (
 )
 
 func TestDrainSchedules_LastSchedule(t *testing.T) {
+	ctx := context.Background()
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
 	node1 := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node1", Annotations: map[string]string{CustomDrainBufferAnnotation: "10m"}}} // Using 10m in initNode ... that should be respected even if the schedule is removed.
 	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, NewEventRecorder(&record.FakeRecorder{}), period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
-	whenFirstSched, _ := scheduler.Schedule(node1, 0)
-	scheduler.DeleteSchedule(node1)
+	whenFirstSched, _ := scheduler.Schedule(ctx, node1, 0)
+	scheduler.DeleteSchedule(ctx, node1)
 
-	when, err := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}, 0)
+	when, err := scheduler.Schedule(ctx, &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}, 0)
 	if err != nil {
 		t.Errorf("DrainSchedules.Schedule() error = %v", err)
 		return
@@ -32,13 +34,13 @@ func TestDrainSchedules_LastSchedule(t *testing.T) {
 	if when.Before(from) || when.After(to) {
 		t.Errorf("Schedule out of timeWindow (1)")
 	}
-	scheduler.DeleteScheduleByName(nodeName)
+	scheduler.DeleteScheduleByName(ctx, nodeName)
 	node2 := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node2Failed", Annotations: map[string]string{CustomDrainBufferAnnotation: "30m"}}}
 	node3 := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "Node3", Annotations: map[string]string{CustomDrainBufferAnnotation: "20m"}}}
-	whenFirstSched, _ = scheduler.Schedule(node1, 0)
-	scheduler.Schedule(node2, 3)
-	whenThirdSched, _ := scheduler.Schedule(node3, 0)
-	when, err = scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}, 0)
+	whenFirstSched, _ = scheduler.Schedule(ctx, node1, 0)
+	scheduler.Schedule(ctx, node2, 3)
+	whenThirdSched, _ := scheduler.Schedule(ctx, node3, 0)
+	when, err = scheduler.Schedule(ctx, &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}, 0)
 	if err != nil {
 		t.Errorf("DrainSchedules.Schedule() error(2) = %v", err)
 		return
@@ -52,13 +54,14 @@ func TestDrainSchedules_LastSchedule(t *testing.T) {
 }
 
 func TestDrainSchedules_Schedule(t *testing.T) {
+	ctx := context.Background()
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
 	var failedCount int32 = 0
 	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, NewEventRecorder(&record.FakeRecorder{}), period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
-	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
-	whenFirstSchedSpecificGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeGrp", Annotations: map[string]string{DrainGroupAnnotation: "grp1"}}}, failedCount)
-	whenFirstSchedSpecificOverrideGroup, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeOverrideGrp", Annotations: map[string]string{DrainGroupAnnotation: "grpOverride"}}}, failedCount)
+	whenFirstSched, _ := scheduler.Schedule(ctx, &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
+	whenFirstSchedSpecificGroup, _ := scheduler.Schedule(ctx, &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeGrp", Annotations: map[string]string{DrainGroupAnnotation: "grp1"}}}, failedCount)
+	whenFirstSchedSpecificOverrideGroup, _ := scheduler.Schedule(ctx, &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNodeOverrideGrp", Annotations: map[string]string{DrainGroupAnnotation: "grpOverride"}}}, failedCount)
 
 	type timeWindow struct {
 		from, to time.Time
@@ -122,18 +125,18 @@ func TestDrainSchedules_Schedule(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Check that node is not yet scheduled for drain
-			hasSchedule, _ := scheduler.HasSchedule(tt.node)
+			hasSchedule, _ := scheduler.HasSchedule(ctx, tt.node)
 			if hasSchedule {
 				t.Errorf("Node %v should not have any schedule", tt.node.Name)
 			}
 			var failedCount int32 = 0
-			when, err := scheduler.Schedule(tt.node, failedCount)
+			when, err := scheduler.Schedule(ctx, tt.node, failedCount)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DrainSchedules.Schedule() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			// Check that node is scheduled for drain
-			hasSchedule, _ = scheduler.HasSchedule(tt.node)
+			hasSchedule, _ = scheduler.HasSchedule(ctx, tt.node)
 			if !hasSchedule {
 				t.Errorf("Missing schedule record for node %v", tt.node.Name)
 			}
@@ -149,22 +152,23 @@ type failDrainer struct {
 	NoopCordonDrainer
 }
 
-func (d *failDrainer) Drain(n *v1.Node) error { return errors.New("myerr") }
+func (d *failDrainer) Drain(ctx context.Context, n *v1.Node) error { return errors.New("myerr") }
 
 // Test to ensure there are no races when calling HasSchedule while the
 // scheduler is draining a node.
 func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
+	ctx := context.Background()
 	scheduler := NewDrainSchedules(&failDrainer{}, NewEventRecorder(&record.FakeRecorder{}), 0, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
 	node := &v1.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}}
 	var failedCount int32 = 0
-	when, err := scheduler.Schedule(node, failedCount)
+	when, err := scheduler.Schedule(ctx, node, failedCount)
 	if err != nil {
 		t.Fatalf("DrainSchedules.Schedule() error = %v", err)
 	}
 
 	timeout := time.After(time.Until(when) + time.Minute)
 	for {
-		hasSchedule, failed := scheduler.HasSchedule(node)
+		hasSchedule, failed := scheduler.HasSchedule(ctx, node)
 		if !hasSchedule {
 			t.Fatalf("Missing schedule record for node %v", node.Name)
 		}
@@ -188,11 +192,12 @@ func TestDrainSchedules_HasSchedule_Polling(t *testing.T) {
 }
 
 func TestDrainSchedules_DeleteSchedule(t *testing.T) {
+	ctx := context.Background()
 	fmt.Println("Now: " + time.Now().Format(time.RFC3339))
 	period := time.Minute
 	var failedCount int32 = 0
 	scheduler := NewDrainSchedules(&NoopCordonDrainer{}, NewEventRecorder(&record.FakeRecorder{}), period, DefaultSchedulingRetryBackoffDelay, []string{}, []SuppliedCondition{}, NodePreprovisioningConfiguration{}, zap.NewNop(), nil)
-	whenFirstSched, _ := scheduler.Schedule(&v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
+	whenFirstSched, _ := scheduler.Schedule(ctx, &v1.Node{ObjectMeta: meta.ObjectMeta{Name: "initNode"}}, failedCount)
 
 	type timeWindow struct {
 		from, to time.Time
@@ -224,12 +229,12 @@ func TestDrainSchedules_DeleteSchedule(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Check that node is not yet scheduled for drain
-			hasSchedule, _ := scheduler.HasSchedule(tt.node)
+			hasSchedule, _ := scheduler.HasSchedule(ctx, tt.node)
 			if hasSchedule {
 				t.Errorf("Node %v should not have any schedule", tt.node.Name)
 			}
 			var failedCount int32 = 0
-			when, err := scheduler.Schedule(tt.node, failedCount)
+			when, err := scheduler.Schedule(ctx, tt.node, failedCount)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DrainSchedules.Schedule() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -239,14 +244,14 @@ func TestDrainSchedules_DeleteSchedule(t *testing.T) {
 				t.Errorf("Schedule out of timeWindow")
 			}
 			// Check that node is scheduled for drain
-			hasSchedule, _ = scheduler.HasSchedule(tt.node)
+			hasSchedule, _ = scheduler.HasSchedule(ctx, tt.node)
 			if !hasSchedule {
 				t.Errorf("Missing schedule record for node %v", tt.node.Name)
 			}
 			// Deleting schedule
-			scheduler.DeleteSchedule(tt.node)
+			scheduler.DeleteSchedule(ctx, tt.node)
 			// Check that node is no more scheduled for drain
-			hasSchedule, _ = scheduler.HasSchedule(tt.node)
+			hasSchedule, _ = scheduler.HasSchedule(ctx, tt.node)
 			if hasSchedule {
 				t.Errorf("Node %v should not been scheduled anymore", tt.node.Name)
 			}

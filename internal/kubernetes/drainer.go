@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"io/ioutil"
 	"net/http"
 	"strconv"
@@ -146,21 +147,21 @@ func (e VolumeCleanupError) Unwrap() error {
 // A Cordoner cordons nodes.
 type Cordoner interface {
 	// Cordon the supplied node. Marks it unschedulable for new pods.
-	Cordon(n *core.Node, mutators ...nodeMutatorFn) error
+	Cordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error
 
 	// Uncordon the supplied node. Marks it schedulable for new pods.
-	Uncordon(n *core.Node, mutators ...nodeMutatorFn) error
+	Uncordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error
 }
 
 // A Drainer drains nodes.
 type Drainer interface {
 	// Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
-	Drain(n *core.Node) error
-	MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error
-	MarkDrainDelete(n *core.Node) error
-	GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error)
-	GetMaxDrainAttemptsBeforeFail(n *core.Node) int32
-	ResetRetryAnnotation(n *core.Node) error
+	Drain(ctx context.Context, n *core.Node) error
+	MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error
+	MarkDrainDelete(ctx context.Context, n *core.Node) error
+	GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error)
+	GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32
+	ResetRetryAnnotation(ctx context.Context, n *core.Node) error
 }
 
 type NodeReplacementStatus string
@@ -174,8 +175,8 @@ const (
 
 // A NodeReplacer helps to request for node replacement
 type NodeReplacer interface {
-	ReplaceNode(n *core.Node) (NodeReplacementStatus, error)
-	PreprovisionNode(n *core.Node) (NodeReplacementStatus, error)
+	ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error)
+	PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error)
 }
 
 // A CordonDrainer both cordons and drains nodes!
@@ -193,43 +194,47 @@ type DrainerNodeReplacer interface {
 // A NoopCordonDrainer does nothing.
 type NoopCordonDrainer struct{}
 
-func (d *NoopCordonDrainer) GetPodsToDrain(_ string, _ PodStore) ([]*core.Pod, error) {
+func (d *NoopCordonDrainer) GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error) {
 	return nil, nil
 }
 
 // Cordon does nothing.
-func (d *NoopCordonDrainer) Cordon(_ *core.Node, _ ...nodeMutatorFn) error { return nil }
+func (d *NoopCordonDrainer) Cordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
+	return nil
+}
 
 // Uncordon does nothing.
-func (d *NoopCordonDrainer) Uncordon(_ *core.Node, _ ...nodeMutatorFn) error { return nil }
+func (d *NoopCordonDrainer) Uncordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
+	return nil
+}
 
 // Drain does nothing.
-func (d *NoopCordonDrainer) Drain(_ *core.Node) error { return nil }
+func (d *NoopCordonDrainer) Drain(ctx context.Context, n *core.Node) error { return nil }
 
 // ResetRetryAnnotation does nothing.
-func (d *NoopCordonDrainer) ResetRetryAnnotation(n *core.Node) error { return nil }
+func (d *NoopCordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Node) error { return nil }
 
 // MarkDrain does nothing.
-func (d *NoopCordonDrainer) MarkDrain(_ *core.Node, _, _ time.Time, _ bool, _ int32) error {
+func (d *NoopCordonDrainer) MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	return nil
 }
 
 // MarkDrainDelete does nothing.
-func (d *NoopCordonDrainer) MarkDrainDelete(_ *core.Node) error {
+func (d *NoopCordonDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) error {
 	return nil
 }
 
-func (d *NoopCordonDrainer) GetMaxDrainAttemptsBeforeFail(_ *core.Node) int32 {
+func (d *NoopCordonDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32 {
 	return 0
 }
 
 // ReplaceNode return none
-func (d *NoopCordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
+func (d *NoopCordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
 	return NodeReplacementStatusNone, nil
 }
 
 // PreprovisionNode return none
-func (d *NoopCordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatus, error) {
+func (d *NoopCordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
 	return NodeReplacementStatusNone, nil
 }
 
@@ -380,11 +385,11 @@ func GetNodeRetryMaxAttempt(n *core.Node) (customValue int32, usedDefault bool, 
 	return 0, true, nil
 }
 
-func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(n *core.Node) int32 {
+func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32 {
 	customValue, useDefault, err := GetNodeRetryMaxAttempt(n)
 	if err != nil {
 		d.l.Warn(err.Error(), zap.String("node", n.Name))
-		d.eventRecorder.NodeEventf(n, core.EventTypeWarning, eventReasonBadValueForAnnotation, err.Error())
+		d.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonBadValueForAnnotation, err.Error())
 	}
 	if useDefault {
 		return d.maxDrainAttemptsBeforeFail
@@ -393,7 +398,10 @@ func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(n *core.Node) int32 {
 }
 
 // Cordon the supplied node. Marks it unschedulable for new pods.
-func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error {
+func (d *APICordonDrainer) Cordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "Cordon")
+	defer span.Finish()
+
 	if d.cordonLimiter != nil {
 		canCordon, reason := d.cordonLimiter.CanCordon(n)
 		if !canCordon {
@@ -422,7 +430,10 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 }
 
 // Uncordon the supplied node. Marks it schedulable for new pods.
-func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) error {
+func (d *APICordonDrainer) Uncordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "Uncordon")
+	defer span.Finish()
+
 	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
@@ -440,7 +451,10 @@ func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) err
 	return nil
 }
 
-func (d *APICordonDrainer) ResetRetryAnnotation(n *core.Node) error {
+func (d *APICordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Node) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ResetRetryAnnotation")
+	defer span.Finish()
+
 	// Till we are done with the annotation migration to the new key we have to deal with the 2 keys. Later we can remove that first block.
 	if n.Annotations[drainRetryAnnotationKey] == drainRetryFailedAnnotationValue {
 		PatchNodeAnnotationKey(d.c, n.Name, drainRetryAnnotationKey, drainRetryAnnotationValue)
@@ -449,7 +463,10 @@ func (d *APICordonDrainer) ResetRetryAnnotation(n *core.Node) error {
 }
 
 // MarkDrainDelete removes the condition on the node to mark the current drain schedule.
-func (d *APICordonDrainer) MarkDrainDelete(n *core.Node) error {
+func (d *APICordonDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "MarkDrainDelete")
+	defer span.Finish()
+
 	if err := RetryWithTimeout(
 		func() error {
 			nodeName := n.Name
@@ -486,7 +503,16 @@ func (d *APICordonDrainer) MarkDrainDelete(n *core.Node) error {
 }
 
 // MarkDrain set a condition on the node to mark that the drain is scheduled. (retry internally in case of failure)
-func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
+func (d *APICordonDrainer) MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "MarkDrain")
+	defer span.Finish()
+
+	span.SetTag("node", n.GetName())
+	span.SetTag("when", when)
+	span.SetTag("finish", finish)
+	span.SetTag("failCount", failCount)
+	span.SetTag("failed", failed)
+
 	if err := RetryWithTimeout(
 		func() error {
 			nodeName := n.Name
@@ -504,7 +530,7 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 			if !finish.IsZero() {
 				if failed {
 					msgSuffix = fmt.Sprintf(" | %s: %s", FailedStr, finish.Format(time.RFC3339))
-					if failCount >= d.GetMaxDrainAttemptsBeforeFail(n) {
+					if failCount >= d.GetMaxDrainAttemptsBeforeFail(ctx, n) {
 						freshNode.Annotations[drainRetryFailedAnnotationKey] = drainRetryFailedAnnotationValue
 					}
 				} else {
@@ -596,10 +622,13 @@ func GetDrainConditionStatus(n *core.Node) (DrainConditionStatus, error) {
 }
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
-func (d *APICordonDrainer) Drain(node *core.Node) error {
+func (d *APICordonDrainer) Drain(ctx context.Context, node *core.Node) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "Drain")
+	defer span.Finish()
+
 	// Do nothing if draining is not enabled.
 	if d.skipDrain {
-		LoggerForNode(node, d.l).Debug("Skipping drain because draining is disabled")
+		TracedLoggerForNode(ctx, node, d.l).Debug("Skipping drain because draining is disabled")
 		return nil
 	}
 
@@ -610,11 +639,11 @@ func (d *APICordonDrainer) Drain(node *core.Node) error {
 	}
 
 	if !n.Spec.Unschedulable {
-		LoggerForNode(node, d.l).Info("Aborting drain because the node is not cordoned")
+		TracedLoggerForNode(ctx, node, d.l).Info("Aborting drain because the node is not cordoned")
 		return NodeIsNotCordonError{NodeName: node.Name}
 	}
 
-	pods, err := d.GetPodsToDrain(n.GetName(), nil)
+	pods, err := d.GetPodsToDrain(ctx, n.GetName(), nil)
 	if err != nil {
 		return fmt.Errorf("cannot get pods for node %s: %w", n.GetName(), err)
 	}
@@ -624,16 +653,16 @@ func (d *APICordonDrainer) Drain(node *core.Node) error {
 	for i := range pods {
 		pod := pods[i]
 		go func() {
-			d.eventRecorder.NodeEventf(n, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod %s/%s to drain node", pod.Namespace, pod.Name)
-			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod to drain node %s", n.Name)
-			if err := d.evict(n, pod, abort); err != nil {
-				d.eventRecorder.NodeEventf(n, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-				d.eventRecorder.PodEventf(pod, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed: %v", err)
+			d.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod %s/%s to drain node", pod.Namespace, pod.Name)
+			d.eventRecorder.PodEventf(ctx, pod, core.EventTypeNormal, eventReasonEvictionStarting, "Evicting pod to drain node %s", n.Name)
+			if err := d.evict(ctx, n, pod, abort); err != nil {
+				d.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+				d.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, eventReasonEvictionFailed, "Eviction failed: %v", err)
 				errs <- fmt.Errorf("cannot evict pod %s/%s: %w", pod.GetNamespace(), pod.GetName(), err)
 				return
 			}
-			d.eventRecorder.NodeEventf(n, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod %s/%s evicted from node", pod.Namespace, pod.Name)
-			d.eventRecorder.PodEventf(pod, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod evicted from node %s", n.Name)
+			d.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod %s/%s evicted from node", pod.Namespace, pod.Name)
+			d.eventRecorder.PodEventf(ctx, pod, core.EventTypeNormal, eventReasonEvictionSucceeded, "Pod evicted from node %s", n.Name)
 			errs <- nil // the for range pods below expects to receive one value per pod from the errs channel
 		}()
 	}
@@ -658,7 +687,10 @@ func (d *APICordonDrainer) Drain(node *core.Node) error {
 	return nil
 }
 
-func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*core.Pod, error) {
+func (d *APICordonDrainer) GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "GetPodsToDrain")
+	defer span.Finish()
+
 	var err error
 	var pods []*core.Pod
 	if podStore != nil {
@@ -690,12 +722,12 @@ func (d *APICordonDrainer) GetPodsToDrain(node string, podStore PodStore) ([]*co
 	return include, nil
 }
 
-func (d *APICordonDrainer) evict(node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+func (d *APICordonDrainer) evict(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	evictionAPIURL, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, d.runtimeObjectStore)
 	if ok {
-		return d.evictWithOperatorAPI(evictionAPIURL, node, pod, abort)
+		return d.evictWithOperatorAPI(ctx, evictionAPIURL, node, pod, abort)
 	}
-	return d.evictWithKubernetesAPI(node, pod, abort)
+	return d.evictWithKubernetesAPI(ctx, node, pod, abort)
 }
 
 func (d *APICordonDrainer) getGracePeriod(pod *core.Pod) int64 {
@@ -705,9 +737,12 @@ func (d *APICordonDrainer) getGracePeriod(pod *core.Pod) int64 {
 	}
 	return gracePeriod
 }
-func (d *APICordonDrainer) evictWithKubernetesAPI(node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+func (d *APICordonDrainer) evictWithKubernetesAPI(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "evictWithKubernetesAPI")
+	defer span.Finish()
+
 	gracePeriod := d.getGracePeriod(pod)
-	return d.evictionSequence(node, pod, abort,
+	return d.evictionSequence(ctx, node, pod, abort,
 		//eviction function
 		func() error {
 			return d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
@@ -737,12 +772,15 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(node *core.Node, pod *core.Pod
 // 404    : the pod is not found, already delete
 // 503    : the service is not able to answer now, potentially not reaching the leader, you should retry
 // 500    : server error, that could be a transient error, retry couple of times
-func (d *APICordonDrainer) evictWithOperatorAPI(url string, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "evictWithKubernetesAPI")
+	defer span.Finish()
+
 	conditions := GetConditionsTypes(GetNodeOffendingConditions(node, d.conditions))
 	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
 	gracePeriod := d.getGracePeriod(pod)
 	maxRetryOn500 := 4
-	return d.evictionSequence(node, pod, abort,
+	return d.evictionSequence(ctx, node, pod, abort,
 		//eviction function
 		func() error {
 			evictionPayload := &policy.Eviction{
@@ -752,6 +790,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(url string, node *core.Node, pod
 			}
 
 			req, err := http.NewRequest("POST", url, GetEvictionJsonPayload(evictionPayload))
+			req = req.WithContext(ctx)
 			req.Header.Set("Content-Type", "application/json")
 
 			client := httptrace.WrapClient(&http.Client{Timeout: 10 * time.Second})
@@ -793,8 +832,11 @@ func (d *APICordonDrainer) evictWithOperatorAPI(url string, node *core.Node, pod
 	)
 }
 
-func (d *APICordonDrainer) evictionSequence(node *core.Node, pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), d.deleteTimeout())
+func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "evictionSequence")
+	defer span.Finish()
+
+	ctx, cancel := context.WithTimeout(ctx, d.deleteTimeout())
 	defer cancel()
 	backoff := wait.Backoff{
 		Duration: 10 * time.Second,
@@ -831,8 +873,8 @@ func (d *APICordonDrainer) evictionSequence(node *core.Node, pod *core.Pod, abor
 			// cannot currently be evicted, for example due to a pod
 			// disruption budget.
 			case apierrors.IsTooManyRequests(err):
-				d.eventRecorder.NodeEventf(node, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod %s/%s failed: %v", pod.Namespace, pod.Name, err)
-				d.eventRecorder.PodEventf(pod, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod from node %s failed: %v", node.Name, err)
+				d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod %s/%s failed: %v", pod.Namespace, pod.Name, err)
+				d.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod from node %s failed: %v", node.Name, err)
 				waitTime := backoff.Step()
 				if statErr, ok := err.(apierrors.APIStatus); ok && statErr.Status().Details != nil {
 					if proposedWaitSeconds := statErr.Status().Details.RetryAfterSeconds; proposedWaitSeconds > 0 {
@@ -846,7 +888,7 @@ func (d *APICordonDrainer) evictionSequence(node *core.Node, pod *core.Pod, abor
 			case apierrors.IsNotFound(err):
 				// the pod is already gone
 				// maybe we still need to perform PVC management
-				err = d.deletePVCAndPV(pod)
+				err = d.deletePVCAndPV(ctx, pod)
 				if err != nil {
 					return VolumeCleanupError{Err: err} // this one is typed because we match it to a failure cause
 				}
@@ -860,7 +902,7 @@ func (d *APICordonDrainer) evictionSequence(node *core.Node, pod *core.Pod, abor
 				if err != nil {
 					return fmt.Errorf("cannot confirm pod was deleted: %w", err)
 				}
-				err = d.deletePVCAndPV(pod)
+				err = d.deletePVCAndPV(ctx, pod)
 				if err != nil {
 					return VolumeCleanupError{Err: err} // this one is typed because we match it to a failure cause
 				}
@@ -893,19 +935,23 @@ func (d *APICordonDrainer) awaitDeletion(pod *core.Pod, timeout time.Duration) e
 	return nil
 }
 
-func (d *APICordonDrainer) deletePVCAndPV(pod *core.Pod) error {
-	pvcDeleted, err := d.deletePVCAssociatedWithStorageClass(pod)
+func (d *APICordonDrainer) deletePVCAndPV(ctx context.Context, pod *core.Pod) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVCAndPV")
+	defer span.Finish()
+	span.SetTag("pod", pod.GetName())
+
+	pvcDeleted, err := d.deletePVCAssociatedWithStorageClass(ctx, pod)
 	if err != nil {
 		return err
 	}
 
 	// now if the pod is pending because it is missing the PVC and if it is controlled by a statefulset we should delete it to have statefulset controller rebuilding the PVC
 	if len(pvcDeleted) > 0 {
-		if err := d.deletePVAssociatedWithDeletedPVC(pod, pvcDeleted); err != nil {
+		if err := d.deletePVAssociatedWithDeletedPVC(ctx, pod, pvcDeleted); err != nil {
 			return err
 		}
 		for _, pvc := range pvcDeleted {
-			if err := d.podDeleteRetryWaitingForPVC(pod, pvc); err != nil {
+			if err := d.podDeleteRetryWaitingForPVC(ctx, pod, pvc); err != nil {
 				return err
 			}
 		}
@@ -913,7 +959,11 @@ func (d *APICordonDrainer) deletePVCAndPV(pod *core.Pod) error {
 	return nil
 }
 
-func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(pod *core.Pod, pvc *core.PersistentVolumeClaim) error {
+func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(ctx context.Context, pod *core.Pod, pvc *core.PersistentVolumeClaim) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "podDeleteRetryWaitingForPVC")
+	defer span.Finish()
+	span.SetTag("pvc", pvc.GetName())
+
 	podDeleteCheckPVCFunc := func() (bool, error) {
 		// check if the PVC was created
 		gotPVC, err := d.c.CoreV1().PersistentVolumeClaims(pvc.GetNamespace()).Get(pvc.GetName(), meta.GetOptions{})
@@ -938,7 +988,10 @@ func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(pod *core.Pod, pvc *core.
 	return wait.PollImmediate(DefaultPodDeletePeriodWaitingForPVC, DefaultPVCRecreateTimeout, podDeleteCheckPVCFunc)
 }
 
-func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(pod *core.Pod, pvcDeleted []*core.PersistentVolumeClaim) error {
+func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context, pod *core.Pod, pvcDeleted []*core.PersistentVolumeClaim) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVAssociatedWithDeletedPVC")
+	defer span.Finish()
+
 	for _, claim := range pvcDeleted {
 		if claim.Spec.VolumeName == "" {
 			continue
@@ -949,8 +1002,8 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(pod *core.Pod, pvcDe
 			continue // This PV was already deleted
 		}
 
-		d.eventRecorder.PersistentVolumeEventf(pv, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pvc %s/%s and pod %s/%s", claim.Namespace, claim.Name, pod.Namespace, pod.Name))
-		d.eventRecorder.PodEventf(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PV %s", pv.Name))
+		d.eventRecorder.PersistentVolumeEventf(ctx, pv, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pvc %s/%s and pod %s/%s", claim.Namespace, claim.Name, pod.Namespace, pod.Name))
+		d.eventRecorder.PodEventf(ctx, pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PV %s", pv.Name))
 
 		err = d.c.CoreV1().PersistentVolumes().Delete(pv.Name, nil)
 		if apierrors.IsNotFound(err) {
@@ -958,8 +1011,8 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(pod *core.Pod, pvcDe
 			continue // This PV was already deleted
 		}
 		if err != nil {
-			d.eventRecorder.PersistentVolumeEventf(pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV: %v", err))
-			d.eventRecorder.PodEventf(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV %s: %v", pv.Name, err))
+			d.eventRecorder.PersistentVolumeEventf(ctx, pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV: %v", err))
+			d.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV %s: %v", pv.Name, err))
 			return fmt.Errorf("cannot delete pv %s: %w", pv.Name, err)
 		}
 		d.l.Info("deleting pv", zap.String("pv", pv.Name))
@@ -990,7 +1043,10 @@ func (d *APICordonDrainer) awaitPVDeletion(pv *core.PersistentVolume, timeout ti
 
 // deletePVCAssociatedWithStorageClass takes care of deleting the PVCs associated with the annotated classes
 // returns the list of deleted PVCs and the first error encountered if any
-func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([]*core.PersistentVolumeClaim, error) {
+func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(ctx context.Context, pod *core.Pod) ([]*core.PersistentVolumeClaim, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVCAssociatedWithStorageClass")
+	defer span.Finish()
+
 	if d.storageClassesAllowingPVDeletion == nil {
 		return nil, nil
 	}
@@ -1024,8 +1080,8 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 			continue
 		}
 
-		d.eventRecorder.PodEventf(pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PVC %s/%s", pvc.Namespace, pvc.Name))
-		d.eventRecorder.PersistentVolumeClaimEventf(pvc, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pod %s/%s", pod.Namespace, pod.Name))
+		d.eventRecorder.PodEventf(ctx, pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PVC %s/%s", pvc.Namespace, pvc.Name))
+		d.eventRecorder.PersistentVolumeClaimEventf(ctx, pvc, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pod %s/%s", pod.Namespace, pod.Name))
 
 		err = d.c.CoreV1().PersistentVolumeClaims(pod.GetNamespace()).Delete(v.PersistentVolumeClaim.ClaimName, nil)
 		if apierrors.IsNotFound(err) {
@@ -1033,8 +1089,8 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(pod *core.Pod) ([
 			continue // This PVC was already deleted
 		}
 		if err != nil {
-			d.eventRecorder.PodEventf(pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PVC %s/%s: %v", pvc.Namespace, pvc.Name, err))
-			d.eventRecorder.PersistentVolumeClaimEventf(pvc, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete: %v", err))
+			d.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PVC %s/%s: %v", pvc.Namespace, pvc.Name, err))
+			d.eventRecorder.PersistentVolumeClaimEventf(ctx, pvc, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete: %v", err))
 			return deletedPVCs, fmt.Errorf("cannot delete pvc %s/%s: %w", pod.GetNamespace(), v.PersistentVolumeClaim.ClaimName, err)
 		}
 		d.l.Info("deleting pvc", zap.String("pvc", v.PersistentVolumeClaim.ClaimName), zap.String("namespace", pod.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
@@ -1068,7 +1124,10 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 	})
 }
 
-func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, withRateLimiting bool) (NodeReplacementStatus, error) {
+func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.Node, reason string, withRateLimiting bool) (NodeReplacementStatus, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "performNodeReplacement")
+	defer span.Finish()
+
 	nodeFromStore, err := d.runtimeObjectStore.Nodes().Get(n.Name)
 	if err != nil {
 		return NodeReplacementStatusNone, err
@@ -1077,7 +1136,7 @@ func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, w
 	replacementValue, ok := nodeFromStore.Labels[NodeLabelKeyReplaceRequest]
 	if !ok || replacementValue == NodeLabelValueReplaceCleanup {
 		if withRateLimiting && !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
-			d.eventRecorder.NodeEventf(n, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
+			d.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
 			return NodeReplacementStatusBlockedByLimiter, nil
 		}
 
@@ -1106,12 +1165,18 @@ func (d *APICordonDrainer) performNodeReplacement(n *core.Node, reason string, w
 	}
 }
 
-func (d *APICordonDrainer) ReplaceNode(n *core.Node) (NodeReplacementStatus, error) {
-	return d.performNodeReplacement(n, newNodeRequestReasonReplacement, true)
+func (d *APICordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ReplaceNode")
+	defer span.Finish()
+
+	return d.performNodeReplacement(ctx, n, newNodeRequestReasonReplacement, true)
 }
 
-func (d *APICordonDrainer) PreprovisionNode(n *core.Node) (NodeReplacementStatus, error) {
-	return d.performNodeReplacement(n, newNodeRequestReasonPreprovisioning, false)
+func (d *APICordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "PreprovisionNode")
+	defer span.Finish()
+
+	return d.performNodeReplacement(ctx, n, newNodeRequestReasonPreprovisioning, false)
 }
 
 var evictionPayloadEncoder runtime.Encoder
