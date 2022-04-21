@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	ConfigurationAnnotationKey = "node-lifecycle.datadoghq.com/draino-configuration"
-	OutOfScopeAnnotationValue  = "out-of-scope"
-	nodeOptionsMetricName      = "node_options_nodes_total"
+	ConfigurationLabelKey = "node-lifecycle.datadoghq.com/draino-configuration"
+	OutOfScopeLabelValue  = "out-of-scope"
+	nodeOptionsMetricName = "node_options_nodes_total"
 	nodeOptionsCPUMetricName   = "node_options_cpu_total"
 )
 
@@ -169,7 +169,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 		case <-ticker.C:
 			// Let's update the nodes metadata
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
-				_, outOfDate, err := s.getAnnotationUpdate(node)
+				_, outOfDate, err := s.getLabelUpdate(node)
 				if err != nil {
 					s.logger.Error("Failed to check if config annotation was out of date", zap.Error(err), zap.String("node", node.Name))
 				} else if outOfDate {
@@ -230,7 +230,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 
 func NodeInScopeWithConditionCheck(conditions []SuppliedCondition, node *v1.Node) bool {
 	conditionsStr := GetConditionsTypes(conditions)
-	return (len(node.Annotations[ConfigurationAnnotationKey]) > 0 && node.Annotations[ConfigurationAnnotationKey] != OutOfScopeAnnotationValue) && atLeastOneConditionAcceptedByTheNode(conditionsStr, node)
+	return (len(node.Labels[ConfigurationLabelKey]) > 0 && node.Labels[ConfigurationLabelKey] != OutOfScopeLabelValue) && atLeastOneConditionAcceptedByTheNode(conditionsStr, node)
 }
 
 //updateGauges is in charge of updating the gauges values and purging the series that do not exist anymore
@@ -280,14 +280,14 @@ func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
 	s.queueNodeToBeUpdated.AddRateLimited(node.Name)
 }
 
-// getAnnotationUpdate returns the annotation value the node should have and whether or not the annotation value is currently out of date (not equal to first return value)
-func (s *DrainoConfigurationObserverImpl) getAnnotationUpdate(node *v1.Node) (string, bool, error) {
-	valueOriginal := node.Annotations[ConfigurationAnnotationKey]
+// getLabelUpdate returns the label value the node should have and whether or not the label
+// value is currently out of date (not equal to first return value)
+func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string, bool, error) {
+	valueOriginal := node.Labels[ConfigurationLabelKey]
 	configsOriginal := strings.Split(valueOriginal, ",")
 	var configs []string
 	for _, config := range configsOriginal {
-		// TODO delete empty string check once out of scope value has gone to all applicable nodes' annotation value in the fleet
-		if config == "" || config == OutOfScopeAnnotationValue || config == s.configName {
+		if config == "" || config == OutOfScopeLabelValue || config == s.configName {
 			continue
 		}
 		configs = append(configs, config)
@@ -302,7 +302,7 @@ func (s *DrainoConfigurationObserverImpl) getAnnotationUpdate(node *v1.Node) (st
 	}
 	if len(configs) == 0 {
 		// add out of scope value for user visibility
-		configs = append(configs, OutOfScopeAnnotationValue)
+		configs = append(configs, OutOfScopeLabelValue)
 	}
 	sort.Strings(configs)
 	valueDesired := strings.Join(configs, ",")
@@ -352,7 +352,7 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 			nodeName := obj.(string)
 
 			if err := RetryWithTimeout(func() error {
-				err := s.updateNodeAnnotations(nodeName)
+				err := s.updateNodeLabels(nodeName)
 				if err != nil {
 					s.logger.Info("Failed attempt to update annotation", zap.String("node", nodeName), zap.Error(err))
 				}
@@ -371,8 +371,8 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 	}
 }
 
-func (s *DrainoConfigurationObserverImpl) updateNodeAnnotations(nodeName string) error {
-	s.logger.Info("Update node annotations", zap.String("node", nodeName))
+func (s *DrainoConfigurationObserverImpl) updateNodeLabels(nodeName string) error {
+	s.logger.Info("Update node labels", zap.String("node", nodeName))
 	node, err := s.runtimeObjectStore.Nodes().Get(nodeName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -380,7 +380,7 @@ func (s *DrainoConfigurationObserverImpl) updateNodeAnnotations(nodeName string)
 		}
 		return err
 	}
-	desiredValue, outOfDate, err := s.getAnnotationUpdate(node)
+	desiredValue, outOfDate, err := s.getLabelUpdate(node)
 	if err != nil {
 		return err
 	}
@@ -389,7 +389,7 @@ func (s *DrainoConfigurationObserverImpl) updateNodeAnnotations(nodeName string)
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
 		}
-		return PatchNodeAnnotationKey(s.kclient, nodeName, ConfigurationAnnotationKey, desiredValue)
+		return PatchNodeLabelKey(s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
 	}
 	return nil
 }
@@ -402,29 +402,31 @@ func (s *DrainoConfigurationObserverImpl) Reset() {
 		s.logger.Info("Wait for node informer to sync", zap.Bool("synced", synced))
 		return synced, nil
 	}); err != nil {
-		s.logger.Error("Failed to sync node informer before reset annotation. Reset annotation cancelled.")
+		s.logger.Error("Failed to sync node informer before reset labels. Reset labels cancelled.")
 	}
 
-	s.logger.Info("Resetting annotations for configuration names")
+	s.logger.Info("Resetting labels for configuration names")
 	// Reset the annotations that are set by the observer
 	for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
-		s.logger.Info("Resetting annotations for node", zap.String("node", node.Name))
-		if node.Annotations[ConfigurationAnnotationKey] != "" {
+		s.logger.Info("Resetting labels for node", zap.String("node", node.Name))
+		if node.Labels[ConfigurationLabelKey] != "" {
 			if err := RetryWithTimeout(func() error {
 				time.Sleep(2 * time.Second)
-				err := PatchDeleteNodeAnnotationKey(s.kclient, node.Name, ConfigurationAnnotationKey)
+				err := PatchDeleteNodeLabelKey(s.kclient, node.Name, ConfigurationLabelKey)
 				if err != nil {
-					s.logger.Info("Failed attempt to reset annotation", zap.String("node", node.Name), zap.Error(err))
+					s.logger.Info("Failed attempt to reset labels", zap.String("node", node.Name),
+						zap.Error(err))
 				}
 				return err
 			}, 500*time.Millisecond, 10*time.Second); err != nil {
-				s.logger.Error("Failed to reset annotations", zap.String("node", node.Name), zap.Error(err))
+				s.logger.Error("Failed to reset labels", zap.String("node", node.Name),
+					zap.Error(err))
 				continue
 			}
-			s.logger.Info("Annotation reset done", zap.String("node", node.Name))
+			s.logger.Info("Labels reset done", zap.String("node", node.Name))
 		}
 	}
-	s.logger.Info("Nodes annotation reset completed")
+	s.logger.Info("Nodes labels reset completed")
 }
 
 func (s *DrainoConfigurationObserverImpl) HasPodWithPVCManagementEnabled(node *v1.Node) bool {
