@@ -46,8 +46,11 @@ Flags:
                                  Leader election renew deadline.
       --leader-election-retry-period=2s
                                  Leader election retry period.
+      --leader-election-token-name=draino
+                                 Leader election token name.
       --skip-drain               Whether to skip draining nodes after cordoning.
       --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
+      --evict-statefulset-pods   Evict pods that were created by an extant StatefulSet.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
       --protected-pod-annotation=KEY[=VALUE] ...
