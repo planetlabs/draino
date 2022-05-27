@@ -1,3 +1,7 @@
+# Project maintenance
+
+This is a fork of `planetlabs/draino`. This fork is public because our primary intention was to contribute to the original project. With time the original project was not maintained anymore (difficulties to have reviews, and changes not integrated). This code as diverged a lot compare to the original project. Since the initial design is blocking us for some evolutions, we will soon stop maintaining that public fork soon (before end of 2022). We will maybe come back with a new equivalent project that we be owned and maintained by datadog, with more feature in te domain of workload eviction and node replacement
+
 # draino [![Docker Pulls](https://img.shields.io/docker/pulls/planetlabs/draino.svg)](https://hub.docker.com/r/planetlabs/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/planetlabs/draino) [![Travis](https://img.shields.io/travis/com/planetlabs/draino.svg?maxAge=300)](https://travis-ci.com/planetlabs/draino/) [![Codecov](https://img.shields.io/codecov/c/github/planetlabs/draino.svg?maxAge=3600)](https://codecov.io/gh/planetlabs/draino/)
 Draino automatically drains Kubernetes nodes based on labels and node
 conditions. Nodes that match _all_ of the supplied labels and _any_ of the
