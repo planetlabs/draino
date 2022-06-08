@@ -110,7 +110,8 @@ func main() {
 		maxDrainAttemptsBeforeFail     = app.Flag("max-drain-attempts-before-fail", "Maximum number of failed drain attempts before giving-up on draining the node.").Default("8").Int()
 
 		// Pod Opt-in flags
-		optInPodAnnotations = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		optInPodAnnotations      = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		shortLivedPodAnnotations = app.Flag("short-lived-pod-annotation", "Pod that have a short live, just like job; we prefer let them run till the end instead of evicting them; node is cordon. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
 		// NodeReplacement limiter flags
 		maxNodeReplacementPerHour = app.Flag("max-node-replacement-per-hour", "Maximum number of nodes per hour for which draino can ask replacement.").Default("2").Int()
@@ -345,13 +346,16 @@ func main() {
 	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: kubernetes.Component})
 	eventRecorder := kubernetes.NewEventRecorder(k8sEventRecorder)
 
+	consolidatedOptInAnnotations := append(*optInPodAnnotations, *shortLivedPodAnnotations...)
+
 	cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 		eventRecorder,
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
+		kubernetes.WithShortLivedPodFilter(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *shortLivedPodAnnotations...)),
 		kubernetes.WithPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
-			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.NewPodFilters(pf...)))),
+			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)))),
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
@@ -362,7 +366,7 @@ func main() {
 
 	podFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
 		kubernetes.NewPodFiltersWithOptInFirst(
-			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
+			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
 
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
 		cs,
