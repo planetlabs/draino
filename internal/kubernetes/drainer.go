@@ -732,7 +732,7 @@ func (d *APICordonDrainer) GetPodsToDrain(ctx context.Context, node string, podS
 					return nil, fmt.Errorf("cannot filter shortLivedPod: %w", err)
 				}
 				if shortLivedPod {
-					continue // we don't want to drain that pod, skip it
+					continue // we don't want to evict that pod, skip it
 				}
 			}
 			include = append(include, p)
