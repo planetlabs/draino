@@ -353,9 +353,11 @@ func main() {
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
 		kubernetes.EvictionHeadroom(*evictionHeadroom),
 		kubernetes.WithSkipDrain(*skipDrain),
-		kubernetes.WithShortLivedPodFilter(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *shortLivedPodAnnotations...)),
-		kubernetes.WithPodFilter(kubernetes.NewPodFiltersIgnoreCompletedPods(
-			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)))),
+		kubernetes.WithPodFilter(
+			kubernetes.NewPodFiltersIgnoreCompletedPods(
+				kubernetes.NewPodFiltersIgnoreShortLivedPods(
+					kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)),
+					runtimeObjectStoreImpl, *shortLivedPodAnnotations...))),
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),

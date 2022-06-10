@@ -27,10 +27,10 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
-
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
+	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	core "k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,8 +42,6 @@ import (
 	runtimejson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-
-	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
 )
 
 // Default pod eviction settings.
@@ -249,7 +247,6 @@ type APICordonDrainer struct {
 	runtimeObjectStore RuntimeObjectStore
 
 	filter                 PodFilterFunc
-	shortLivedPodFilter    PodFilterFunc
 	cordonLimiter          CordonLimiter
 	nodeReplacementLimiter NodeReplacementLimiter
 
@@ -288,14 +285,6 @@ func EvictionHeadroom(h time.Duration) APICordonDrainerOption {
 func WithPodFilter(f PodFilterFunc) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.filter = f
-	}
-}
-
-// WithShortLivedPodFilter configures a filter that may be used to exclude pods that behave like jobs...
-// they are going to die by themselves, we should not evict them
-func WithShortLivedPodFilter(f PodFilterFunc) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
-		d.shortLivedPodFilter = f
 	}
 }
 
@@ -726,15 +715,6 @@ func (d *APICordonDrainer) GetPodsToDrain(ctx context.Context, node string, podS
 			return nil, fmt.Errorf("cannot filter pods: %w", err)
 		}
 		if passes {
-			if d.shortLivedPodFilter != nil {
-				shortLivedPod, _, err := d.shortLivedPodFilter(*p)
-				if err != nil {
-					return nil, fmt.Errorf("cannot filter shortLivedPod: %w", err)
-				}
-				if shortLivedPod {
-					continue // we don't want to evict that pod, skip it
-				}
-			}
 			include = append(include, p)
 		}
 	}
