@@ -140,6 +140,20 @@ func NewPodFiltersWithOptInFirst(optInFilter, filter PodFilterFunc) PodFilterFun
 	}
 }
 
+func NewPodFiltersIgnoreShortLivedPods(filter PodFilterFunc, store RuntimeObjectStore, annotations ...string) PodFilterFunc {
+	shortLivedPodFilter := PodOrControllerHasAnyOfTheAnnotations(store, annotations...)
+	return func(p core.Pod) (bool, string, error) {
+		isShortLived, _, err := shortLivedPodFilter(p)
+		if err != nil {
+			return false, "error-in-short-lived-filter", err
+		}
+		if isShortLived {
+			return false, "short-lived-pod", nil
+		}
+		return filter(p)
+	}
+}
+
 func NewPodFiltersIgnoreCompletedPods(filter PodFilterFunc) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
 		if p.Status.Phase == core.PodSucceeded || p.Status.Phase == core.PodFailed {

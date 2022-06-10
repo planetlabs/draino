@@ -22,10 +22,10 @@ import (
 )
 
 const (
-	ConfigurationLabelKey = "node-lifecycle.datadoghq.com/draino-configuration"
-	OutOfScopeLabelValue  = "out-of-scope"
-	nodeOptionsMetricName = "node_options_nodes_total"
-	nodeOptionsCPUMetricName   = "node_options_cpu_total"
+	ConfigurationLabelKey    = "node-lifecycle.datadoghq.com/draino-configuration"
+	OutOfScopeLabelValue     = "out-of-scope"
+	nodeOptionsMetricName    = "node_options_nodes_total"
+	nodeOptionsCPUMetricName = "node_options_cpu_total"
 )
 
 type DrainoConfigurationObserver interface {
