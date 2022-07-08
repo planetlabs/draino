@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -349,24 +348,28 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 		// func encapsultation to benefit from defer s.queue.Done()
 		func(obj interface{}) {
 			defer s.queueNodeToBeUpdated.Done(obj)
+
 			nodeName := obj.(string)
+			defer s.queueNodeToBeUpdated.Forget(nodeName)
+			// in all case we can forget the node
+			// if needed it will come back at next observability iteration
 
 			if err := RetryWithTimeout(func() error {
 				err := s.updateNodeLabels(nodeName)
 				if err != nil {
-					s.logger.Info("Failed attempt to update annotation", zap.String("node", nodeName), zap.Error(err))
+					if apierrors.IsNotFound(err) {
+						return nil // the node was deleted, no more need for update.
+					}
+					s.logger.Info("Failed at tempt to update annotation", zap.String("node", nodeName), zap.Error(err))
 				}
 				return err
-			}, 500*time.Millisecond, 10*time.Second); err != nil {
+			}, 500*time.Millisecond, 3*time.Second); err != nil {
 				requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
 				s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount))
-				// let's retry later
-				jitter := time.Duration(rand.Int63n(int64(60*requeueCount))) * time.Second
-				s.queueNodeToBeUpdated.AddAfter(obj, time.Minute+jitter)
-				return
+				// let's forget for that iteration
+				// the node will be retried at next observability iteration
 			}
-			// Remove the nodeName from the queue
-			s.queueNodeToBeUpdated.Forget(nodeName)
+
 		}(obj)
 	}
 }
@@ -389,7 +392,13 @@ func (s *DrainoConfigurationObserverImpl) updateNodeLabels(nodeName string) erro
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
 		}
-		return PatchNodeLabelKey(s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
+		err := PatchNodeLabelKey(s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
 	}
 	return nil
 }

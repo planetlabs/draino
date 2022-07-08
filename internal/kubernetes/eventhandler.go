@@ -19,9 +19,10 @@ package kubernetes
 import (
 	"context"
 	"fmt"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"strings"
 	"time"
+
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"

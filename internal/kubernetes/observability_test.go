@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -198,6 +199,8 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 		nodeFilterFunc func(obj interface{}) bool
 		objects        []runtime.Object
 		validationFunc func(node *v1.Node) bool
+		wantErr        bool
+		isNotFoundErr  bool
 	}{
 		{
 			name:           "updates when out of date",
@@ -214,6 +217,23 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 			validationFunc: func(node *v1.Node) bool {
 				return node.Labels[ConfigurationLabelKey] == "draino1"
 			},
+		},
+		{
+			name:           "node do not exist",
+			configName:     "draino1",
+			nodeFilterFunc: func(obj interface{}) bool { return true },
+			objects: []runtime.Object{
+				&v1.Node{
+					ObjectMeta: meta.ObjectMeta{
+						Name: "node1",
+					},
+				},
+			},
+			nodeName: "node_other",
+			validationFunc: func(node *v1.Node) bool {
+				return node.Labels[ConfigurationLabelKey] == "draino1"
+			},
+			wantErr: true,
 		},
 	}
 
@@ -232,6 +252,23 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 				logger:             zap.NewNop(),
 			}
 			err := s.updateNodeLabels(tt.nodeName)
+			if err == nil && tt.wantErr {
+				t.Errorf("Should have returned and error")
+				return
+			}
+			if err != nil && !tt.wantErr {
+				t.Errorf("Should NOT have returned and error")
+				return
+			}
+
+			if err != nil && tt.wantErr {
+				if tt.isNotFoundErr && !apierrors.IsNotFound(err) {
+					t.Errorf("Error should be of type isNotFound")
+					return
+				}
+				return
+			}
+
 			require.NoError(t, err)
 			if err := wait.PollImmediate(50*time.Millisecond, 5*time.Second,
 				func() (bool, error) {
