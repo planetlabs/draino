@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
@@ -33,8 +34,9 @@ const (
 	DrainGroupAnnotation              = "draino/drain-group"          // this one adds subgroup to the default group (subgroup creation)
 	DrainGroupOverrideAnnotation      = "draino/drain-group-override" // this one completely overrides the default group
 
-	preprovisioningAnnotationKey   = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
-	preprovisioningAnnotationValue = "true"
+	preprovisioningAnnotationKey        = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
+	preprovisioningAnnotationValue      = "true"
+	preprovisioningFalseAnnotationValue = "false"
 )
 
 type DrainScheduler interface {
@@ -53,8 +55,9 @@ type SchedulesGroup struct {
 }
 
 type NodePreprovisioningConfiguration struct {
-	Timeout     time.Duration
-	CheckPeriod time.Duration
+	Timeout           time.Duration
+	CheckPeriod       time.Duration
+	AllNodesByDefault bool
 }
 
 type DrainSchedules struct {
@@ -410,7 +413,7 @@ func (d *DrainSchedules) handleDrainFailure(ctx context.Context, sched *schedule
 }
 
 func (d *DrainSchedules) hasPreprovisioningAnnotation(node *v1.Node) bool {
-	return node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue
+	return node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue || (d.preprovisioningConfiguration.AllNodesByDefault && !(node.Annotations[preprovisioningAnnotationKey] == preprovisioningFalseAnnotationValue))
 }
 
 type AlreadyScheduledError struct {
