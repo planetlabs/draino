@@ -118,8 +118,9 @@ func main() {
 		durationBeforeReplacement = app.Flag("duration-before-replacement", "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.").Default(kubernetes.DefaultDurationBeforeReplacement.String()).Duration()
 
 		// Preprovisioning flags
-		preprovisioningTimeout     = app.Flag("preprovisioning-timeout", "Timeout for a node to be preprovisioned before draining").Default(kubernetes.DefaultPreprovisioningTimeout.String()).Duration()
-		preprovisioningCheckPeriod = app.Flag("preprovisioning-check-period", "Period to check if a node has been preprovisioned").Default(kubernetes.DefaultPreprovisioningCheckPeriod.String()).Duration()
+		preprovisioningTimeout            = app.Flag("preprovisioning-timeout", "Timeout for a node to be preprovisioned before draining").Default(kubernetes.DefaultPreprovisioningTimeout.String()).Duration()
+		preprovisioningCheckPeriod        = app.Flag("preprovisioning-check-period", "Period to check if a node has been preprovisioned").Default(kubernetes.DefaultPreprovisioningCheckPeriod.String()).Duration()
+		preprovisioningActivatedByDefault = app.Flag("preprovisioning-by-default", "Set this flag to activate pre-provisioning by default for all nodes").Default("false").Bool()
 
 		// PV/PVC management
 		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
@@ -383,7 +384,7 @@ func main() {
 		kubernetes.WithConditionsFilter(*conditions),
 		kubernetes.WithCordonPodFilter(podFilteringFunc),
 		kubernetes.WithGlobalBlocking(globalLocker),
-		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod}))
+		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod, AllNodesByDefault: *preprovisioningActivatedByDefault}))
 
 	if *dryRun {
 		h = cache.FilteringResourceEventHandler{
