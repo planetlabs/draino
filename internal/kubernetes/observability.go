@@ -283,7 +283,7 @@ func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
 // value is currently out of date (not equal to first return value)
 func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string, bool, error) {
 	valueOriginal := node.Labels[ConfigurationLabelKey]
-	configsOriginal := strings.Split(valueOriginal, ",")
+	configsOriginal := strings.Split(valueOriginal, ".")
 	var configs []string
 	for _, config := range configsOriginal {
 		if config == "" || config == OutOfScopeLabelValue || config == s.configName {
@@ -304,7 +304,7 @@ func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string,
 		configs = append(configs, OutOfScopeLabelValue)
 	}
 	sort.Strings(configs)
-	valueDesired := strings.Join(configs, ",")
+	valueDesired := strings.Join(configs, ".")
 	return valueDesired, valueDesired != valueOriginal, nil
 }
 

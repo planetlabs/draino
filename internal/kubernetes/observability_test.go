@@ -123,7 +123,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			podFilterFunc:     NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode("draino2"),
-			expectedValue:     "draino1,draino2",
+			expectedValue:     "draino1.draino2",
 			expectedOutOfDate: true,
 		},
 		{
@@ -142,7 +142,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
 			podFilterFunc:     NewPodFilters(),
 			objects:           []runtime.Object{},
-			node:              getNode("draino1,other-draino"),
+			node:              getNode("draino1.other-draino"),
 			expectedValue:     "other-draino",
 			expectedOutOfDate: true,
 		},
@@ -152,8 +152,8 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
 			podFilterFunc:     NewPodFilters(),
 			objects:           []runtime.Object{},
-			node:              getNode("draino2,draino1"),
-			expectedValue:     "draino1,draino2",
+			node:              getNode("draino2.draino1"),
+			expectedValue:     "draino1.draino2",
 			expectedOutOfDate: true,
 		},
 	}
