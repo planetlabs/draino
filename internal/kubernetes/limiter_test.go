@@ -16,6 +16,11 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 )
 
+func parseLabels(labelStr string) labels.Selector {
+	selector, _ := labels.Parse(labelStr)
+	return selector
+}
+
 func getNodesTestSlice() []*core.Node {
 	return []*core.Node{
 		{
@@ -55,6 +60,9 @@ func getNodesTestSlice() []*core.Node {
 			ObjectMeta: v1.ObjectMeta{
 				Name: "AB",
 				Labels: map[string]string{
+					"A": "A", "B": "B",
+				},
+				Annotations: map[string]string{
 					"A": "A", "B": "B",
 				},
 			},
@@ -287,6 +295,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 		name                 string
 		globalBlockerBuilder func(store RuntimeObjectStore) GlobalBlocker
 		limiterfuncs         map[string]LimiterFunc
+		skipLimiterSelector  labels.Selector
 		node                 *core.Node
 		want                 bool
 		want1                string
@@ -323,6 +332,30 @@ func TestLimiter_CanCordon(t *testing.T) {
 			limiterfuncs: map[string]LimiterFunc{"limiter40%": MaxSimultaneousCordonLimiterFunc(40, true)},
 			want:         false,
 			want1:        "limiter40%",
+		},
+		{
+			name:                "skip selector does not match any of the node annotations",
+			node:                getNodesTestMap()["AB"],
+			limiterfuncs:        map[string]LimiterFunc{"limiter40%": MaxSimultaneousCordonLimiterFunc(40, true)},
+			skipLimiterSelector: parseLabels("foo=bar"),
+			want:                false,
+			want1:               "limiter40%",
+		},
+		{
+			name:                "empty skip selector is does not just return true",
+			node:                getNodesTestMap()["AB"],
+			limiterfuncs:        map[string]LimiterFunc{"limiter40%": MaxSimultaneousCordonLimiterFunc(40, true)},
+			skipLimiterSelector: labels.NewSelector(),
+			want:                false,
+			want1:               "limiter40%",
+		},
+		{
+			name:                "skip selector does matches one of the node annotations",
+			node:                getNodesTestMap()["AB"],
+			limiterfuncs:        map[string]LimiterFunc{"limiter40%": MaxSimultaneousCordonLimiterFunc(40, true)},
+			skipLimiterSelector: parseLabels("A=A"),
+			want:                true,
+			want1:               "",
 		},
 		{
 			name: "global limit ok, but limit on taint block",
@@ -422,9 +455,14 @@ func TestLimiter_CanCordon(t *testing.T) {
 			kclient := fake.NewSimpleClientset(objects...)
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
+			selector := labels.NewSelector()
+			if tt.skipLimiterSelector != nil {
+				selector = tt.skipLimiterSelector
+			}
 			l := &Limiter{
-				logger:      zap.NewNop(),
-				rateLimiter: flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				logger:                        zap.NewNop(),
+				rateLimiter:                   flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				skipLimiterAnnotationSelector: selector,
 			}
 			l.SetNodeLister(store.Nodes())
 			for k, v := range tt.limiterfuncs {
@@ -604,8 +642,9 @@ func TestPodLimiter(t *testing.T) {
 			defer closeCh()
 
 			l := &Limiter{
-				logger:      zap.NewNop(),
-				rateLimiter: flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				logger:                        zap.NewNop(),
+				rateLimiter:                   flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				skipLimiterAnnotationSelector: labels.NewSelector(),
 			}
 			l.SetNodeLister(store.Nodes())
 			for k, v := range tt.limiterfuncs {

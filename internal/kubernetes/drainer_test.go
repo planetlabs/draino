@@ -30,6 +30,7 @@ import (
 	policy "k8s.io/api/policy/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -88,9 +89,10 @@ func newFakeClientSet(objects []runtime.Object, rs ...reactor) kubernetes.Interf
 
 type fakeLimiter struct{}
 
-func (f fakeLimiter) CanCordon(node *core.Node) (bool, string)     { return true, "" }
-func (f fakeLimiter) SetNodeLister(lister NodeLister)              {}
-func (f fakeLimiter) AddLimiter(s string, limiterFunc LimiterFunc) {}
+func (f fakeLimiter) CanCordon(node *core.Node) (bool, string)        { return true, "" }
+func (f fakeLimiter) SetNodeLister(lister NodeLister)                 {}
+func (f fakeLimiter) SetSkipLimiterSelector(selector labels.Selector) {}
+func (f fakeLimiter) AddLimiter(s string, limiterFunc LimiterFunc)    {}
 
 var _ CordonLimiter = &fakeLimiter{}
 
