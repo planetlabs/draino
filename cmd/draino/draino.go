@@ -38,6 +38,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/alecthomas/kingpin.v2"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
@@ -100,14 +101,15 @@ func main() {
 		cordonProtectedPodAnnotations = app.Flag("cordon-protected-pod-annotation", "Protect nodes hosting pods with this annotation from cordon. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
 
 		// Cordon limiter flags
-		maxSimultaneousCordon          = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
-		maxSimultaneousCordonForLabels = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
-		maxSimultaneousCordonForTaints = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
-		maxNotReadyNodes               = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
-		maxNotReadyNodesPeriod         = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
-		maxPendingPodsPeriod           = app.Flag("max-pending-pods-period", "Polling period to check volume of pending pods").Default(kubernetes.DefaultMaxPendingPodsPeriod.String()).Duration()
-		maxPendingPods                 = app.Flag("max-pending-pods", "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
-		maxDrainAttemptsBeforeFail     = app.Flag("max-drain-attempts-before-fail", "Maximum number of failed drain attempts before giving-up on draining the node.").Default("8").Int()
+		skipCordonLimiterNodeAnnotation = app.Flag("skip-cordon-limiter-node-annotation", "Skip all limiter logic if node has annotation.").PlaceHolder("KEY[=VALUE]").String()
+		maxSimultaneousCordon           = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
+		maxSimultaneousCordonForLabels  = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
+		maxSimultaneousCordonForTaints  = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
+		maxNotReadyNodes                = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
+		maxNotReadyNodesPeriod          = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
+		maxPendingPodsPeriod            = app.Flag("max-pending-pods-period", "Polling period to check volume of pending pods").Default(kubernetes.DefaultMaxPendingPodsPeriod.String()).Duration()
+		maxPendingPods                  = app.Flag("max-pending-pods", "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
+		maxDrainAttemptsBeforeFail      = app.Flag("max-drain-attempts-before-fail", "Maximum number of failed drain attempts before giving-up on draining the node.").Default("8").Int()
 
 		// Pod Opt-in flags
 		optInPodAnnotations      = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
@@ -296,7 +298,11 @@ func main() {
 	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(*cordonProtectedPodAnnotations...))
 
 	// Cordon limiter
-	cordonLimiter := kubernetes.NewCordonLimiter(log)
+	selector, err := labels.Parse(*skipCordonLimiterNodeAnnotation)
+	if err != nil {
+		kingpin.FatalIfError(err, "cannot parse 'skip-cordon-limiter-node-annotation' argument")
+	}
+	cordonLimiter := kubernetes.NewCordonLimiter(log, selector)
 	for _, p := range *maxSimultaneousCordon {
 		max, percent, parseErr := kubernetes.ParseCordonMax(p)
 		if parseErr != nil {

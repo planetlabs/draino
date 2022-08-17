@@ -77,10 +77,11 @@ type NodeLister interface {
 	ListNodes() []*core.Node
 }
 
-func NewCordonLimiter(logger *zap.Logger) CordonLimiter {
+func NewCordonLimiter(logger *zap.Logger, skipLimiterAnnotationSelector labels.Selector) CordonLimiter {
 	return &Limiter{
-		logger:      logger,
-		rateLimiter: flowcontrol.NewTokenBucketRateLimiter(1, 1), // limiters are computing % on top of the cache. Here we ensure that the cache has time to be updated.
+		logger:                        logger,
+		rateLimiter:                   flowcontrol.NewTokenBucketRateLimiter(1, 1), // limiters are computing % on top of the cache. Here we ensure that the cache has time to be updated.
+		skipLimiterAnnotationSelector: skipLimiterAnnotationSelector,
 	}
 }
 
@@ -114,6 +115,11 @@ type Limiter struct {
 	rateLimiter  flowcontrol.RateLimiter // since we are relying on the store cache that is asynchronously populated to check cordon status, let's be sure that we don't have cordon burst
 	limiterfuncs map[string]LimiterFunc
 	logger       *zap.Logger
+	// During emergencies, we might need to rotate a node group quickly.
+	// Using the limitation functions, the rotation might take a while, depending on the size of the node group.
+	// Therefore, we can add an annotation to all the nodes that need to be rotated, which will disable the rate limiting.
+	// Caution! Before adding this annotation to many nodes, we have to ensure that there is enough capacity left to schedule all the workload.
+	skipLimiterAnnotationSelector labels.Selector
 }
 
 func (l *Limiter) SetNodeLister(lister NodeLister) {
@@ -123,6 +129,10 @@ func (l *Limiter) SetNodeLister(lister NodeLister) {
 func (l *Limiter) CanCordon(node *core.Node) (can bool, reason string) {
 	if node.Spec.Unschedulable {
 		return true, "" // it is already cordon anyway
+	}
+
+	if l.skipLimiterAnnotationSelector.Matches(labels.Set(node.GetAnnotations())) {
+		return true, ""
 	}
 
 	allNodes := l.nodeLister.ListNodes()
