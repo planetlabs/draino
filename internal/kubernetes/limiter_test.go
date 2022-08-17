@@ -423,8 +423,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
 			l := &Limiter{
-				logger:      zap.NewNop(),
-				rateLimiter: flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				logger:                        zap.NewNop(),
+				rateLimiter:                   flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				skipLimiterAnnotationSelector: labels.NewSelector(),
 			}
 			l.SetNodeLister(store.Nodes())
 			for k, v := range tt.limiterfuncs {
@@ -604,8 +605,9 @@ func TestPodLimiter(t *testing.T) {
 			defer closeCh()
 
 			l := &Limiter{
-				logger:      zap.NewNop(),
-				rateLimiter: flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				logger:                        zap.NewNop(),
+				rateLimiter:                   flowcontrol.NewTokenBucketRateLimiter(200, 200),
+				skipLimiterAnnotationSelector: labels.NewSelector(),
 			}
 			l.SetNodeLister(store.Nodes())
 			for k, v := range tt.limiterfuncs {

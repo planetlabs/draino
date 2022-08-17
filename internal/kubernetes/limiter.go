@@ -69,6 +69,7 @@ type CordonLimiter interface {
 	CanCordon(node *core.Node) (bool, string)
 
 	SetNodeLister(lister NodeLister)
+	SetSkipLimiterSelector(selector labels.Selector)
 
 	// Add a named limiter function to the limiter.
 	AddLimiter(string, LimiterFunc)
@@ -77,11 +78,11 @@ type NodeLister interface {
 	ListNodes() []*core.Node
 }
 
-func NewCordonLimiter(logger *zap.Logger, skipLimiterAnnotationSelector labels.Selector) CordonLimiter {
+func NewCordonLimiter(logger *zap.Logger) CordonLimiter {
 	return &Limiter{
 		logger:                        logger,
 		rateLimiter:                   flowcontrol.NewTokenBucketRateLimiter(1, 1), // limiters are computing % on top of the cache. Here we ensure that the cache has time to be updated.
-		skipLimiterAnnotationSelector: skipLimiterAnnotationSelector,
+		skipLimiterAnnotationSelector: labels.NewSelector(),
 	}
 }
 
@@ -126,12 +127,17 @@ func (l *Limiter) SetNodeLister(lister NodeLister) {
 	l.nodeLister = lister
 }
 
+func (l *Limiter) SetSkipLimiterSelector(selector labels.Selector) {
+	l.skipLimiterAnnotationSelector = selector
+}
+
 func (l *Limiter) CanCordon(node *core.Node) (can bool, reason string) {
 	if node.Spec.Unschedulable {
 		return true, "" // it is already cordon anyway
 	}
 
-	if l.skipLimiterAnnotationSelector.Matches(labels.Set(node.GetAnnotations())) {
+	// an empty selector would just return true
+	if !l.skipLimiterAnnotationSelector.Empty() && l.skipLimiterAnnotationSelector.Matches(labels.Set(node.GetAnnotations())) {
 		return true, ""
 	}
 

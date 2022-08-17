@@ -298,11 +298,14 @@ func main() {
 	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(*cordonProtectedPodAnnotations...))
 
 	// Cordon limiter
-	selector, err := labels.Parse(*skipCordonLimiterNodeAnnotation)
-	if err != nil {
-		kingpin.FatalIfError(err, "cannot parse 'skip-cordon-limiter-node-annotation' argument")
+	cordonLimiter := kubernetes.NewCordonLimiter(log)
+	if *skipCordonLimiterNodeAnnotation != "" {
+		selector, err := labels.Parse(*skipCordonLimiterNodeAnnotation)
+		if err != nil {
+			kingpin.FatalIfError(err, "cannot parse 'skip-cordon-limiter-node-annotation' argument")
+		}
+		cordonLimiter.SetSkipLimiterSelector(selector)
 	}
-	cordonLimiter := kubernetes.NewCordonLimiter(log, selector)
 	for _, p := range *maxSimultaneousCordon {
 		max, percent, parseErr := kubernetes.ParseCordonMax(p)
 		if parseErr != nil {
