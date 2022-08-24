@@ -23,7 +23,7 @@ const (
 	SetConditionTimeout     = 10 * time.Second
 	SetConditionRetryPeriod = 50 * time.Millisecond
 
-	DefaultPreprovisioningTimeout     = 1 * time.Hour
+	DefaultPreprovisioningTimeout     = 1*time.Hour + 20*time.Minute
 	DefaultPreprovisioningCheckPeriod = 30 * time.Second
 
 	DefaultSchedulingRetryBackoffDelay = 23 * time.Minute
@@ -345,25 +345,34 @@ func (d *DrainSchedules) newSchedule(ctx context.Context, node *v1.Node, when ti
 		// Node preprovisioning
 		if d.hasPreprovisioningAnnotation(node) {
 			log.Info("Start pre-provisioning before drain")
-			replacementRequestEventDone := false // Flag to be sure that we produce the event only once.
 			preprovisionStartTime := time.Now()
 			tags, _ := tag.New(context.Background(), tag.Upsert(TagReason, newNodeRequestReasonPreprovisioning)) // nolint:gosec
+			replacementStarted := false
 			if err := wait.PollImmediate(
 				d.preprovisioningConfiguration.CheckPeriod,
 				d.preprovisioningConfiguration.Timeout,
 				func() (bool, error) {
-					replacementStatus, err := d.drainer.PreprovisionNode(ctx, node)
-					if err != nil {
-						log.Error("Failed to validate node-replacement status", zap.Error(err))
+					if !replacementStarted {
+						err := d.drainer.PreprovisionNode(ctx, node)
+						if err != nil {
+							log.Error("Failed to start node-replacement", zap.Error(err))
+							return false, nil
+						}
+						d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done")
+						replacementStarted = true
 						return false, nil
 					}
-					if !replacementRequestEventDone {
-						d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonNodePreprovisioning, "Node pre-provisioning before drain: request done")
-						replacementRequestEventDone = true
+					replacementStatus, err := d.drainer.GetReplacementStatus(ctx, node)
+					if err != nil {
+						log.Error("Failed to get node replacement status", zap.Error(err))
+						return false, nil
 					}
 					if replacementStatus == NodeReplacementStatusDone {
 						d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonNodePreprovisioningCompleted, "Node pre-provisioning before drain: completed")
 						return true, nil
+					}
+					if replacementStatus == NodeReplacementStatusFailed {
+						return false, fmt.Errorf("node pre-provisioning before drain: failed")
 					}
 					return false, nil
 				},

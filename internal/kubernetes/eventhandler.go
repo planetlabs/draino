@@ -408,9 +408,15 @@ func (h *DrainingResourceEventHandler) HandleNode(ctx context.Context, n *core.N
 	if len(pods) == 0 && drainStatus.Completed {
 		elapseSinceCompleted := time.Since(drainStatus.LastTransition)
 		if elapseSinceCompleted > h.durationWithCompletedStatusBeforeReplacement {
-			// This node probably blocked due to minSize set on the nodegroup
-			status, err := h.cordonDrainer.ReplaceNode(ctx, n)
-			LogForVerboseNode(hlogger, n, "node replacement", zap.String("status", string(status)), zap.Error(err))
+			replacementStatus, err := h.cordonDrainer.GetReplacementStatus(ctx, n)
+			if err != nil {
+				LogForVerboseNode(hlogger, n, "failed to get replacement status", zap.Error(err))
+			}
+			if replacementStatus == "" || replacementStatus == NodeReplacementStatusFailed {
+				// This node probably blocked due to minSize set on the nodegroup
+				replaceStarted, err := h.cordonDrainer.ReplaceNode(ctx, n)
+				LogForVerboseNode(hlogger, n, "node replacement", zap.Bool("replaceStarted", replaceStarted), zap.Error(err))
+			}
 		}
 		return // we are waiting for that node to be removed from the cluster by the CA
 	}

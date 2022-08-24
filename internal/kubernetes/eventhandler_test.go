@@ -136,20 +136,28 @@ func (d *mockCordonDrainer) DeleteScheduleByName(ctx context.Context, nodeName s
 	})
 }
 
-func (d *mockCordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+func (d *mockCordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
 	d.calls = append(d.calls, mockCall{
 		name: "ReplaceNode",
 		node: n.Name,
 	})
-	return NodeReplacementStatusNone, nil
+	return false, nil
 }
 
-func (d *mockCordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+func (d *mockCordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) error {
 	d.calls = append(d.calls, mockCall{
 		name: "PreprovisionNode",
 		node: n.Name,
 	})
-	return NodeReplacementStatusNone, nil
+	return nil
+}
+
+func (d *mockCordonDrainer) GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+	d.calls = append(d.calls, mockCall{
+		name: "GetReplacementStatus",
+		node: n.Name,
+	})
+	return "", nil
 }
 
 func TestDrainingResourceEventHandler(t *testing.T) {
@@ -242,6 +250,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			},
 			expected: []mockCall{
 				{name: "GetPodsToDrain", node: nodeName},
+				{name: "GetReplacementStatus", node: nodeName},
 				{name: "ReplaceNode", node: nodeName},
 			},
 		},

@@ -66,11 +66,10 @@ const (
 	FailedStr    = "Failed"
 	ScheduledStr = "Scheduled"
 
-	NodeLabelKeyReplaceRequest      = "node.datadoghq.com/replace"
-	NodeLabelValueReplaceRequested  = "requested"
-	NodeLabelValueReplaceProcessing = "processing"
-	NodeLabelValueReplaceCleanup    = "cleanup"
-	NodeLabelValueReplaceDone       = "done"
+	NodeLabelKeyReplaceRequest     = "node.datadoghq.com/replace"
+	NodeLabelValueReplaceRequested = "requested"
+	NodeLabelValueReplaceDone      = "done"
+	NodeLabelValueReplaceFailed    = "failed"
 
 	eventReasonEvictionStarting      = "EvictionStarting"
 	eventReasonEvictionSucceeded     = "EvictionSucceeded"
@@ -166,16 +165,16 @@ type Drainer interface {
 type NodeReplacementStatus string
 
 const (
-	NodeReplacementStatusRequested        NodeReplacementStatus = "requested"
-	NodeReplacementStatusDone             NodeReplacementStatus = "done"
-	NodeReplacementStatusNone             NodeReplacementStatus = "none"
-	NodeReplacementStatusBlockedByLimiter NodeReplacementStatus = "blockedByLimiter"
+	NodeReplacementStatusRequested NodeReplacementStatus = "requested"
+	NodeReplacementStatusDone      NodeReplacementStatus = "done"
+	NodeReplacementStatusFailed    NodeReplacementStatus = "failed"
 )
 
 // A NodeReplacer helps to request for node replacement
 type NodeReplacer interface {
-	ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error)
-	PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error)
+	ReplaceNode(ctx context.Context, n *core.Node) (bool, error)
+	PreprovisionNode(ctx context.Context, n *core.Node) error
+	GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error)
 }
 
 // A CordonDrainer both cordons and drains nodes!
@@ -228,13 +227,18 @@ func (d *NoopCordonDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n
 }
 
 // ReplaceNode return none
-func (d *NoopCordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
-	return NodeReplacementStatusNone, nil
+func (d *NoopCordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
+	return false, nil
 }
 
 // PreprovisionNode return none
-func (d *NoopCordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
-	return NodeReplacementStatusNone, nil
+func (d *NoopCordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) error {
+	return nil
+}
+
+// PreprovisionNode return none
+func (d *NoopCordonDrainer) GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+	return "", nil
 }
 
 var _ CordonDrainer = &APICordonDrainer{}
@@ -1123,59 +1127,47 @@ func (d *APICordonDrainer) awaitPVCDeletion(pvc *core.PersistentVolumeClaim, tim
 	})
 }
 
-func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.Node, reason string, withRateLimiting bool) (NodeReplacementStatus, error) {
+func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.Node, reason string) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "performNodeReplacement")
 	defer span.Finish()
 
-	nodeFromStore, err := d.runtimeObjectStore.Nodes().Get(n.Name)
+	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
 	if err != nil {
-		return NodeReplacementStatusNone, err
+		return fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
 	}
-
-	replacementValue, ok := nodeFromStore.Labels[NodeLabelKeyReplaceRequest]
-	if !ok || replacementValue == NodeLabelValueReplaceCleanup {
-		if withRateLimiting && !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
-			d.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
-			return NodeReplacementStatusBlockedByLimiter, nil
-		}
-
-		fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
-		if err != nil {
-			return NodeReplacementStatusNone, fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
-		}
-		fresh.Labels[NodeLabelKeyReplaceRequest] = NodeLabelValueReplaceRequested
-		if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
-			return NodeReplacementStatusNone, fmt.Errorf("cannot request replacement node %s: %w", fresh.GetName(), err)
-		}
-		tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName()), tag.Upsert(TagReason, reason)) // nolint:gosec
-		StatRecordForNode(tags, n, MeasureNodesReplacementRequest.M(1))
-		return NodeReplacementStatusRequested, nil
+	fresh.Labels[NodeLabelKeyReplaceRequest] = NodeLabelValueReplaceRequested
+	if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
+		return fmt.Errorf("cannot request replacement node %s: %w", fresh.GetName(), err)
 	}
-
-	switch replacementValue {
-	case NodeLabelValueReplaceRequested, NodeLabelValueReplaceProcessing:
-		return NodeReplacementStatusRequested, nil
-	case NodeLabelValueReplaceDone:
-		return NodeReplacementStatusDone, nil
-	case NodeLabelValueReplaceCleanup:
-		return NodeLabelValueReplaceCleanup, nil
-	default:
-		return NodeReplacementStatusNone, nil
-	}
+	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName()), tag.Upsert(TagReason, reason)) // nolint:gosec
+	StatRecordForNode(tags, n, MeasureNodesReplacementRequest.M(1))
+	return nil
 }
 
-func (d *APICordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+func (d *APICordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "ReplaceNode")
 	defer span.Finish()
-
-	return d.performNodeReplacement(ctx, n, newNodeRequestReasonReplacement, true)
+	if !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
+		d.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
+		return false, nil
+	}
+	err := d.performNodeReplacement(ctx, n, newNodeRequestReasonReplacement)
+	return err != nil, err
 }
 
-func (d *APICordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+func (d *APICordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "PreprovisionNode")
 	defer span.Finish()
 
-	return d.performNodeReplacement(ctx, n, newNodeRequestReasonPreprovisioning, false)
+	return d.performNodeReplacement(ctx, n, newNodeRequestReasonPreprovisioning)
+}
+
+func (d *APICordonDrainer) GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+	freshNode, err := d.runtimeObjectStore.Nodes().Get(n.Name)
+	if err != nil {
+		return "", err
+	}
+	return NodeReplacementStatus(freshNode.Labels[NodeLabelKeyReplaceRequest]), nil
 }
 
 var evictionPayloadEncoder runtime.Encoder
