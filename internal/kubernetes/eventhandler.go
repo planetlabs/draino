@@ -548,7 +548,7 @@ func (h *DrainingResourceEventHandler) shouldUncordon(ctx context.Context, n *co
 	}
 	if len(pods) > 0 {
 		logger.Info("Pod needs to be scheduled on node", zap.String("pod", pods[0].Name))
-		h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+pods[0].Name+" needs that node due to local PV, uncordoning the node")
+		h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+pods[0].Namespace+"/"+pods[0].Name+" needs that node due to local PV, uncordoning the node")
 		return true, nil
 	}
 
