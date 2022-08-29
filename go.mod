@@ -18,6 +18,7 @@ require (
 	github.com/googleapis/gnostic v0.0.0-20170729233727-0c5108395e2d
 	github.com/julienschmidt/httprouter v1.1.0
 	github.com/oklog/run v1.0.0
+	github.com/prometheus/client_golang v0.9.2
 	github.com/stretchr/testify v1.7.0
 	go.opencensus.io v0.22.4
 	go.uber.org/zap v1.13.0

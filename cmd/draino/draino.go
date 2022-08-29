@@ -33,6 +33,7 @@ import (
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/julienschmidt/httprouter"
+	prom "github.com/prometheus/client_golang/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
@@ -201,7 +202,9 @@ func main() {
 
 	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon, skippedCordon, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
 
-	p, err := prometheus.NewExporter(prometheus.Options{Namespace: kubernetes.Component})
+	promOptions := prometheus.Options{Namespace: kubernetes.Component, Registry: prom.NewRegistry()}
+	kubernetes.InitWorkqueueMetrics(promOptions.Registry)
+	p, err := prometheus.NewExporter(promOptions)
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
 
