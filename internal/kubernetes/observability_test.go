@@ -233,7 +233,8 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 			validationFunc: func(node *v1.Node) bool {
 				return node.Labels[ConfigurationLabelKey] == "draino1"
 			},
-			wantErr: true,
+			wantErr:       true,
+			isNotFoundErr: true,
 		},
 	}
 

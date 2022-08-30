@@ -120,7 +120,7 @@ func (w *NodeWatch) Get(name string) (*core.Node, error) {
 		return nil, fmt.Errorf("cannot get node %s: %w", name, err)
 	}
 	if !exists {
-		return nil, fmt.Errorf("node %s does not exist", name)
+		return nil, apierrors.NewNotFound(v1.Resource("node"), name)
 	}
 	return o.(*core.Node), nil
 }
@@ -296,9 +296,12 @@ func NewStatefulsetWatch(c kubernetes.Interface) *StatefulSetWatch {
 }
 
 func (s StatefulSetWatch) Get(namespace, name string) (*v1.StatefulSet, error) {
-	obj, _, err := s.GetStore().GetByKey(namespace + "/" + name)
+	obj, exists, err := s.GetStore().GetByKey(namespace + "/" + name)
 	if err != nil {
 		return nil, err
+	}
+	if !exists {
+		return nil, apierrors.NewNotFound(v1.Resource("statefulset"), name)
 	}
 	if obj != nil {
 		sts, ok := obj.(*v1.StatefulSet)
@@ -393,10 +396,14 @@ func NewPersistentVolumeClaimWatch(c kubernetes.Interface) *PersistentVolumeClai
 }
 
 func (p *PersistentVolumeClaimWatch) Get(namespace, name string) (*core.PersistentVolumeClaim, error) {
-	obj, _, err := p.GetStore().GetByKey(namespace + "/" + name)
+	obj, exists, err := p.GetStore().GetByKey(namespace + "/" + name)
 	if err != nil {
 		return nil, err
 	}
+	if !exists {
+		return nil, apierrors.NewNotFound(v1.Resource("persistentVolumeClaim"), name)
+	}
+
 	if obj != nil {
 		pvc, ok := obj.(*core.PersistentVolumeClaim)
 		if ok {

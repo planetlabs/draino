@@ -166,6 +166,9 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			s.queueNodeToBeUpdated.ShutDown()
 			return
 		case <-ticker.C:
+			// Let's print the queue size
+			s.logger.Info("queueNodeToBeUpdated", zap.Int("len", s.queueNodeToBeUpdated.Len()))
+
 			// Let's update the nodes metadata
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 				_, outOfDate, err := s.getLabelUpdate(node)
@@ -275,7 +278,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 }
 
 func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
-	s.logger.Info("Adding node to queue", zap.String("node", node.Name))
+	s.logger.Info("Adding node to queue", zap.String("node", node.Name), zap.Int("requeue", s.queueNodeToBeUpdated.NumRequeues(node.Name)))
 	s.queueNodeToBeUpdated.AddRateLimited(node.Name)
 }
 
@@ -378,9 +381,6 @@ func (s *DrainoConfigurationObserverImpl) updateNodeLabels(nodeName string) erro
 	s.logger.Info("Update node labels", zap.String("node", nodeName))
 	node, err := s.runtimeObjectStore.Nodes().Get(nodeName)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
 		return err
 	}
 	desiredValue, outOfDate, err := s.getLabelUpdate(node)
