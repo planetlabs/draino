@@ -93,6 +93,8 @@ type DrainoConfigurationObserverImpl struct {
 	// The consequence is that the metric is not 100% accurate when the controller starts. It converges after couple ou cycles.
 	queueNodeToBeUpdated workqueue.RateLimitingInterface
 
+	rateLimiters []workqueue.RateLimiter
+
 	configName          string
 	conditions          []SuppliedCondition
 	nodeFilterFunc      func(obj interface{}) bool
@@ -107,21 +109,25 @@ type DrainoConfigurationObserverImpl struct {
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
 func NewScopeObserver(client client.Interface, configName string, conditions []SuppliedCondition, runtimeObjectStore RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
+
+	rateLimiters := []workqueue.RateLimiter{
+		workqueue.NewItemExponentialFailureRateLimiter(200*time.Millisecond, 20*time.Second),
+		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(0.5, 1)},
+	}
+
 	scopeObserver := &DrainoConfigurationObserverImpl{
-		kclient:             client,
-		runtimeObjectStore:  runtimeObjectStore,
-		nodeFilterFunc:      nodeFilterFunc,
-		podFilterFunc:       podFilterFunc,
-		userOptOutPodFilter: userOptOutPodFilter,
-		userOptInPodFilter:  userOptInPodFilter,
-		analysisPeriod:      analysisPeriod,
-		logger:              log,
-		configName:          configName,
-		conditions:          conditions,
-		queueNodeToBeUpdated: workqueue.NewNamedRateLimitingQueue(workqueue.NewMaxOfRateLimiter(
-			workqueue.NewItemExponentialFailureRateLimiter(200*time.Millisecond, 20*time.Second),
-			&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(0.5, 1)}),
-			"nodeUpdater"),
+		kclient:              client,
+		runtimeObjectStore:   runtimeObjectStore,
+		nodeFilterFunc:       nodeFilterFunc,
+		podFilterFunc:        podFilterFunc,
+		userOptOutPodFilter:  userOptOutPodFilter,
+		userOptInPodFilter:   userOptInPodFilter,
+		analysisPeriod:       analysisPeriod,
+		logger:               log,
+		configName:           configName,
+		conditions:           conditions,
+		queueNodeToBeUpdated: workqueue.NewNamedRateLimitingQueue(workqueue.NewMaxOfRateLimiter(rateLimiters...), "nodeUpdater"),
+		rateLimiters:         rateLimiters,
 	}
 	return scopeObserver
 }
@@ -278,7 +284,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 }
 
 func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
-	s.logger.Info("Adding node to queue", zap.String("node", node.Name), zap.Int("requeue", s.queueNodeToBeUpdated.NumRequeues(node.Name)))
+	s.logger.Info("Adding node to queue", zap.String("node", node.Name), zap.Int("requeue", s.queueNodeToBeUpdated.NumRequeues(node.Name)), zap.Duration("r0", s.rateLimiters[0].When(node.Name)), zap.Duration("r1", s.rateLimiters[1].When(node.Name)))
 	s.queueNodeToBeUpdated.AddRateLimited(node.Name)
 }
 
