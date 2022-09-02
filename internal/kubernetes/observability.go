@@ -378,24 +378,26 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 			nodeName := obj.(string)
 			// let's forget for that iteration
 			// the node will be retried at next observability iteration
-			defer s.queueNodeToBeUpdated.Forget(nodeName)
 			defer s.queueNodeToBeUpdated.Done(obj)
 
 			// nodePatchLimiter: client side protect to avoid flooding the api-server in case of massive update
-			if s.nodePatchLimiter.TryAccept() {
-				err := s.patchNodeLabels(nodeName)
-				if err != nil {
-					if apierrors.IsNotFound(err) {
-						return // the node was deleted, no more need for update.
-					}
-					requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
-					s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount), zap.Error(err))
-					// Most of the time the error would be that on massive update (all nodes need to be updated) the API server will rate limit us.
-					// In that we wait for next round of observability
+			//			if s.nodePatchLimiter.TryAccept() {
+			err := s.patchNodeLabels(nodeName)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					return // the node was deleted, no more need for update.
 				}
-			} else {
-				MeasureNodeLabelPatchRateLimited.M(1)
+				requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
+				s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount), zap.Error(err))
+				if requeueCount > 10 {
+					s.queueNodeToBeUpdated.Forget(nodeName)
+					return
+				}
+				s.queueNodeToBeUpdated.AddRateLimited(obj) // retry with exp backoff
 			}
+			//} else {
+			//	MeasureNodeLabelPatchRateLimited.M(1)
+			//}
 		}(obj)
 	}
 }
