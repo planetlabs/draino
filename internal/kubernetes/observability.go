@@ -12,11 +12,11 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	client "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -32,6 +32,10 @@ type DrainoConfigurationObserver interface {
 	IsInScope(node *v1.Node) (bool, string, error)
 	Reset()
 }
+
+var (
+	MeasureNodeLabelPatchRateLimited = stats.Int64("draino/node_patch_ratelimited", "Number of rate limited patch label on nodes", stats.UnitDimensionless)
+)
 
 // metricsObjectsForObserver groups all the object required to serve the metrics
 type metricsObjectsForObserver struct {
@@ -89,11 +93,13 @@ type DrainoConfigurationObserverImpl struct {
 	kclient            client.Interface
 	runtimeObjectStore RuntimeObjectStore
 	analysisPeriod     time.Duration
+
 	// queueNodeToBeUpdated: To avoid burst in node updates the work to be done is queued. This way we can pace the node updates.
 	// The consequence is that the metric is not 100% accurate when the controller starts. It converges after couple ou cycles.
-	queueNodeToBeUpdated workqueue.RateLimitingInterface
-
-	rateLimiters []workqueue.RateLimiter
+	queueNodeToBeUpdated   workqueue.RateLimitingInterface
+	rateLimiters           []workqueue.RateLimiter
+	nodePatchRatelimitView *view.View
+	nodePatchLimiter       flowcontrol.RateLimiter
 
 	configName          string
 	conditions          []SuppliedCondition
@@ -112,7 +118,6 @@ func NewScopeObserver(client client.Interface, configName string, conditions []S
 
 	rateLimiters := []workqueue.RateLimiter{
 		workqueue.NewItemExponentialFailureRateLimiter(200*time.Millisecond, 20*time.Second),
-		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(0.5, 1)},
 	}
 
 	scopeObserver := &DrainoConfigurationObserverImpl{
@@ -128,7 +133,17 @@ func NewScopeObserver(client client.Interface, configName string, conditions []S
 		conditions:           conditions,
 		queueNodeToBeUpdated: workqueue.NewNamedRateLimitingQueue(workqueue.NewMaxOfRateLimiter(rateLimiters...), "nodeUpdater"),
 		rateLimiters:         rateLimiters,
+		nodePatchLimiter:     flowcontrol.NewTokenBucketRateLimiter(10, 5), // it will take ~8min to converge on a new cluster of 5K nodes. New cluster or when we retag all.
+		nodePatchRatelimitView: &view.View{
+			Name:        "nodes_label_patch_ratelimited_total",
+			Measure:     MeasureNodeLabelPatchRateLimited,
+			Description: "Number of node label patch that are rate limited.",
+			Aggregation: view.Count(),
+			TagKeys:     []tag.Key{},
+		},
 	}
+	view.Register(scopeObserver.nodePatchRatelimitView)
+
 	return scopeObserver
 }
 
@@ -284,7 +299,11 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 }
 
 func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
-	s.logger.Info("Adding node to queue", zap.String("node", node.Name), zap.Int("requeue", s.queueNodeToBeUpdated.NumRequeues(node.Name)), zap.Duration("r0", s.rateLimiters[0].When(node.Name)), zap.Duration("r1", s.rateLimiters[1].When(node.Name)))
+	logFields := []zap.Field{zap.String("node", node.Name), zap.Int("requeue", s.queueNodeToBeUpdated.NumRequeues(node.Name))}
+	for i := range s.rateLimiters {
+		logFields = append(logFields, zap.Duration(fmt.Sprintf("r%d", i), s.rateLimiters[i].When(node.Name)))
+	}
+	s.logger.Info("Adding node to queue", logFields...)
 	s.queueNodeToBeUpdated.AddRateLimited(node.Name)
 }
 
@@ -356,34 +375,32 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 
 		// func encapsultation to benefit from defer s.queue.Done()
 		func(obj interface{}) {
+			nodeName := obj.(string)
+			// let's forget for that iteration
+			// the node will be retried at next observability iteration
+			defer s.queueNodeToBeUpdated.Forget(nodeName)
 			defer s.queueNodeToBeUpdated.Done(obj)
 
-			nodeName := obj.(string)
-			defer s.queueNodeToBeUpdated.Forget(nodeName)
-			// in all case we can forget the node
-			// if needed it will come back at next observability iteration
-
-			if err := RetryWithTimeout(func() error {
-				err := s.updateNodeLabels(nodeName)
+			// nodePatchLimiter: client side protect to avoid flooding the api-server in case of massive update
+			if s.nodePatchLimiter.TryAccept() {
+				err := s.patchNodeLabels(nodeName)
 				if err != nil {
 					if apierrors.IsNotFound(err) {
-						return nil // the node was deleted, no more need for update.
+						return // the node was deleted, no more need for update.
 					}
-					s.logger.Info("Failed at tempt to update annotation", zap.String("node", nodeName), zap.Error(err))
+					requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
+					s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount), zap.Error(err))
+					// Most of the time the error would be that on massive update (all nodes need to be updated) the API server will rate limit us.
+					// In that we wait for next round of observability
 				}
-				return err
-			}, 500*time.Millisecond, 3*time.Second); err != nil {
-				requeueCount := s.queueNodeToBeUpdated.NumRequeues(nodeName)
-				s.logger.Error("Failed to update annotations", zap.String("node", nodeName), zap.Int("retry", requeueCount))
-				// let's forget for that iteration
-				// the node will be retried at next observability iteration
+			} else {
+				MeasureNodeLabelPatchRateLimited.M(1)
 			}
-
 		}(obj)
 	}
 }
 
-func (s *DrainoConfigurationObserverImpl) updateNodeLabels(nodeName string) error {
+func (s *DrainoConfigurationObserverImpl) patchNodeLabels(nodeName string) error {
 	s.logger.Info("Update node labels", zap.String("node", nodeName))
 	node, err := s.runtimeObjectStore.Nodes().Get(nodeName)
 	if err != nil {

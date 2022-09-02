@@ -128,9 +128,9 @@ func main() {
 		// PV/PVC management
 		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
 
-		configName           = app.Flag("config-name", "Name of the draino configuration").Required().String()
-		resetScopeAnnotation = app.Flag("reset-config-annotations", "Reset the scope annotation on the nodes").Bool()
-		scopeAnalysisPeriod  = app.Flag("scope-analysis-period", "Period to run the scope analysis and generate metric").Default((5 * time.Minute).String()).Duration()
+		configName          = app.Flag("config-name", "Name of the draino configuration").Required().String()
+		resetScopeLabel     = app.Flag("reset-config-labels", "Reset the scope label on the nodes").Bool()
+		scopeAnalysisPeriod = app.Flag("scope-analysis-period", "Period to run the scope analysis and generate metric").Default((5 * time.Minute).String()).Duration()
 
 		klogVerbosity = app.Flag("klog-verbosity", "Verbosity to run klog at").Default("4").Int32()
 
@@ -452,7 +452,7 @@ func main() {
 
 	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
-	if *resetScopeAnnotation == true {
+	if *resetScopeLabel == true {
 		go scopeObserver.Reset()
 	}
 
