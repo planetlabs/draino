@@ -125,7 +125,6 @@ type DrainoConfigurationObserverImpl struct {
 	// queueNodeToBeUpdated: To avoid burst in node updates the work to be done is queued. This way we can pace the node updates.
 	// The consequence is that the metric is not 100% accurate when the controller starts. It converges after couple ou cycles.
 	queueNodeToBeUpdated workqueue.RateLimitingInterface
-	rateLimiters         []workqueue.RateLimiter
 	nodePatchLimiter     flowcontrol.RateLimiter // client side protection for APIServer
 
 	configName          string
@@ -145,8 +144,7 @@ func NewScopeObserver(client client.Interface, configName string, conditions []S
 
 	// We are not adding a BucketRateLimiter to that list because the same nodes are going to be appended periodically if the update fails
 	// Failing nodes will already be in the queue with a retry. Added a BucketRL proved to be a problem here is the client side is not able to dequeue
-	// faster that the add period. In that case the processing time for the item end up being pushed always further in the future and the processing never happens
-	// if the flow of add is not interrupted.
+	// faster that the add period. In that case the processing time for the item end up being pushed always further in the future and delay the processing more and more.
 	// See: https://gist.github.com/dbenque/56c907adc1a1a1f08d16943cd390d7de
 	//
 	// For this reason I have preferred to move the bucket limiter on the other side of the queue, to have a kind of client-side protection on the API-Server.
@@ -167,7 +165,6 @@ func NewScopeObserver(client client.Interface, configName string, conditions []S
 		configName:           configName,
 		conditions:           conditions,
 		queueNodeToBeUpdated: workqueue.NewNamedRateLimitingQueue(workqueue.NewMaxOfRateLimiter(rateLimiters...), "nodeUpdater"),
-		rateLimiters:         rateLimiters,
 		nodePatchLimiter:     flowcontrol.NewTokenBucketRateLimiter(50, 10), // client side protection
 	}
 	scopeObserver.metricsObjects.initializeQueueMetrics()
@@ -328,9 +325,6 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 
 func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
 	logFields := []zap.Field{zap.String("node", node.Name), zap.Int("requeue", s.queueNodeToBeUpdated.NumRequeues(node.Name))}
-	for i := range s.rateLimiters {
-		logFields = append(logFields, zap.Duration(fmt.Sprintf("r%d", i), s.rateLimiters[i].When(node.Name)))
-	}
 	s.logger.Info("Adding node to queue", logFields...)
 	s.queueNodeToBeUpdated.AddRateLimited(node.Name)
 }
@@ -421,11 +415,14 @@ func (s *DrainoConfigurationObserverImpl) processQueueForNodeUpdates() {
 					}
 					s.queueNodeToBeUpdated.AddRateLimited(obj) // retry with exp backoff
 					MeasureNodeLabelPatchFailed.M(1)
+					return
 				}
-			} else {
-				s.queueNodeToBeUpdated.AddRateLimited(obj) // retry with exp backoff
-				MeasureNodeLabelPatchRateLimited.M(1)
+				// the item was correctly processed
+				s.queueNodeToBeUpdated.Forget(nodeName)
+				return
 			}
+			s.queueNodeToBeUpdated.AddRateLimited(obj) // retry with exp backoff
+			MeasureNodeLabelPatchRateLimited.M(1)
 		}(obj)
 	}
 }
