@@ -252,7 +252,7 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 				podFilterFunc:      NewPodFilters(),
 				logger:             zap.NewNop(),
 			}
-			err := s.updateNodeLabels(tt.nodeName)
+			err := s.patchNodeLabels(tt.nodeName)
 			if err == nil && tt.wantErr {
 				t.Errorf("Should have returned and error")
 				return
