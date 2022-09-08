@@ -545,11 +545,11 @@ func (d *APICordonDrainer) MarkDrain(ctx context.Context, n *core.Node, when, fi
 			// Create or update the condition associated to the monitor
 			now := meta.Time{Time: time.Now()}
 			conditionUpdated := false
+			msgPrefix := fmt.Sprintf("[%d] | ", failCount)
 			for i, condition := range freshNode.Status.Conditions {
 				if string(condition.Type) != ConditionDrainedScheduled {
 					continue
 				}
-				msgPrefix := fmt.Sprintf("[%d] | ", failCount)
 				freshNode.Status.Conditions[i].LastHeartbeatTime = now
 				freshNode.Status.Conditions[i].Message = msgPrefix + "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix
 				freshNode.Status.Conditions[i].Status = conditionStatus
@@ -563,7 +563,7 @@ func (d *APICordonDrainer) MarkDrain(ctx context.Context, n *core.Node, when, fi
 						LastHeartbeatTime:  now,
 						LastTransitionTime: now,
 						Reason:             "Draino",
-						Message:            "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix,
+						Message:            msgPrefix + "Drain activity scheduled " + when.Format(time.RFC3339) + msgSuffix,
 					},
 				)
 			}
