@@ -458,6 +458,10 @@ func (d *APICordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Nod
 	span, ctx := tracer.StartSpanFromContext(ctx, "ResetRetryAnnotation")
 	defer span.Finish()
 
+	if _, ok := n.Labels[NodeLabelKeyReplaceRequest]; ok {
+		PatchDeleteNodeLabelKey(d.c, n.Name, NodeLabelKeyReplaceRequest)
+	}
+
 	// Till we are done with the annotation migration to the new key we have to deal with the 2 keys. Later we can remove that first block.
 	if n.Annotations[drainRetryAnnotationKey] == drainRetryFailedAnnotationValue {
 		PatchNodeAnnotationKey(d.c, n.Name, drainRetryAnnotationKey, drainRetryAnnotationValue)
