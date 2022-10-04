@@ -6,7 +6,7 @@
       "id": 4647566357591622,
       "definition": {
         "type": "note",
-        "content": "\n[Documentation](https://infra-docs.us1.prod.dog/kubernetes/kubernetes/node-lifecycle/) | \n[Dashboard list](https://app.datadoghq.com/dashboard/lists?q=%5Bcompute%5D+%5Bnla%5D) | [Slack](https://dd.slack.com/archives/C010UB763NE)\n",
+        "content": "\n[Documentation](https://datadoghq.atlassian.net/wiki/spaces/K8S/pages/2274623742/NLA+-+Node+Lifecycle+Automation) | [FAQ](https://datadoghq.atlassian.net/wiki/spaces/K8S/pages/2277966820/NLA+-+FAQ) |\n[Dashboard list](https://app.datadoghq.com/dashboard/lists?q=%5Bcompute%5D+%5Bnla%5D) | [Slack](https://dd.slack.com/archives/C010UB763NE)\n",
         "background_color": "white",
         "font_size": "24",
         "text_align": "center",
@@ -19,15 +19,15 @@
       "layout": {
         "x": 0,
         "y": 0,
-        "width": 4,
-        "height": 1
+        "width": 5,
+        "height": 2
       }
     },
     {
       "id": 5302483934625036,
       "definition": {
         "type": "note",
-        "content": "Audit logs for **[my pod](https://app.datadoghq.com/logs?query=%40objectRef.resource%3A%28events%20OR%20pods%29%20%28%40requestObject.involvedObject.name%3ApodName%20OR%20%40objectRef.name%3ApodName%29%20%40requestObject.source.component%3Adraino&cols=kubernetes_cluster%2C%40requestObject.metadata.namespace%2C%40requestObject.source.component%2C%40http.method%2C%40objectRef.name%2C%40requestObject.reason%2C%40requestObject.message&index=k8s-audit&messageDisplay=inline&stream_sort=time%2Casc&live=true)** and **[my node](https://app.datadoghq.com/logs?query=%40objectRef.resource%3A%28events%20OR%20nodes%29%20%28%40requestObject.involvedObject.name%3AnodeName%20OR%20%40objectRef.name%3AnodeName%29%20-%40http.method%3A%28get%20OR%20watch%29%20%40requestObject.source.component%3Adraino&cols=kubernetes_cluster%2C%40requestObject.source.component%2C%40http.method%2C%40objectRef.name%2C%40requestObject.spec.unschedulable%2C%40requestObject.reason%2C%40requestObject.message&index=k8s-audit&messageDisplay=inline&stream_sort=time%2Casc&live=true)**\n\nreplace {podName|nodeName} by the real value in the logs query + set time window\n\n\n\n",
+        "content": "Audit logs for **[my pod](https://app.datadoghq.com/logs?query=%40objectRef.resource%3A%28events%20OR%20pods%29%20%28%40requestObject.involvedObject.name%3ApodName%20OR%20%40objectRef.name%3ApodName%29%20%40requestObject.source.component%3Adraino&cols=kubernetes_cluster%2C%40requestObject.metadata.namespace%2C%40requestObject.source.component%2C%40http.method%2C%40objectRef.name%2C%40requestObject.reason%2C%40requestObject.message&index=k8s-audit&messageDisplay=inline&stream_sort=time%2Casc&live=true)** , **[my node](https://app.datadoghq.com/logs?query=%40objectRef.resource%3A%28events%20OR%20nodes%29%20%28%40requestObject.involvedObject.name%3AnodeName%20OR%20%40objectRef.name%3AnodeName%29%20-%40http.method%3A%28get%20OR%20watch%29%20%40requestObject.source.component%3Adraino&cols=kubernetes_cluster%2C%40requestObject.source.component%2C%40http.method%2C%40objectRef.name%2C%40requestObject.spec.unschedulable%2C%40requestObject.reason%2C%40requestObject.message&index=k8s-audit&messageDisplay=inline&stream_sort=time%2Casc&live=true)** and [evictions](https://app.datadoghq.com/logs?query=%40usr.name%3A%22system%3Aserviceaccount%3Acluster-controllers%3Adraino%22%20%20%40requestObject.reason%3A%28Evictio%2A%20OR%20Cordo%2A%20OR%20Uncord%2A%20OR%20Drain%2A%29&agg_m=count&agg_q=%40requestObject.involvedObject.name&agg_t=count&cols=kubernetes_cluster%2C%40requestObject.involvedObject.kind%2C%40objectRef.name%2C%40requestObject.reason%2C%40requestObject.message%2C%40requestObject.involvedObject.name&index=k8s-audit&messageDisplay=inline&sort_m=&sort_t=&stream_sort=time%2Cdesc&top_n=10&top_o=top&viz=stream&from_ts=1637942472685&to_ts=1637946072685&live=true)\n\nreplace {podName|nodeName} by the real value in the logs query + set time window\n\n\n\n",
         "background_color": "white",
         "font_size": "16",
         "text_align": "center",
@@ -38,10 +38,10 @@
         "has_padding": true
       },
       "layout": {
-        "x": 4,
+        "x": 5,
         "y": 0,
-        "width": 6,
-        "height": 1
+        "width": 7,
+        "height": 2
       }
     },
     {
@@ -83,44 +83,62 @@
               "type": "query_table",
               "requests": [
                 {
-                  "aggregator": "last",
-                  "cell_display_mode": [
-                    "bar"
-                  ],
-                  "q": "sum:draino.draino_node_options_nodes_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {conditions}",
-                  "alias": "Node count",
-                  "limit": 50,
-                  "order": "desc"
-                },
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {conditions}",
-                  "alias": "in-scope",
-                  "conditional_formats": [
+                  "formulas": [
                     {
-                      "comparator": ">",
-                      "palette": "green_on_white",
-                      "value": 0
+                      "alias": "Node count",
+                      "cell_display_mode": "bar",
+                      "limit": {
+                        "count": 50,
+                        "order": "desc"
+                      },
+                      "formula": "query1"
+                    },
+                    {
+                      "alias": "in-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "green_on_white",
+                          "value": 0,
+                          "comparator": ">"
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query2"
+                    },
+                    {
+                      "alias": "out-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "yellow_on_white",
+                          "value": 0,
+                          "comparator": ">"
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query3"
                     }
                   ],
-                  "cell_display_mode": [
-                    "bar"
-                  ],
-                  "aggregator": "last"
-                },
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {conditions}",
-                  "alias": "out-scope",
-                  "conditional_formats": [
+                  "response_format": "scalar",
+                  "queries": [
                     {
-                      "comparator": ">",
-                      "palette": "yellow_on_white",
-                      "value": 0
+                      "query": "sum:draino.draino_node_options_nodes_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any,!nodegroup_name_prefix:} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any,!nodegroup_name_prefix:} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any,!nodegroup_name_prefix:} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query3",
+                      "aggregator": "last"
                     }
-                  ],
-                  "cell_display_mode": [
-                    "bar"
-                  ],
-                  "aggregator": "last"
+                  ]
                 }
               ],
               "has_search_bar": "auto"
@@ -156,8 +174,8 @@
                       "conditional_formats": [
                         {
                           "palette": "green_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "cell_display_mode": "bar",
@@ -168,8 +186,8 @@
                       "conditional_formats": [
                         {
                           "palette": "yellow_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "cell_display_mode": "bar",
@@ -179,19 +197,19 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any} by {nodegroup_name,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
                     },
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any} by {nodegroup_name,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query2",
                       "aggregator": "last"
                     },
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any} by {nodegroup_name,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query3",
                       "aggregator": "last"
@@ -209,6 +227,72 @@
             }
           },
           {
+            "id": 8015477821795208,
+            "definition": {
+              "title": "Nodes out of scope per NG",
+              "type": "toplist",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1",
+                      "limit": {
+                        "count": 500,
+                        "order": "desc"
+                      }
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "custom_bg_color": "#f60404",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 100
+                    },
+                    {
+                      "custom_bg_color": "#7a1f00",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 50
+                    },
+                    {
+                      "custom_bg_color": "#7a1f00",
+                      "comparator": ">",
+                      "palette": "white_on_red",
+                      "value": 25
+                    },
+                    {
+                      "custom_bg_color": "#370606",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 12
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:false,!nodegroup_name_prefix:} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ]
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 2,
+              "height": 5
+            }
+          },
+          {
             "id": 7950668124204104,
             "definition": {
               "title": "Nodes in scope per NG",
@@ -219,7 +303,7 @@
                     {
                       "formula": "query1",
                       "limit": {
-                        "count": 100,
+                        "count": 500,
                         "order": "desc"
                       }
                     }
@@ -259,73 +343,7 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true} by {nodegroup_name}",
-                      "data_source": "metrics",
-                      "name": "query1",
-                      "aggregator": "last"
-                    }
-                  ]
-                }
-              ]
-            },
-            "layout": {
-              "x": 8,
-              "y": 0,
-              "width": 2,
-              "height": 5
-            }
-          },
-          {
-            "id": 8015477821795208,
-            "definition": {
-              "title": "Nodes out of scope per NG",
-              "type": "toplist",
-              "requests": [
-                {
-                  "formulas": [
-                    {
-                      "formula": "query1",
-                      "limit": {
-                        "count": 100,
-                        "order": "desc"
-                      }
-                    }
-                  ],
-                  "conditional_formats": [
-                    {
-                      "custom_bg_color": "#f60404",
-                      "comparator": ">",
-                      "palette": "custom_bg",
-                      "value": 100
-                    },
-                    {
-                      "custom_bg_color": "#7a1f00",
-                      "comparator": ">",
-                      "palette": "custom_bg",
-                      "value": 50
-                    },
-                    {
-                      "custom_bg_color": "#7a1f00",
-                      "comparator": ">",
-                      "palette": "white_on_red",
-                      "value": 25
-                    },
-                    {
-                      "custom_bg_color": "#370606",
-                      "comparator": ">",
-                      "palette": "custom_bg",
-                      "value": 12
-                    },
-                    {
-                      "comparator": ">",
-                      "palette": "custom_bg",
-                      "value": 0
-                    }
-                  ],
-                  "response_format": "scalar",
-                  "queries": [
-                    {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:false} by {nodegroup_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:} by {nodegroup_name}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
@@ -348,8 +366,11 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "100*sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true}/(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard})",
-                  "aggregator": "last",
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "custom_bg_color": "#2a8d43",
@@ -378,12 +399,27 @@
                       "palette": "white_on_red",
                       "value": 0
                     }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,!nodegroup_name_prefix:}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
                   ]
                 }
               ],
               "autoscale": false,
               "custom_unit": "%",
-              "precision": 0
+              "precision": 1
             },
             "layout": {
               "x": 0,
@@ -399,13 +435,25 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true}",
-                  "aggregator": "last",
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "comparator": ">",
                       "palette": "green_on_white",
                       "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
                     }
                   ]
                 }
@@ -428,13 +476,25 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:false}",
-                  "aggregator": "last",
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "comparator": ">",
                       "palette": "yellow_on_white",
                       "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:false,!nodegroup_name_prefix:}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
                     }
                   ]
                 }
@@ -537,8 +597,8 @@
                     {
                       "formula": "100 * query1 / (query2)",
                       "limit": {
-                        "count": 50,
-                        "order": "asc"
+                        "count": 500,
+                        "order": "desc"
                       }
                     }
                   ],
@@ -574,13 +634,13 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true} by {kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:} by {kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
                     },
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard} by {kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,!nodegroup_name_prefix:} by {kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query2",
                       "aggregator": "last"
@@ -620,8 +680,8 @@
                       "conditional_formats": [
                         {
                           "palette": "green_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "cell_display_mode": "bar",
@@ -632,8 +692,8 @@
                       "conditional_formats": [
                         {
                           "palette": "yellow_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "cell_display_mode": "bar",
@@ -643,19 +703,19 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any} by {datacenter,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {datacenter,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
                     },
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any} by {datacenter,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {datacenter,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query2",
                       "aggregator": "last"
                     },
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any} by {datacenter,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {datacenter,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query3",
                       "aggregator": "last"
@@ -687,8 +747,8 @@
                       "conditional_formats": [
                         {
                           "palette": "green_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "limit": {
@@ -702,7 +762,7 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {nodegroup_name,conditions,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,conditions,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
@@ -734,8 +794,8 @@
                       "conditional_formats": [
                         {
                           "palette": "yellow_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "limit": {
@@ -749,7 +809,7 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {nodegroup_name,conditions,kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,conditions,kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
@@ -788,15 +848,14 @@
                     }
                   ],
                   "response_format": "timeseries",
-                  "on_right_yaxis": false,
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true} by {kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:} by {kubernetes_cluster}",
                       "data_source": "metrics",
                       "name": "query1"
                     },
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard} by {kubernetes_cluster}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,!nodegroup_name_prefix:} by {kubernetes_cluster}",
                       "data_source": "metrics",
                       "name": "query2"
                     }
@@ -826,9 +885,9 @@
       },
       "layout": {
         "x": 0,
-        "y": 1,
+        "y": 2,
         "width": 12,
-        "height": 9
+        "height": 1
       }
     },
     {
@@ -890,7 +949,61 @@
             "layout": {
               "x": 0,
               "y": 0,
-              "width": 12,
+              "width": 9,
+              "height": 2
+            }
+          },
+          {
+            "id": 3997265518099924,
+            "definition": {
+              "title": "Velocity: nodes per hour",
+              "show_legend": false,
+              "legend_layout": "auto",
+              "legend_columns": [
+                "avg",
+                "min",
+                "max",
+                "value",
+                "sum"
+              ],
+              "type": "timeseries",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "autosmooth(diff(query1))"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "on_right_yaxis": false,
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,in_scope:true,app:draino-standard,$conditions,!conditions:any}.rollup(avg, 3600)",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
+                  "style": {
+                    "palette": "cool",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "line"
+                }
+              ],
+              "yaxis": {
+                "include_zero": true,
+                "scale": "linear",
+                "label": "",
+                "min": "auto",
+                "max": "auto"
+              },
+              "markers": []
+            },
+            "layout": {
+              "x": 9,
+              "y": 0,
+              "width": 3,
               "height": 2
             }
           },
@@ -906,13 +1019,28 @@
               "type": "change",
               "requests": [
                 {
-                  "order_by": "change",
+                  "formulas": [
+                    {
+                      "formula": "hour_before(query1)"
+                    },
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "change_type": "absolute",
                   "order_dir": "asc",
-                  "compare_to": "hour_before",
-                  "q": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                  "response_format": "scalar",
                   "show_present": true,
                   "increase_good": false,
-                  "change_type": "absolute"
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    }
+                  ],
+                  "order_by": "change"
                 }
               ]
             },
@@ -951,30 +1079,49 @@
               "type": "query_table",
               "requests": [
                 {
-                  "aggregator": "sum",
-                  "conditional_formats": [
+                  "formulas": [
                     {
-                      "comparator": ">",
-                      "palette": "black_on_light_green",
-                      "value": 0
+                      "formula": "query1",
+                      "conditional_formats": [
+                        {
+                          "palette": "black_on_light_green",
+                          "value": 0,
+                          "comparator": ">"
+                        }
+                      ],
+                      "limit": {
+                        "count": 100,
+                        "order": "desc"
+                      },
+                      "alias": "DrainSuccess"
+                    },
+                    {
+                      "formula": "-query2",
+                      "conditional_formats": [
+                        {
+                          "palette": "black_on_light_red",
+                          "value": 0,
+                          "comparator": "<"
+                        }
+                      ],
+                      "alias": "DrainFailure"
                     }
                   ],
-                  "q": "sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:succeeded,$conditions,$ng_namespace,$team,$ng_name}.rollup(sum)",
-                  "alias": "DrainSuccess",
-                  "limit": 100,
-                  "order": "desc"
-                },
-                {
-                  "q": "-sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:failed,$conditions,$ng_namespace,$team,$ng_name}.rollup(sum)",
-                  "alias": "DrainFailure",
-                  "conditional_formats": [
+                  "response_format": "scalar",
+                  "queries": [
                     {
-                      "comparator": "<",
-                      "palette": "black_on_light_red",
-                      "value": 0
+                      "query": "sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:succeeded,$conditions,$ng_namespace,$team,$ng_name}.rollup(sum)",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    },
+                    {
+                      "query": "sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:failed,$conditions,$ng_namespace,$team,$ng_name}.rollup(sum)",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "sum"
                     }
-                  ],
-                  "aggregator": "sum"
+                  ]
                 }
               ],
               "has_search_bar": "never"
@@ -999,8 +1146,8 @@
                       "conditional_formats": [
                         {
                           "palette": "black_on_light_green",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "limit": {
@@ -1014,8 +1161,8 @@
                       "conditional_formats": [
                         {
                           "palette": "black_on_light_red",
-                          "comparator": "<",
-                          "value": 0
+                          "value": 0,
+                          "comparator": "<"
                         }
                       ],
                       "formula": "-query2"
@@ -1135,13 +1282,28 @@
               "type": "change",
               "requests": [
                 {
-                  "order_by": "change",
+                  "formulas": [
+                    {
+                      "formula": "day_before(query1)"
+                    },
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "change_type": "absolute",
                   "order_dir": "asc",
-                  "compare_to": "day_before",
-                  "q": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                  "response_format": "scalar",
                   "show_present": true,
                   "increase_good": false,
-                  "change_type": "absolute"
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    }
+                  ],
+                  "order_by": "change"
                 }
               ]
             },
@@ -1165,8 +1327,8 @@
                       "conditional_formats": [
                         {
                           "palette": "black_on_light_green",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "limit": {
@@ -1180,8 +1342,8 @@
                       "conditional_formats": [
                         {
                           "palette": "black_on_light_red",
-                          "comparator": "<",
-                          "value": 0
+                          "value": 0,
+                          "comparator": "<"
                         }
                       ],
                       "formula": "-query2"
@@ -1301,13 +1463,28 @@
               "type": "change",
               "requests": [
                 {
-                  "order_by": "change",
+                  "formulas": [
+                    {
+                      "formula": "week_before(query1)"
+                    },
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "change_type": "absolute",
                   "order_dir": "asc",
-                  "compare_to": "week_before",
-                  "q": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                  "response_format": "scalar",
                   "show_present": true,
                   "increase_good": false,
-                  "change_type": "absolute"
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    }
+                  ],
+                  "order_by": "change"
                 }
               ]
             },
@@ -1408,30 +1585,49 @@
               "type": "query_table",
               "requests": [
                 {
-                  "aggregator": "sum",
-                  "conditional_formats": [
+                  "formulas": [
                     {
-                      "comparator": ">",
-                      "palette": "black_on_light_green",
-                      "value": 0
+                      "formula": "query1",
+                      "conditional_formats": [
+                        {
+                          "palette": "black_on_light_green",
+                          "value": 0,
+                          "comparator": ">"
+                        }
+                      ],
+                      "limit": {
+                        "count": 100,
+                        "order": "desc"
+                      },
+                      "alias": "DrainSuccess"
+                    },
+                    {
+                      "formula": "-query2",
+                      "conditional_formats": [
+                        {
+                          "palette": "black_on_light_red",
+                          "value": 0,
+                          "comparator": "<"
+                        }
+                      ],
+                      "alias": "DrainFailure"
                     }
                   ],
-                  "q": "sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:succeeded,$ng_namespace,$team,$ng_name,$conditions} by {conditions}.rollup(sum)",
-                  "alias": "DrainSuccess",
-                  "limit": 100,
-                  "order": "desc"
-                },
-                {
-                  "q": "-sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:failed,$ng_namespace,$team,$ng_name,$conditions} by {conditions}.rollup(sum)",
-                  "alias": "DrainFailure",
-                  "conditional_formats": [
+                  "response_format": "scalar",
+                  "queries": [
                     {
-                      "comparator": "<",
-                      "palette": "black_on_light_red",
-                      "value": 0
+                      "query": "sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:succeeded,$ng_namespace,$team,$ng_name,$conditions} by {conditions}.rollup(sum)",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    },
+                    {
+                      "query": "sum:draino.draino_drained_nodes_total{$datacenter,$kubernetes_cluster,result:failed,$ng_namespace,$team,$ng_name,$conditions} by {conditions}.rollup(sum)",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "sum"
                     }
-                  ],
-                  "aggregator": "sum"
+                  ]
                 }
               ],
               "has_search_bar": "always"
@@ -1455,13 +1651,28 @@
               "type": "change",
               "requests": [
                 {
-                  "order_by": "change",
+                  "formulas": [
+                    {
+                      "formula": "month_before(query1)"
+                    },
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "change_type": "absolute",
                   "order_dir": "asc",
-                  "compare_to": "month_before",
-                  "q": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                  "response_format": "scalar",
                   "show_present": true,
                   "increase_good": false,
-                  "change_type": "absolute"
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{!conditions:any,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    }
+                  ],
+                  "order_by": "change"
                 }
               ]
             },
@@ -1572,10 +1783,10 @@
                       "alias": "InScope",
                       "conditional_formats": [
                         {
-                          "value": 0,
+                          "custom_fg_color": "#6464ff",
                           "palette": "green_on_white",
                           "comparator": ">",
-                          "custom_fg_color": "#6464ff"
+                          "value": 0
                         }
                       ],
                       "formula": "query2"
@@ -1584,10 +1795,10 @@
                       "alias": "Scheduled",
                       "conditional_formats": [
                         {
-                          "value": 0,
+                          "custom_fg_color": "#6464ff",
                           "palette": "green_on_white",
                           "comparator": ">",
-                          "custom_fg_color": "#6464ff"
+                          "value": 0
                         }
                       ],
                       "formula": "query3"
@@ -1596,10 +1807,10 @@
                       "alias": "Completed",
                       "conditional_formats": [
                         {
-                          "value": 0,
+                          "custom_fg_color": "#6464ff",
                           "palette": "custom_text",
                           "comparator": ">",
-                          "custom_fg_color": "#6464ff"
+                          "value": 0
                         }
                       ],
                       "formula": "query4"
@@ -1608,10 +1819,10 @@
                       "alias": "Failed",
                       "conditional_formats": [
                         {
-                          "value": 0,
+                          "custom_fg_color": "#6464ff",
                           "palette": "red_on_white",
                           "comparator": ">",
-                          "custom_fg_color": "#6464ff"
+                          "value": 0
                         }
                       ],
                       "formula": "query5"
@@ -1620,10 +1831,10 @@
                       "alias": "Error",
                       "conditional_formats": [
                         {
-                          "value": 0,
+                          "custom_fg_color": "#6464ff",
                           "palette": "red_on_white",
                           "comparator": ">",
-                          "custom_fg_color": "#6464ff"
+                          "value": 0
                         }
                       ],
                       "formula": "query6"
@@ -1720,10 +1931,10 @@
                       "alias": "Scheduled",
                       "conditional_formats": [
                         {
-                          "custom_fg_color": "#6464ff",
+                          "value": 0,
                           "palette": "green_on_white",
                           "comparator": ">",
-                          "value": 0
+                          "custom_fg_color": "#6464ff"
                         }
                       ],
                       "formula": "query2"
@@ -1732,10 +1943,10 @@
                       "alias": "Completed",
                       "conditional_formats": [
                         {
-                          "custom_fg_color": "#6464ff",
+                          "value": 0,
                           "palette": "custom_text",
                           "comparator": ">",
-                          "value": 0
+                          "custom_fg_color": "#6464ff"
                         }
                       ],
                       "formula": "query3"
@@ -1744,10 +1955,10 @@
                       "alias": "Failed",
                       "conditional_formats": [
                         {
-                          "custom_fg_color": "#6464ff",
+                          "value": 0,
                           "palette": "red_on_white",
                           "comparator": ">",
-                          "value": 0
+                          "custom_fg_color": "#6464ff"
                         }
                       ],
                       "formula": "query4"
@@ -1756,10 +1967,10 @@
                       "alias": "Error",
                       "conditional_formats": [
                         {
-                          "custom_fg_color": "#6464ff",
+                          "value": 0,
                           "palette": "red_on_white",
                           "comparator": ">",
-                          "value": 0
+                          "custom_fg_color": "#6464ff"
                         }
                       ],
                       "formula": "query5"
@@ -1926,7 +2137,7 @@
       },
       "layout": {
         "x": 0,
-        "y": 10,
+        "y": 3,
         "width": 12,
         "height": 18
       }
@@ -2010,8 +2221,11 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "100*sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:true,$conditions}/(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,$conditions})",
-                  "aggregator": "last",
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "custom_bg_color": "#2a8d43",
@@ -2040,6 +2254,21 @@
                       "palette": "white_on_red",
                       "value": 0
                     }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:true,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
                   ]
                 }
               ],
@@ -2061,13 +2290,20 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:true,$conditions}",
-                  "aggregator": "last",
                   "conditional_formats": [
                     {
                       "comparator": ">",
                       "palette": "green_on_white",
                       "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:true,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
                     }
                   ]
                 }
@@ -2090,13 +2326,20 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:false,$conditions}",
-                  "aggregator": "last",
                   "conditional_formats": [
                     {
                       "comparator": ">",
                       "palette": "yellow_on_white",
                       "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:false,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
                     }
                   ]
                 }
@@ -2119,7 +2362,15 @@
               "type": "toplist",
               "requests": [
                 {
-                  "q": "top(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:true,$conditions} by {nodegroup_name}, 100, 'last', 'desc')",
+                  "formulas": [
+                    {
+                      "formula": "query1",
+                      "limit": {
+                        "count": 100,
+                        "order": "desc"
+                      }
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "custom_bg_color": "#04f604",
@@ -2151,6 +2402,15 @@
                       "palette": "custom_bg",
                       "value": 0
                     }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:true,$conditions} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
                   ]
                 }
               ]
@@ -2177,8 +2437,8 @@
                       "conditional_formats": [
                         {
                           "palette": "green_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "limit": {
@@ -2224,8 +2484,8 @@
                       "conditional_formats": [
                         {
                           "palette": "yellow_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "limit": {
@@ -2350,8 +2610,8 @@
                       "conditional_formats": [
                         {
                           "palette": "green_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "cell_display_mode": "bar",
@@ -2362,8 +2622,8 @@
                       "conditional_formats": [
                         {
                           "palette": "yellow_on_white",
-                          "comparator": ">",
-                          "value": 0
+                          "value": 0,
+                          "comparator": ">"
                         }
                       ],
                       "cell_display_mode": "bar",
@@ -2485,7 +2745,15 @@
               "type": "toplist",
               "requests": [
                 {
-                  "q": "top(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:false,$conditions} by {nodegroup_name}, 100, 'last', 'desc')",
+                  "formulas": [
+                    {
+                      "formula": "query1",
+                      "limit": {
+                        "count": 100,
+                        "order": "desc"
+                      }
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "custom_bg_color": "#f60404",
@@ -2515,6 +2783,15 @@
                       "comparator": ">",
                       "palette": "custom_bg",
                       "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,app:draino-standard,in_scope:false,$conditions} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
                     }
                   ]
                 }
@@ -2587,7 +2864,7 @@
       },
       "layout": {
         "x": 0,
-        "y": 28,
+        "y": 21,
         "width": 12,
         "height": 1
       }
@@ -2595,7 +2872,7 @@
     {
       "id": 5485166690364998,
       "definition": {
-        "title": "Cordon acitvity [ For maintainers ]",
+        "title": "Cordon activity [ For maintainers ]",
         "type": "group",
         "background_color": "blue",
         "show_title": true,
@@ -2610,7 +2887,15 @@
               "type": "toplist",
               "requests": [
                 {
-                  "q": "sum:draino.draino_skipped_cordon_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {reason}.as_count()"
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_skipped_cordon_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {reason}.as_count()",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "avg"
+                    }
+                  ]
                 }
               ]
             },
@@ -2630,7 +2915,15 @@
               "type": "toplist",
               "requests": [
                 {
-                  "q": "sum:draino.draino_skipped_cordon_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,!nodegroup_name:,$conditions} by {nodegroup_name}.as_count()"
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_skipped_cordon_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,!nodegroup_name:,$conditions} by {nodegroup_name}.as_count()",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "avg"
+                    }
+                  ]
                 }
               ]
             },
@@ -2801,13 +3094,28 @@
               "type": "change",
               "requests": [
                 {
-                  "change_type": "relative",
+                  "formulas": [
+                    {
+                      "formula": "week_before(query1)"
+                    },
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "order_by": "change",
                   "order_dir": "desc",
-                  "compare_to": "week_before",
-                  "q": "sum:draino.draino_skipped_cordon_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {reason}.as_count()",
+                  "response_format": "scalar",
                   "show_present": true,
                   "increase_good": false,
-                  "order_by": "change"
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_skipped_cordon_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {reason}.as_count()",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    }
+                  ],
+                  "change_type": "relative"
                 }
               ]
             },
@@ -2860,12 +3168,29 @@
               "type": "toplist",
               "requests": [
                 {
-                  "q": "top(sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordonlimiterforlabels:*,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {nodegroup_name}.as_count()/sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordonlimiterforlabels:*,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {nodegroup_name}.as_count(),100,'last','desc')",
+                  "formulas": [
+                    {
+                      "formula": "query1 / query1",
+                      "limit": {
+                        "count": 100,
+                        "order": "desc"
+                      }
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "comparator": ">",
                       "palette": "white_on_yellow",
                       "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordonlimiterforlabels:*,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {nodegroup_name}.as_count()",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
                     }
                   ]
                 }
@@ -2990,10 +3315,9 @@
                     }
                   ],
                   "response_format": "timeseries",
-                  "on_right_yaxis": false,
                   "queries": [
                     {
-                      "query": "sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordon:*,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team} by {datacenter,kube_cluster_name}.as_count()",
+                      "query": "sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordon:*,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team} by {datacenter,kube_cluster_name,app}.as_count()",
                       "data_source": "metrics",
                       "name": "query1"
                     }
@@ -3137,12 +3461,35 @@
               "type": "toplist",
               "requests": [
                 {
-                  "q": "top(sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordonlimiterfortaints:*,$ng_namespace,$ng_name,$team,$conditions,$datacenter,$kubernetes_cluster} by {nodegroup_name}.as_count()/sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordonlimiterfortaints:*,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {nodegroup_name}.as_count(),100,'last','desc')",
+                  "formulas": [
+                    {
+                      "formula": "query1 / query2",
+                      "limit": {
+                        "count": 100,
+                        "order": "desc"
+                      }
+                    }
+                  ],
                   "conditional_formats": [
                     {
                       "comparator": ">",
                       "palette": "white_on_yellow",
                       "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordonlimiterfortaints:*,$ng_namespace,$ng_name,$team,$conditions,$datacenter,$kubernetes_cluster} by {nodegroup_name}.as_count()",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_limited_cordon_total{reason:maxsimultaneouscordonlimiterfortaints:*,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {nodegroup_name}.as_count()",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
                     }
                   ]
                 }
@@ -3221,7 +3568,7 @@
       },
       "layout": {
         "x": 0,
-        "y": 29,
+        "y": 22,
         "width": 12,
         "height": 1
       }
@@ -3247,13 +3594,28 @@
               "type": "change",
               "requests": [
                 {
-                  "change_type": "absolute",
+                  "formulas": [
+                    {
+                      "formula": "day_before(query1)"
+                    },
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "order_by": "change",
                   "order_dir": "desc",
-                  "compare_to": "day_before",
-                  "q": "top(sum:draino.draino_drained_nodes_total{result:failed,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {failure_cause}.as_count(), 10, 'sum', 'desc')",
+                  "response_format": "scalar",
                   "show_present": true,
                   "increase_good": false,
-                  "order_by": "change"
+                  "queries": [
+                    {
+                      "query": "top(sum:draino.draino_drained_nodes_total{result:failed,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {failure_cause}.as_count(), 10, \"sum\", \"desc\")",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "avg"
+                    }
+                  ],
+                  "change_type": "absolute"
                 }
               ]
             },
@@ -3273,7 +3635,24 @@
               "type": "toplist",
               "requests": [
                 {
-                  "q": "top(sum:draino.draino_drained_nodes_total{result:failed,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {failure_cause}.as_count(), 10, 'sum', 'desc')"
+                  "formulas": [
+                    {
+                      "formula": "query1",
+                      "limit": {
+                        "count": 10,
+                        "order": "desc"
+                      }
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_drained_nodes_total{result:failed,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions} by {failure_cause}.as_count()",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "sum"
+                    }
+                  ]
                 }
               ]
             },
@@ -3361,7 +3740,7 @@
           {
             "id": 5815134629560906,
             "definition": {
-              "title": "",
+              "title": "Node drain failures and causes",
               "title_size": "16",
               "title_align": "left",
               "show_legend": true,
@@ -3418,7 +3797,7 @@
             "id": 5320765848923344,
             "definition": {
               "type": "note",
-              "content": "Permanent failures represents node for which automatic retry has failed more that 7 times.\nThe system then give up.\nThe node is uncordon and it is annotated with:\n`draino/drain-retry: failed`",
+              "content": "Permanent failures represents node for which automatic retry has failed more that 7 times.\nThe system then give up.\nThe node is uncordon and it is annotated with:\n`draino/drain-retry-failed: failed`\n\n[link to list of nodes](https://app.datadoghq.com/orchestration/overview/node?query=annotation%23draino%2Fdrain-retry-failed%3Afailed&paused=false)\n\nTo purge the NLA history on that node and restart a complete cycle from the beginning change the value of the annotation:\n`draino/drain-retry-failed: restart`",
               "background_color": "vivid_orange",
               "font_size": "14",
               "text_align": "left",
@@ -3448,7 +3827,7 @@
                     {
                       "formula": "query1",
                       "limit": {
-                        "count": 10,
+                        "count": 500,
                         "order": "desc"
                       }
                     }
@@ -3456,7 +3835,7 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "avg:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,drain_retry_failed:true} by {kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,drain_retry_failed:true,conditions:any,app:draino-standard} by {kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
@@ -3496,10 +3875,9 @@
                     }
                   ],
                   "response_format": "timeseries",
-                  "on_right_yaxis": false,
                   "queries": [
                     {
-                      "query": "avg:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,drain_retry_failed:true} by {kube_cluster_name}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,drain_retry_failed:true,conditions:any,app:draino-standard} by {kube_cluster_name}",
                       "data_source": "metrics",
                       "name": "query1"
                     }
@@ -3532,9 +3910,9 @@
       },
       "layout": {
         "x": 0,
-        "y": 30,
+        "y": 23,
         "width": 12,
-        "height": 1,
+        "height": 5,
         "is_column_break": true
       }
     },
@@ -3548,50 +3926,24 @@
         "layout_type": "ordered",
         "widgets": [
           {
-            "id": 2870777055911904,
+            "id": 5980217962865516,
             "definition": {
-              "title": "Number of nodes IN scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions,in_scope:true}",
-                  "aggregator": "last"
-                }
-              ],
-              "precision": 0
+              "type": "note",
+              "content": "[link to nodes](https://app.datadoghq.com/orchestration/overview/node?query=annotation%23node-lifecycle.datadoghq.com%2Fprovision-new-node-before-drain%3Atrue&paused=false)",
+              "background_color": "white",
+              "font_size": "24",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
             },
             "layout": {
               "x": 0,
               "y": 0,
-              "width": 1,
-              "height": 2
-            }
-          },
-          {
-            "id": 3407299307600446,
-            "definition": {
-              "title": "Number of nodes OUT of scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions,in_scope:false}",
-                  "aggregator": "last",
-                  "conditional_formats": [
-                    {
-                      "comparator": ">",
-                      "palette": "yellow_on_white",
-                      "value": 0
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
-            },
-            "layout": {
-              "x": 1,
-              "y": 0,
-              "width": 1,
-              "height": 2
+              "width": 2,
+              "height": 1
             }
           },
           {
@@ -3601,8 +3953,26 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "100*sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions}/(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions})",
-                  "aggregator": "last"
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
+                  ]
                 }
               ],
               "custom_unit": "%",
@@ -3720,8 +4090,15 @@
               "type": "timeseries",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions} by {nodegroup_name}",
                   "on_right_yaxis": false,
+                  "response_format": "timeseries",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
                   "style": {
                     "palette": "dog_classic",
                     "line_type": "solid",
@@ -3789,14 +4166,75 @@
               "width": 3,
               "height": 2
             }
+          },
+          {
+            "id": 2870777055911904,
+            "definition": {
+              "title": "Number of nodes IN scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions,in_scope:true}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 0,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
+          },
+          {
+            "id": 3407299307600446,
+            "definition": {
+              "title": "Number of nodes OUT of scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "yellow_on_white",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,preprovisioning:true,app:draino-standard,$conditions,in_scope:false}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
           }
         ]
       },
       "layout": {
         "x": 0,
-        "y": 31,
+        "y": 28,
         "width": 12,
-        "height": 1
+        "height": 3
       }
     },
     {
@@ -3809,50 +4247,24 @@
         "layout_type": "ordered",
         "widgets": [
           {
-            "id": 4514195184299708,
+            "id": 3357326972004282,
             "definition": {
-              "title": "Number of nodes IN scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions,in_scope:true*}",
-                  "aggregator": "last"
-                }
-              ],
-              "precision": 0
+              "type": "note",
+              "content": "link to [statefulsets](https://app.datadoghq.com/orchestration/overview/statefulSet?query=annotation%23draino%2Fdelete-pvc-and-pv%3Atrue&paused=false) and [pods](https://app.datadoghq.com/orchestration/overview/pod?query=annotation%23draino%2Fdelete-pvc-and-pv%3Atrue&paused=false)",
+              "background_color": "white",
+              "font_size": "24",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
             },
             "layout": {
               "x": 0,
               "y": 0,
-              "width": 1,
-              "height": 2
-            }
-          },
-          {
-            "id": 1377123385895790,
-            "definition": {
-              "title": "Number of nodes OUT of scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions,in_scope:false}",
-                  "aggregator": "last",
-                  "conditional_formats": [
-                    {
-                      "comparator": ">",
-                      "palette": "yellow_on_white",
-                      "value": 0
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
-            },
-            "layout": {
-              "x": 1,
-              "y": 0,
-              "width": 1,
-              "height": 2
+              "width": 2,
+              "height": 1
             }
           },
           {
@@ -3862,8 +4274,26 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "100*sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions}/(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions})",
-                  "aggregator": "last"
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
+                  ]
                 }
               ],
               "custom_unit": "%",
@@ -3981,8 +4411,15 @@
               "type": "timeseries",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions} by {nodegroup_name}",
                   "on_right_yaxis": false,
+                  "response_format": "timeseries",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
                   "style": {
                     "palette": "dog_classic",
                     "line_type": "solid",
@@ -4050,49 +4487,38 @@
               "width": 3,
               "height": 2
             }
-          }
-        ]
-      },
-      "layout": {
-        "x": 0,
-        "y": 32,
-        "width": 12,
-        "height": 1
-      }
-    },
-    {
-      "id": 5551490132657834,
-      "definition": {
-        "title": "Feature: drain retry",
-        "type": "group",
-        "background_color": "vivid_green",
-        "show_title": true,
-        "layout_type": "ordered",
-        "widgets": [
+          },
           {
-            "id": 4873969492474464,
+            "id": 4514195184299708,
             "definition": {
               "title": "Number of nodes IN scope",
               "type": "query_value",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions,in_scope:true}",
-                  "aggregator": "last"
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions,in_scope:true*}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
                 }
               ],
               "precision": 0
             },
             "layout": {
               "x": 0,
-              "y": 0,
+              "y": 1,
               "width": 1,
-              "height": 2
+              "height": 1
             }
           },
           {
-            "id": 1245244384400038,
+            "id": 1377123385895790,
             "definition": {
-              "title": "Number of nodes OUT scope",
+              "title": "Number of nodes OUT of scope",
               "type": "query_value",
               "requests": [
                 {
@@ -4106,7 +4532,7 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions,in_scope:false}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,pvc_management:true,$conditions,in_scope:false}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
@@ -4118,9 +4544,48 @@
             },
             "layout": {
               "x": 1,
-              "y": 0,
+              "y": 1,
               "width": 1,
-              "height": 2
+              "height": 1
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 31,
+        "width": 12,
+        "height": 3
+      }
+    },
+    {
+      "id": 5551490132657834,
+      "definition": {
+        "title": "Feature: drain retry",
+        "type": "group",
+        "background_color": "vivid_green",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 6048291701448336,
+            "definition": {
+              "type": "note",
+              "content": "[link to nodes](https://app.datadoghq.com/orchestration/overview/node?query=annotation%23draino%2Fdrain-retry%3Atrue&paused=false)",
+              "background_color": "white",
+              "font_size": "24",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 2,
+              "height": 1
             }
           },
           {
@@ -4130,8 +4595,26 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "100*sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions}/(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions})",
-                  "aggregator": "last"
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
+                  ]
                 }
               ],
               "custom_unit": "%",
@@ -4249,8 +4732,15 @@
               "type": "timeseries",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions} by {nodegroup_name}",
                   "on_right_yaxis": false,
+                  "response_format": "timeseries",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
                   "style": {
                     "palette": "dog_classic",
                     "line_type": "solid",
@@ -4318,14 +4808,75 @@
               "width": 3,
               "height": 2
             }
+          },
+          {
+            "id": 4873969492474464,
+            "definition": {
+              "title": "Number of nodes IN scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions,in_scope:true}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 0,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
+          },
+          {
+            "id": 1245244384400038,
+            "definition": {
+              "title": "Number of nodes OUT scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "yellow_on_white",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,drain_retry:true,$conditions,in_scope:false}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
           }
         ]
       },
       "layout": {
         "x": 0,
-        "y": 33,
+        "y": 34,
         "width": 12,
-        "height": 1
+        "height": 3
       }
     },
     {
@@ -4338,74 +4889,24 @@
         "layout_type": "ordered",
         "widgets": [
           {
-            "id": 8692133250777212,
+            "id": 1812038611998916,
             "definition": {
-              "title": "Number of nodes IN scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "formulas": [
-                    {
-                      "formula": "query1"
-                    }
-                  ],
-                  "response_format": "scalar",
-                  "queries": [
-                    {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,eviction_url:true,$conditions,in_scope:true}",
-                      "data_source": "metrics",
-                      "name": "query1",
-                      "aggregator": "last"
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
+              "type": "note",
+              "content": "link to [statefulsets](https://app.datadoghq.com/orchestration/overview/statefulSet?query=annotation%23draino%2Feviction-api-url%3A%2A&paused=false) and [pods](https://app.datadoghq.com/orchestration/overview/pod?query=annotation%23draino%2Feviction-api-url%3A%2A&paused=false)",
+              "background_color": "white",
+              "font_size": "24",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
             },
             "layout": {
               "x": 0,
               "y": 0,
-              "width": 1,
-              "height": 2
-            }
-          },
-          {
-            "id": 1350140128036796,
-            "definition": {
-              "title": "Number of nodes OUT scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "formulas": [
-                    {
-                      "formula": "query1"
-                    }
-                  ],
-                  "conditional_formats": [
-                    {
-                      "comparator": ">",
-                      "palette": "yellow_on_white",
-                      "value": 0
-                    }
-                  ],
-                  "response_format": "scalar",
-                  "queries": [
-                    {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,eviction_url:true,$conditions,in_scope:false}",
-                      "data_source": "metrics",
-                      "name": "query1",
-                      "aggregator": "last"
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
-            },
-            "layout": {
-              "x": 1,
-              "y": 0,
-              "width": 1,
-              "height": 2
+              "width": 2,
+              "height": 1
             }
           },
           {
@@ -4633,14 +5134,85 @@
               "width": 3,
               "height": 2
             }
+          },
+          {
+            "id": 8692133250777212,
+            "definition": {
+              "title": "Number of nodes IN scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,eviction_url:true,$conditions,in_scope:true}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 0,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
+          },
+          {
+            "id": 1350140128036796,
+            "definition": {
+              "title": "Number of nodes OUT scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "yellow_on_white",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,eviction_url:true,$conditions,in_scope:false}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
           }
         ]
       },
       "layout": {
         "x": 0,
-        "y": 34,
+        "y": 37,
         "width": 12,
-        "height": 1
+        "height": 3
       }
     },
     {
@@ -4653,57 +5225,24 @@
         "layout_type": "ordered",
         "widgets": [
           {
-            "id": 539437336994560,
+            "id": 8540343693386668,
             "definition": {
-              "title": "Number of nodes IN scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions,in_scope:true}",
-                  "aggregator": "last",
-                  "conditional_formats": [
-                    {
-                      "comparator": ">",
-                      "palette": "white_on_red",
-                      "value": 0
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
+              "type": "note",
+              "content": "link to [nodes](https://app.datadoghq.com/orchestration/overview/node?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=false) [statefulsets](https://app.datadoghq.com/orchestration/overview/statefulSet?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=false) [deployment](https://app.datadoghq.com/orchestration/overview/deployment?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=false) and [pods](https://app.datadoghq.com/orchestration/overview/pod?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=false)",
+              "background_color": "white",
+              "font_size": "24",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
             },
             "layout": {
               "x": 0,
               "y": 0,
-              "width": 1,
-              "height": 2
-            }
-          },
-          {
-            "id": 8228191989677458,
-            "definition": {
-              "title": "Number of nodes OUT scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions,in_scope:false}",
-                  "aggregator": "last",
-                  "conditional_formats": [
-                    {
-                      "comparator": ">",
-                      "palette": "green_on_white",
-                      "value": 0
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
-            },
-            "layout": {
-              "x": 1,
-              "y": 0,
-              "width": 1,
-              "height": 2
+              "width": 2,
+              "height": 1
             }
           },
           {
@@ -4713,8 +5252,26 @@
               "type": "query_value",
               "requests": [
                 {
-                  "q": "100*sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions}/(sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions})",
-                  "aggregator": "last"
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
+                  ]
                 }
               ],
               "custom_unit": "%",
@@ -4832,8 +5389,15 @@
               "type": "timeseries",
               "requests": [
                 {
-                  "q": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions} by {nodegroup_name}",
                   "on_right_yaxis": false,
+                  "response_format": "timeseries",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
                   "style": {
                     "palette": "dog_classic",
                     "line_type": "solid",
@@ -4901,14 +5465,82 @@
               "width": 3,
               "height": 2
             }
+          },
+          {
+            "id": 539437336994560,
+            "definition": {
+              "title": "Number of nodes IN scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "white_on_red",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions,in_scope:true}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 0,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
+          },
+          {
+            "id": 8228191989677458,
+            "definition": {
+              "title": "Number of nodes OUT scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "green_on_white",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_out_via_pod_annotation:true,$conditions,in_scope:false}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
           }
         ]
       },
       "layout": {
         "x": 0,
-        "y": 35,
+        "y": 40,
         "width": 12,
-        "height": 1
+        "height": 3
       }
     },
     {
@@ -4921,69 +5553,24 @@
         "layout_type": "ordered",
         "widgets": [
           {
-            "id": 1188197115636516,
+            "id": 1421312419550774,
             "definition": {
-              "title": "Number of nodes IN scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "response_format": "scalar",
-                  "queries": [
-                    {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_in_via_pod_annotation:true,$conditions,in_scope:true}",
-                      "data_source": "metrics",
-                      "name": "query1",
-                      "aggregator": "last"
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
+              "type": "note",
+              "content": "link to [nodes](https://app.datadoghq.com/orchestration/overview/node?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=true) [statefulsets](https://app.datadoghq.com/orchestration/overview/statefulSet?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=true) [deployment](https://app.datadoghq.com/orchestration/overview/deployment?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=true) and [pods](https://app.datadoghq.com/orchestration/overview/pod?query=label%23node-lifecycle.datadoghq.com%2Fenabled%3Afalse&paused=true)",
+              "background_color": "white",
+              "font_size": "24",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
             },
             "layout": {
               "x": 0,
               "y": 0,
-              "width": 1,
-              "height": 2
-            }
-          },
-          {
-            "id": 2299075389880718,
-            "definition": {
-              "title": "Number of nodes OUT scope",
-              "type": "query_value",
-              "requests": [
-                {
-                  "formulas": [
-                    {
-                      "formula": "query1"
-                    }
-                  ],
-                  "conditional_formats": [
-                    {
-                      "comparator": ">",
-                      "palette": "green_on_white",
-                      "value": 0
-                    }
-                  ],
-                  "response_format": "scalar",
-                  "queries": [
-                    {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_in_via_pod_annotation:true,$conditions,in_scope:false}",
-                      "data_source": "metrics",
-                      "name": "query1",
-                      "aggregator": "last"
-                    }
-                  ]
-                }
-              ],
-              "precision": 0
-            },
-            "layout": {
-              "x": 1,
-              "y": 0,
-              "width": 1,
-              "height": 2
+              "width": 2,
+              "height": 1
             }
           },
           {
@@ -5211,41 +5798,18 @@
               "width": 3,
               "height": 2
             }
-          }
-        ]
-      },
-      "layout": {
-        "x": 0,
-        "y": 36,
-        "width": 12,
-        "height": 3
-      }
-    },
-    {
-      "id": 3917229782842188,
-      "definition": {
-        "title": "Feature: user specific condition",
-        "type": "group",
-        "background_color": "vivid_green",
-        "show_title": true,
-        "layout_type": "ordered",
-        "widgets": [
+          },
           {
-            "id": 7367789757762526,
+            "id": 1188197115636516,
             "definition": {
               "title": "Number of nodes IN scope",
               "type": "query_value",
               "requests": [
                 {
-                  "formulas": [
-                    {
-                      "formula": "query1"
-                    }
-                  ],
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_in_via_pod_annotation:true,$conditions,in_scope:true,user_allowed_conditions_annotation:true}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_in_via_pod_annotation:true,$conditions,in_scope:true}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
@@ -5257,13 +5821,13 @@
             },
             "layout": {
               "x": 0,
-              "y": 0,
+              "y": 1,
               "width": 1,
-              "height": 2
+              "height": 1
             }
           },
           {
-            "id": 763536452837436,
+            "id": 2299075389880718,
             "definition": {
               "title": "Number of nodes OUT scope",
               "type": "query_value",
@@ -5284,7 +5848,7 @@
                   "response_format": "scalar",
                   "queries": [
                     {
-                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions,in_scope:false,user_allowed_conditions_annotation:true}",
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_in_via_pod_annotation:true,$conditions,in_scope:false}",
                       "data_source": "metrics",
                       "name": "query1",
                       "aggregator": "last"
@@ -5296,9 +5860,48 @@
             },
             "layout": {
               "x": 1,
-              "y": 0,
+              "y": 1,
               "width": 1,
-              "height": 2
+              "height": 1
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 43,
+        "width": 12,
+        "height": 3
+      }
+    },
+    {
+      "id": 3917229782842188,
+      "definition": {
+        "title": "Feature: user specific condition",
+        "type": "group",
+        "background_color": "vivid_green",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 3632045483726858,
+            "definition": {
+              "type": "note",
+              "content": "[link to nodes](https://app.datadoghq.com/orchestration/overview/node?query=tag%23draino%2Fnode-conditions%3A%2A&paused=false)",
+              "background_color": "white",
+              "font_size": "24",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 2,
+              "height": 1
             }
           },
           {
@@ -5526,12 +6129,1219 @@
               "width": 3,
               "height": 2
             }
+          },
+          {
+            "id": 7367789757762526,
+            "definition": {
+              "title": "Number of nodes IN scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,user_opt_in_via_pod_annotation:true,$conditions,in_scope:true,user_allowed_conditions_annotation:true}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 0,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
+          },
+          {
+            "id": 763536452837436,
+            "definition": {
+              "title": "Number of nodes OUT scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "green_on_white",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_nodes_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,$conditions,in_scope:false,user_allowed_conditions_annotation:true}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "width": 1,
+              "height": 1
+            }
           }
         ]
       },
       "layout": {
         "x": 0,
-        "y": 39,
+        "y": 46,
+        "width": 12,
+        "height": 3
+      }
+    },
+    {
+      "id": 4077740151293666,
+      "definition": {
+        "title": "CPU in scope of NLA [ For all users ]",
+        "type": "group",
+        "background_color": "purple",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 5801848886462402,
+            "definition": {
+              "type": "note",
+              "content": "This group is to reveal the number of nodes in scope **overall**.\n\nIf you are interested by only a specific `condition`, select a value in the *conditions* filter and go to the dedicated group under this one.",
+              "background_color": "vivid_purple",
+              "font_size": "18",
+              "text_align": "center",
+              "vertical_align": "center",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left",
+              "has_padding": true
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 3,
+              "height": 1
+            }
+          },
+          {
+            "id": 1734945488969672,
+            "definition": {
+              "title": "CPUs in scope per condition",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "alias": "CPU count",
+                      "cell_display_mode": "bar",
+                      "limit": {
+                        "count": 50,
+                        "order": "desc"
+                      },
+                      "formula": "query1"
+                    },
+                    {
+                      "alias": "in-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "green_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query2"
+                    },
+                    {
+                      "alias": "out-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "yellow_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query3"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any,!nodegroup_name_prefix:} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any,!nodegroup_name_prefix:} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {conditions}",
+                      "data_source": "metrics",
+                      "name": "query3",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "has_search_bar": "auto"
+            },
+            "layout": {
+              "x": 3,
+              "y": 0,
+              "width": 2,
+              "height": 3
+            }
+          },
+          {
+            "id": 4611597749074084,
+            "definition": {
+              "title": "Top 100 NG in CPU count (use sort to switch category)",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "alias": "CPU count",
+                      "cell_display_mode": "bar",
+                      "limit": {
+                        "count": 100,
+                        "order": "desc"
+                      },
+                      "formula": "query1"
+                    },
+                    {
+                      "alias": "in-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "green_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query2"
+                    },
+                    {
+                      "alias": "out-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "yellow_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query3"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {nodegroup_name,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query3",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "has_search_bar": "never"
+            },
+            "layout": {
+              "x": 5,
+              "y": 0,
+              "width": 3,
+              "height": 5
+            }
+          },
+          {
+            "id": 4198682471884760,
+            "definition": {
+              "title": "CPUs in scope per NG",
+              "type": "toplist",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1",
+                      "limit": {
+                        "count": 500,
+                        "order": "desc"
+                      }
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "custom_bg_color": "#04f604",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 100
+                    },
+                    {
+                      "custom_bg_color": "#1f7a00",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 50
+                    },
+                    {
+                      "custom_bg_color": "#1a4f08",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 25
+                    },
+                    {
+                      "custom_bg_color": "#063706",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 12
+                    },
+                    {
+                      "custom_bg_color": "#051a05",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ]
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 2,
+              "height": 5
+            }
+          },
+          {
+            "id": 1200173675326860,
+            "definition": {
+              "title": "CPUs out of scope per NG",
+              "type": "toplist",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1",
+                      "limit": {
+                        "count": 500,
+                        "order": "desc"
+                      }
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "custom_bg_color": "#f60404",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 100
+                    },
+                    {
+                      "custom_bg_color": "#7a1f00",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 50
+                    },
+                    {
+                      "custom_bg_color": "#7a1f00",
+                      "comparator": ">",
+                      "palette": "white_on_red",
+                      "value": 25
+                    },
+                    {
+                      "custom_bg_color": "#370606",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 12
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:false,!nodegroup_name_prefix:} by {nodegroup_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ]
+            },
+            "layout": {
+              "x": 10,
+              "y": 0,
+              "width": 2,
+              "height": 5
+            }
+          },
+          {
+            "id": 4087938201264562,
+            "definition": {
+              "title": "NLA Overall Coverage",
+              "type": "query_value",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "custom_bg_color": "#2a8d43",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 90
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "white_on_green",
+                      "value": 75
+                    },
+                    {
+                      "custom_bg_color": "#16587f",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 50
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "white_on_yellow",
+                      "value": 25
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "white_on_red",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,!nodegroup_name_prefix:}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "autoscale": false,
+              "custom_unit": "%",
+              "precision": 2
+            },
+            "layout": {
+              "x": 0,
+              "y": 1,
+              "width": 1,
+              "height": 2
+            }
+          },
+          {
+            "id": 5952012919660484,
+            "definition": {
+              "title": "CPUs in scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "green_on_white",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "autoscale": false,
+              "custom_unit": "CPUs",
+              "precision": 0
+            },
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "width": 1,
+              "height": 2
+            }
+          },
+          {
+            "id": 2430778181213064,
+            "definition": {
+              "title": "CPUs out of scope",
+              "type": "query_value",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "palette": "yellow_on_white",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:false}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "autoscale": false,
+              "custom_unit": "CPU",
+              "precision": 0
+            },
+            "layout": {
+              "x": 2,
+              "y": 1,
+              "width": 1,
+              "height": 2
+            }
+          },
+          {
+            "id": 7885350626683318,
+            "definition": {
+              "title": "In vs Out of scope",
+              "show_legend": false,
+              "legend_layout": "auto",
+              "legend_columns": [
+                "avg",
+                "min",
+                "max",
+                "value",
+                "sum"
+              ],
+              "type": "timeseries",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "on_right_yaxis": false,
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:} by {kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
+                  "style": {
+                    "palette": "green",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "area"
+                },
+                {
+                  "formulas": [
+                    {
+                      "formula": "-query1"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "on_right_yaxis": false,
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:false,!nodegroup_name_prefix:} by {kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
+                  "style": {
+                    "palette": "orange",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "area"
+                }
+              ],
+              "yaxis": {
+                "include_zero": true,
+                "scale": "linear",
+                "label": "",
+                "min": "auto",
+                "max": "auto"
+              },
+              "markers": []
+            },
+            "layout": {
+              "x": 0,
+              "y": 3,
+              "width": 3,
+              "height": 3
+            }
+          },
+          {
+            "id": 487199249592496,
+            "definition": {
+              "title": "InScope ratio % per cluster1",
+              "type": "toplist",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)",
+                      "limit": {
+                        "count": 500,
+                        "order": "desc"
+                      }
+                    }
+                  ],
+                  "conditional_formats": [
+                    {
+                      "custom_bg_color": "#2a8d43",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 90
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "white_on_green",
+                      "value": 75
+                    },
+                    {
+                      "custom_bg_color": "#16587f",
+                      "comparator": ">",
+                      "palette": "custom_bg",
+                      "value": 50
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "white_on_yellow",
+                      "value": 25
+                    },
+                    {
+                      "comparator": ">",
+                      "palette": "white_on_red",
+                      "value": 0
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:} by {kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,!nodegroup_name_prefix:} by {kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ]
+            },
+            "layout": {
+              "x": 3,
+              "y": 3,
+              "width": 2,
+              "height": 5
+            }
+          },
+          {
+            "id": 2730714035803450,
+            "definition": {
+              "title": "CPUs in scope per cluster",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "alias": "CPU count",
+                      "cell_display_mode": "bar",
+                      "limit": {
+                        "count": 1000,
+                        "order": "desc"
+                      },
+                      "formula": "query1"
+                    },
+                    {
+                      "alias": "in-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "green_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query2"
+                    },
+                    {
+                      "alias": "out-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "yellow_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "cell_display_mode": "bar",
+                      "formula": "query3"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {datacenter,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {datacenter,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query2",
+                      "aggregator": "last"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,conditions:any,!nodegroup_name_prefix:} by {datacenter,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query3",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "has_search_bar": "auto"
+            },
+            "layout": {
+              "x": 5,
+              "y": 5,
+              "width": 3,
+              "height": 3
+            }
+          },
+          {
+            "id": 6611737061864436,
+            "definition": {
+              "title": "Top 50 NG in-scope  with condition(s) in CPU count",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "alias": "in-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "green_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "limit": {
+                        "count": 50,
+                        "order": "desc"
+                      },
+                      "cell_display_mode": "bar",
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:true,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {nodegroup_name,conditions,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "has_search_bar": "never"
+            },
+            "layout": {
+              "x": 8,
+              "y": 5,
+              "width": 2,
+              "height": 3
+            }
+          },
+          {
+            "id": 4556362726140242,
+            "definition": {
+              "title": "Top 50 NG out-scope with condition(s) in CPU count",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "alias": "out-scope",
+                      "conditional_formats": [
+                        {
+                          "palette": "yellow_on_white",
+                          "comparator": ">",
+                          "value": 0
+                        }
+                      ],
+                      "limit": {
+                        "count": 50,
+                        "order": "desc"
+                      },
+                      "cell_display_mode": "bar",
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{in_scope:false,app:draino-standard,$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team,$conditions,!conditions:any} by {nodegroup_name,conditions,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ],
+              "has_search_bar": "never"
+            },
+            "layout": {
+              "x": 10,
+              "y": 5,
+              "width": 2,
+              "height": 3
+            }
+          },
+          {
+            "id": 3055409049932458,
+            "definition": {
+              "title": "InScope ratio % per cluster",
+              "show_legend": true,
+              "legend_layout": "horizontal",
+              "legend_columns": [
+                "avg",
+                "min",
+                "max",
+                "value",
+                "sum"
+              ],
+              "type": "timeseries",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "100 * query1 / (query2)"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "queries": [
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,in_scope:true,!nodegroup_name_prefix:} by {kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    },
+                    {
+                      "query": "sum:draino.draino_node_options_cpu_total{$datacenter,$kubernetes_cluster,$ng_namespace,$team,$ng_name,conditions:any,app:draino-standard,!nodegroup_name_prefix:} by {kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query2"
+                    }
+                  ],
+                  "style": {
+                    "palette": "cool",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "line"
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "100"
+              },
+              "markers": []
+            },
+            "layout": {
+              "x": 0,
+              "y": 6,
+              "width": 3,
+              "height": 2
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 49,
+        "width": 12,
+        "height": 9
+      }
+    },
+    {
+      "id": 1406336625253506,
+      "definition": {
+        "title": "Nodes status",
+        "type": "group",
+        "background_color": "vivid_yellow",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 483215088732880,
+            "definition": {
+              "title": "Node lifetime - Cluster Average",
+              "show_legend": false,
+              "legend_layout": "auto",
+              "legend_columns": [
+                "avg",
+                "min",
+                "max",
+                "value",
+                "sum"
+              ],
+              "type": "timeseries",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "forecast(query1, 'linear', 1)"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "on_right_yaxis": false,
+                  "queries": [
+                    {
+                      "query": "avg:k8s_datadog_node_problem_detector.node_lifetime_hours{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name} by {kubernetes_cluster,datacenter}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
+                  "style": {
+                    "palette": "dog_classic",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "line"
+                },
+                {
+                  "formulas": [
+                    {
+                      "formula": "forecast(query1, \"linear\", 1)"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "on_right_yaxis": false,
+                  "queries": [
+                    {
+                      "query": "avg:k8s_datadog_node_problem_detector.node_lifetime{$datacenter,$kubernetes_cluster,$ng_namespace,*,$ng_name} by {kubernetes_cluster,datacenter}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
+                  "style": {
+                    "palette": "cool",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "line"
+                }
+              ],
+              "yaxis": {
+                "include_zero": true,
+                "scale": "linear",
+                "label": "",
+                "min": "auto",
+                "max": "auto"
+              },
+              "markers": [
+                {
+                  "label": " 90 Days ",
+                  "value": "y = 2160",
+                  "display_type": "error dashed"
+                },
+                {
+                  "label": " 30 Days ",
+                  "value": "y = 720",
+                  "display_type": "warning dashed"
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 1363728755141114,
+            "definition": {
+              "title": "Node lifetime - Team Average",
+              "type": "query_table",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "alias": "Node Lifetime average",
+                      "limit": {
+                        "count": 500,
+                        "order": "desc"
+                      },
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "avg:k8s_datadog_node_problem_detector.node_lifetime{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team} by {kubernetes_cluster,datacenter,team}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "last"
+                    }
+                  ]
+                }
+              ]
+            },
+            "layout": {
+              "x": 3,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 7991587368828250,
+            "definition": {
+              "title": "",
+              "title_size": "16",
+              "title_align": "left",
+              "show_legend": true,
+              "legend_layout": "auto",
+              "legend_columns": [
+                "avg",
+                "min",
+                "max",
+                "value",
+                "sum"
+              ],
+              "type": "timeseries",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "queries": [
+                    {
+                      "query": "sum:k8s_node_metadata_controller.node_out_of_date{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team} by {kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
+                  "style": {
+                    "palette": "dog_classic",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "bars"
+                }
+              ]
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 2,
+              "height": 2
+            }
+          },
+          {
+            "id": 5180322712433436,
+            "definition": {
+              "title": "",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1",
+                      "limit": {
+                        "count": 500,
+                        "order": "desc"
+                      }
+                    }
+                  ],
+                  "response_format": "scalar",
+                  "queries": [
+                    {
+                      "query": "sum:k8s_node_metadata_controller.node_out_of_date{$datacenter,$kubernetes_cluster,$ng_namespace,$ng_name,$team} by {kube_cluster_name,nodegroups.datadoghq.com/name}",
+                      "data_source": "metrics",
+                      "name": "query1",
+                      "aggregator": "avg"
+                    }
+                  ]
+                }
+              ]
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 2,
+              "height": 2
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 58,
+        "width": 12,
+        "height": 3
+      }
+    },
+    {
+      "id": 1350557661640550,
+      "definition": {
+        "title": "Zonal Clusters",
+        "type": "group",
+        "background_color": "vivid_blue",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 6762822465645054,
+            "definition": {
+              "title": "Zonal clusters: partition open for eviction",
+              "title_size": "16",
+              "title_align": "left",
+              "show_legend": true,
+              "legend_layout": "auto",
+              "legend_columns": [
+                "avg",
+                "min",
+                "max",
+                "value",
+                "sum"
+              ],
+              "type": "timeseries",
+              "requests": [
+                {
+                  "formulas": [
+                    {
+                      "formula": "query1"
+                    }
+                  ],
+                  "response_format": "timeseries",
+                  "queries": [
+                    {
+                      "query": "max:disruption_budget_manager.time_partition{reason:,$datacenter,$kubernetes_cluster} by {partition,kube_cluster_name}",
+                      "data_source": "metrics",
+                      "name": "query1"
+                    }
+                  ],
+                  "style": {
+                    "palette": "dog_classic",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "display_type": "bars"
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 2
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 61,
         "width": 12,
         "height": 3
       }
@@ -5540,39 +7350,39 @@
   "template_variables": [
     {
       "name": "datacenter",
-      "default": "*",
       "prefix": "datacenter",
-      "available_values": []
+      "available_values": [],
+      "default": "*"
     },
     {
       "name": "kubernetes_cluster",
-      "default": "*",
       "prefix": "kubernetes_cluster",
-      "available_values": []
+      "available_values": [],
+      "default": "*"
     },
     {
       "name": "ng_namespace",
-      "default": "*",
       "prefix": "nodegroup_namespace",
-      "available_values": []
+      "available_values": [],
+      "default": "*"
     },
     {
       "name": "ng_name",
-      "default": "*",
       "prefix": "nodegroup_name",
-      "available_values": []
+      "available_values": [],
+      "default": "*"
     },
     {
       "name": "team",
-      "default": "*",
       "prefix": "team",
-      "available_values": []
+      "available_values": [],
+      "default": "*"
     },
     {
       "name": "conditions",
-      "default": "*",
       "prefix": "conditions",
-      "available_values": []
+      "available_values": [],
+      "default": "*"
     }
   ],
   "layout_type": "ordered",
