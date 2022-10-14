@@ -290,3 +290,75 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 		})
 	}
 }
+
+func TestPVCStorageClassCleanupEnabled(t *testing.T) {
+
+	tests := []struct {
+		name                       string
+		p                          *v1.Pod
+		defaultTrueIfNoEvictionUrl bool
+		want                       bool
+	}{
+		{
+			name:                       "default false, no annotation",
+			p:                          &v1.Pod{},
+			defaultTrueIfNoEvictionUrl: false,
+			want:                       false,
+		},
+		{
+			name:                       "default true, no annotation",
+			p:                          &v1.Pod{},
+			defaultTrueIfNoEvictionUrl: true,
+			want:                       true,
+		},
+		{
+			name: "default true, explicit opt-out",
+			p: &v1.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Annotations: map[string]string{PVCStorageClassCleanupAnnotationKey: PVCStorageClassCleanupAnnotationFalseValue},
+				},
+			},
+			defaultTrueIfNoEvictionUrl: true,
+			want:                       false,
+		},
+		{
+			name: "default false, but explicit opt-in",
+			p: &v1.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Annotations: map[string]string{PVCStorageClassCleanupAnnotationKey: PVCStorageClassCleanupAnnotationTrueValue},
+				},
+			},
+			defaultTrueIfNoEvictionUrl: false,
+			want:                       true,
+		},
+		{
+			name: "default true, with evictionURL only",
+			p: &v1.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Annotations: map[string]string{EvictionAPIURLAnnotationKey: "url"},
+				},
+			},
+			defaultTrueIfNoEvictionUrl: true,
+			want:                       false,
+		},
+		{
+			name: "default true, with evictionURL and explicit opt-in",
+			p: &v1.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Annotations: map[string]string{PVCStorageClassCleanupAnnotationKey: PVCStorageClassCleanupAnnotationTrueValue, EvictionAPIURLAnnotationKey: "url"},
+				},
+			},
+			defaultTrueIfNoEvictionUrl: true,
+			want:                       true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kclient := fake.NewSimpleClientset(tt.p)
+			store, closingFunc := RunStoreForTest(kclient)
+			defer closingFunc()
+
+			assert.Equalf(t, tt.want, PVCStorageClassCleanupEnabled(tt.p, store, tt.defaultTrueIfNoEvictionUrl), "PVCStorageClassCleanupEnabled test=%s", tt.name)
+		})
+	}
+}
