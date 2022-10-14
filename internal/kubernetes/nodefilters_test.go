@@ -626,7 +626,7 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
-			got, err := GetUnscheduledPodsBoundToNodeByPV(tt.node, store, zap.NewNop())
+			got, err := GetUnscheduledPodsBoundToNodeByPV(tt.node, store, false, zap.NewNop())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetUnscheduledPodsBoundToNodeByPV() error = %v, wantErr %v", err, tt.wantErr)
 				return

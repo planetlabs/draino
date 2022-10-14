@@ -390,7 +390,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			store, closeCh := RunStoreForTest(kclient)
 			defer closeCh()
 			cordonDrainer := &mockCordonDrainer{}
-			h := NewDrainingResourceEventHandler(kclient, cordonDrainer, store, NewEventRecorder(&record.FakeRecorder{}), WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
+			h := NewDrainingResourceEventHandler(kclient, cordonDrainer, store, NewEventRecorder(&record.FakeRecorder{}), WithDrainBuffer(0*time.Second), WithGlobalConfigHandler(GlobalConfig{SuppliedConditions: ParseConditions(tc.conditions)}))
 			h.drainScheduler = cordonDrainer
 			h.OnUpdate(nil, tc.obj)
 

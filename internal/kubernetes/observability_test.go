@@ -165,7 +165,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
-				configName:         tt.configName,
+				globalConfig:       GlobalConfig{ConfigName: tt.configName},
 				nodeFilterFunc:     tt.nodeFilterFunc,
 				podFilterFunc:      tt.podFilterFunc,
 				logger:             zap.NewNop(),
@@ -246,11 +246,13 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
-				configName:         tt.configName,
-				conditions:         tt.conditions,
-				nodeFilterFunc:     tt.nodeFilterFunc,
-				podFilterFunc:      NewPodFilters(),
-				logger:             zap.NewNop(),
+				globalConfig: GlobalConfig{
+					ConfigName:         tt.configName,
+					SuppliedConditions: tt.conditions,
+				},
+				nodeFilterFunc: tt.nodeFilterFunc,
+				podFilterFunc:  NewPodFilters(),
+				logger:         zap.NewNop(),
 			}
 			err := s.patchNodeLabels(tt.nodeName)
 			if err == nil && tt.wantErr {

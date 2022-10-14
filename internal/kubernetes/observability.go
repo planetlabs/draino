@@ -127,8 +127,7 @@ type DrainoConfigurationObserverImpl struct {
 	queueNodeToBeUpdated workqueue.RateLimitingInterface
 	nodePatchLimiter     flowcontrol.RateLimiter // client side protection for APIServer
 
-	configName          string
-	conditions          []SuppliedCondition
+	globalConfig        GlobalConfig
 	nodeFilterFunc      func(obj interface{}) bool
 	podFilterFunc       PodFilterFunc
 	userOptOutPodFilter PodFilterFunc
@@ -140,7 +139,7 @@ type DrainoConfigurationObserverImpl struct {
 
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
-func NewScopeObserver(client client.Interface, configName string, conditions []SuppliedCondition, runtimeObjectStore RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
+func NewScopeObserver(client client.Interface, globalConfig GlobalConfig, runtimeObjectStore RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
 
 	// We are not adding a BucketRateLimiter to that list because the same nodes are going to be appended periodically if the update fails
 	// Failing nodes will already be in the queue with a retry. Added a BucketRL proved to be a problem here is the client side is not able to dequeue
@@ -162,8 +161,7 @@ func NewScopeObserver(client client.Interface, configName string, conditions []S
 		userOptInPodFilter:   userOptInPodFilter,
 		analysisPeriod:       analysisPeriod,
 		logger:               log,
-		configName:           configName,
-		conditions:           conditions,
+		globalConfig:         globalConfig,
 		queueNodeToBeUpdated: workqueue.NewNamedRateLimitingQueue(workqueue.NewMaxOfRateLimiter(rateLimiters...), "nodeUpdater"),
 		nodePatchLimiter:     flowcontrol.NewTokenBucketRateLimiter(50, 10), // client side protection
 	}
@@ -234,7 +232,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				}
 
 				nodeTags := GetNodeTagsValues(node)
-				conditions := GetNodeOffendingConditions(node, s.conditions)
+				conditions := GetNodeOffendingConditions(node, s.globalConfig.SuppliedConditions)
 				if node.Annotations == nil {
 					node.Annotations = map[string]string{}
 				}
@@ -336,7 +334,7 @@ func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string,
 	configsOriginal := strings.Split(valueOriginal, ".")
 	var configs []string
 	for _, config := range configsOriginal {
-		if config == "" || config == OutOfScopeLabelValue || config == s.configName {
+		if config == "" || config == OutOfScopeLabelValue || config == s.globalConfig.ConfigName {
 			continue
 		}
 		configs = append(configs, config)
@@ -347,7 +345,7 @@ func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string,
 	}
 	LogForVerboseNode(s.logger, node, "InScope information", zap.Bool("inScope", inScope), zap.String("reason", reason))
 	if inScope {
-		configs = append(configs, s.configName)
+		configs = append(configs, s.globalConfig.ConfigName)
 	}
 	if len(configs) == 0 {
 		// add out of scope value for user visibility
@@ -498,18 +496,27 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithPVCManagementEnabled(node *v
 		return false
 	}
 	for _, p := range pods {
-		if PVCStorageClassCleanupEnabled(p, s.runtimeObjectStore) {
+		if PVCStorageClassCleanupEnabled(p, s.runtimeObjectStore, s.globalConfig.PVCManagementEnableIfNoEvictionUrl) {
 			return true
 		}
 	}
 	return false
 }
 
-func PVCStorageClassCleanupEnabled(p *v1.Pod, store RuntimeObjectStore) bool {
+func PVCStorageClassCleanupEnabled(p *v1.Pod, store RuntimeObjectStore, defaultTrueIfNoEvictionUrl bool) bool {
 	valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, p, store)
-	if valAnnotation == PVCStorageClassCleanupAnnotationValue {
+	if valAnnotation == PVCStorageClassCleanupAnnotationTrueValue {
 		return true
 	}
+	if valAnnotation == PVCStorageClassCleanupAnnotationFalseValue {
+		return false
+	}
+
+	if defaultTrueIfNoEvictionUrl {
+		_, evictionUrlFound := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, p, store)
+		return !evictionUrlFound
+	}
+
 	return false
 }
 

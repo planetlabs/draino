@@ -138,7 +138,7 @@ func ConvertLabelsToFilterExpr(labelsSlice []string) (*string, error) {
 }
 
 // GetUnscheduledPodsBoundToNodeByPV Check if there is any pod that would be bound to that node due to PV/PVC and that is not yet scheduled
-func GetUnscheduledPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore, logger *zap.Logger) ([]*core.Pod, error) {
+func GetUnscheduledPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore, pvcManagementDefaultTrueIfNoEvictionURL bool, logger *zap.Logger) ([]*core.Pod, error) {
 	var result []*core.Pod
 	// Is there a local PV on the node
 	pvs := store.PersistentVolumes().GetPVForNode(node)
@@ -174,7 +174,7 @@ func GetUnscheduledPodsBoundToNodeByPV(node *core.Node, store RuntimeObjectStore
 				LogForVerboseNode(logger, node, fmt.Sprintf("Pod for claim "+pv.Spec.ClaimRef.Name+", adding pod "+pod.Name))
 
 				var pendingPodDelay time.Duration
-				if PVCStorageClassCleanupEnabled(pod, store) {
+				if PVCStorageClassCleanupEnabled(pod, store, pvcManagementDefaultTrueIfNoEvictionURL) {
 					// The pod must be long (enough) pending to be sure that we are not looking at the fresh STS while we are performing the PVC cleanup
 					// Adding a 10s delay on top of PVC deletion timeout to be sure that we have time to perform the PVC cleanup
 					pendingPodDelay = 10*time.Second + awaitPVCDeletionTimeout

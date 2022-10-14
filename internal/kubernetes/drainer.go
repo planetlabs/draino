@@ -58,9 +58,10 @@ const (
 	ConditionDrainedScheduled = "DrainScheduled"
 	DefaultSkipDrain          = false
 
-	EvictionNodeConditionsAnnotationKey   = "draino/node-conditions"
-	PVCStorageClassCleanupAnnotationKey   = "draino/delete-pvc-and-pv"
-	PVCStorageClassCleanupAnnotationValue = "true"
+	EvictionNodeConditionsAnnotationKey        = "draino/node-conditions"
+	PVCStorageClassCleanupAnnotationKey        = "draino/delete-pvc-and-pv"
+	PVCStorageClassCleanupAnnotationTrueValue  = "true"
+	PVCStorageClassCleanupAnnotationFalseValue = "false"
 
 	CompletedStr = "Completed"
 	FailedStr    = "Failed"
@@ -259,7 +260,7 @@ type APICordonDrainer struct {
 	skipDrain                  bool
 	maxDrainAttemptsBeforeFail int32
 
-	conditions []SuppliedCondition
+	globalConfig GlobalConfig
 
 	storageClassesAllowingPVDeletion map[string]struct{}
 }
@@ -338,10 +339,10 @@ func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) APICordonDra
 	}
 }
 
-// WithSuppliedConditions give the list of conditions for which draino is triggered
-func WithSuppliedConditions(conditions []string) APICordonDrainerOption {
+// WithGlobalConfig give the list of conditions for which draino is triggered
+func WithGlobalConfig(globalConfig GlobalConfig) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
-		d.conditions = ParseConditions(conditions)
+		d.globalConfig = globalConfig
 	}
 }
 
@@ -783,7 +784,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 	span, ctx := tracer.StartSpanFromContext(ctx, "evictWithKubernetesAPI")
 	defer span.Finish()
 
-	conditions := GetConditionsTypes(GetNodeOffendingConditions(node, d.conditions))
+	conditions := GetConditionsTypes(GetNodeOffendingConditions(node, d.globalConfig.SuppliedConditions))
 	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
 	gracePeriod := d.getGracePeriod(pod)
 	maxRetryOn500 := 4
@@ -1058,8 +1059,7 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(ctx context.Conte
 		return nil, nil
 	}
 
-	valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, pod, d.runtimeObjectStore)
-	if valAnnotation != PVCStorageClassCleanupAnnotationValue {
+	if !PVCStorageClassCleanupEnabled(pod, d.runtimeObjectStore, d.globalConfig.PVCManagementEnableIfNoEvictionUrl) {
 		return nil, nil
 	}
 
