@@ -130,7 +130,7 @@ type DrainingResourceEventHandler struct {
 	labelsKeyForDrainGroups      []string
 	preprovisioningConfiguration NodePreprovisioningConfiguration
 
-	conditions []SuppliedCondition
+	globalConfig GlobalConfig
 
 	durationWithCompletedStatusBeforeReplacement time.Duration
 }
@@ -167,10 +167,10 @@ func WithDurationWithCompletedStatusBeforeReplacement(d time.Duration) DrainingR
 	}
 }
 
-// WithConditionsFilter configures which conditions should be handled.
-func WithConditionsFilter(conditions []string) DrainingResourceEventHandlerOption {
+// WithGlobalConfigHandler configures which conditions should be handled.
+func WithGlobalConfigHandler(globalConfig GlobalConfig) DrainingResourceEventHandlerOption {
 	return func(h *DrainingResourceEventHandler) {
-		h.conditions = ParseConditions(conditions)
+		h.globalConfig = globalConfig
 	}
 }
 
@@ -222,7 +222,7 @@ func NewDrainingResourceEventHandler(kubeClient kubernetes.Interface, d CordonDr
 	for _, o := range ho {
 		o(h)
 	}
-	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.schedulingBackoffDelay, h.labelsKeyForDrainGroups, h.conditions, h.preprovisioningConfiguration, h.logger, h.globalLocker)
+	h.drainScheduler = NewDrainSchedules(d, e, h.buffer, h.schedulingBackoffDelay, h.labelsKeyForDrainGroups, h.globalConfig.SuppliedConditions, h.preprovisioningConfiguration, h.logger, h.globalLocker)
 	return h
 }
 
@@ -355,7 +355,7 @@ func (h *DrainingResourceEventHandler) HandleNode(ctx context.Context, n *core.N
 		}
 	}
 
-	badConditions := GetNodeOffendingConditions(n, h.conditions)
+	badConditions := GetNodeOffendingConditions(n, h.globalConfig.SuppliedConditions)
 	LogForVerboseNode(hlogger, n, fmt.Sprintf("Offending conditions count %d", len(badConditions)))
 	if len(badConditions) == 0 {
 		return
@@ -370,7 +370,7 @@ func (h *DrainingResourceEventHandler) HandleNode(ctx context.Context, n *core.N
 	// First cordon the node if it is not yet cordoned
 	if !n.Spec.Unschedulable {
 		// Check if the node is not needed due to a local PV and a pending pod trying to land on that node
-		podsWithPVCBoundToThatNode, err := GetUnscheduledPodsBoundToNodeByPV(n, h.objectsStore, logger)
+		podsWithPVCBoundToThatNode, err := GetUnscheduledPodsBoundToNodeByPV(n, h.objectsStore, h.globalConfig.PVCManagementEnableIfNoEvictionUrl, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -491,13 +491,13 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(ctx context.Context, n
 			LogForVerboseNode(h.logger, n, "Cordon Filter", zap.String("pod", pod.Name), zap.String("reason", reason), zap.Bool("ok", ok))
 			if err != nil {
 				tags, _ := tag.New(tags, tag.Upsert(TagReason, "error"))
-				StatRecordForEachCondition(tags, n, h.conditions, MeasureSkippedCordon.M(1))
+				StatRecordForEachCondition(tags, n, h.globalConfig.SuppliedConditions, MeasureSkippedCordon.M(1))
 				h.logger.Error("filtering issue", zap.Error(err), zap.String("node", n.Name), zap.String("pod", pod.Name), zap.String("namespace", n.Name))
 				return false
 			}
 			if !ok {
 				tags, _ := tag.New(tags, tag.Upsert(TagReason, reason))
-				StatRecordForEachCondition(tags, n, h.conditions, MeasureSkippedCordon.M(1))
+				StatRecordForEachCondition(tags, n, h.globalConfig.SuppliedConditions, MeasureSkippedCordon.M(1))
 				h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonCordonSkip, "Pod %s/%s is not in eviction scope", pod.Namespace, pod.Name)
 				h.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, eventReasonCordonSkip, "Pod is blocking cordon/drain for node %s", n.Name)
 				h.logger.Debug("Cordon filter triggered", zap.String("node", n.Name), zap.String("pod", pod.Name))
@@ -524,7 +524,7 @@ func (h *DrainingResourceEventHandler) shouldUncordon(ctx context.Context, n *co
 		return false, nil
 	}
 
-	badConditions := GetNodeOffendingConditions(n, h.conditions)
+	badConditions := GetNodeOffendingConditions(n, h.globalConfig.SuppliedConditions)
 	if len(badConditions) == 0 {
 		LogForVerboseNode(logger, n, "No offending condition")
 		previousConditions := parseConditionsFromAnnotation(n)
@@ -542,7 +542,7 @@ func (h *DrainingResourceEventHandler) shouldUncordon(ctx context.Context, n *co
 	}
 
 	// Check if the node need to be uncordon because a pod is bound to it due to a PV/PVC (local volume)
-	pods, err := GetUnscheduledPodsBoundToNodeByPV(n, h.objectsStore, logger)
+	pods, err := GetUnscheduledPodsBoundToNodeByPV(n, h.objectsStore, h.globalConfig.PVCManagementEnableIfNoEvictionUrl, logger)
 	if err != nil {
 		return false, err
 	}
@@ -647,13 +647,13 @@ func (h *DrainingResourceEventHandler) scheduleDrain(ctx context.Context, n *cor
 		}
 		log.Error("Failed to schedule the drain activity", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
-		StatRecordForEachCondition(tags, n, GetNodeOffendingConditions(n, h.conditions), MeasureNodesDrainScheduled.M(1))
+		StatRecordForEachCondition(tags, n, GetNodeOffendingConditions(n, h.globalConfig.SuppliedConditions), MeasureNodesDrainScheduled.M(1))
 		h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonDrainSchedulingFailed, "Drain scheduling failed: %v", err)
 		return
 	}
 	log.Info("Drain scheduled ", zap.Time("after", when))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
-	StatRecordForEachCondition(tags, n, GetNodeOffendingConditions(n, h.conditions), MeasureNodesDrainScheduled.M(1))
+	StatRecordForEachCondition(tags, n, GetNodeOffendingConditions(n, h.globalConfig.SuppliedConditions), MeasureNodesDrainScheduled.M(1))
 	h.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, eventReasonDrainScheduled, "Will drain node after %s, in %s", when.Format(time.RFC3339Nano), when.Sub(time.Now()))
 }
 

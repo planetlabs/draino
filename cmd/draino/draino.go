@@ -127,6 +127,7 @@ func main() {
 
 		// PV/PVC management
 		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
+		pvcManagementByDefault               = app.Flag("pvc-management-by-default", "PVC management is automatically activated for a workload that do not use eviction++").Default("false").Bool()
 
 		configName          = app.Flag("config-name", "Name of the draino configuration").Required().String()
 		resetScopeLabel     = app.Flag("reset-config-labels", "Reset the scope label on the nodes").Bool()
@@ -361,6 +362,12 @@ func main() {
 
 	consolidatedOptInAnnotations := append(*optInPodAnnotations, *shortLivedPodAnnotations...)
 
+	globalConfig := kubernetes.GlobalConfig{
+		ConfigName:                         *configName,
+		SuppliedConditions:                 kubernetes.ParseConditions(*conditions),
+		PVCManagementEnableIfNoEvictionUrl: *pvcManagementByDefault,
+	}
+
 	cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 		eventRecorder,
 		kubernetes.MaxGracePeriod(*maxGracePeriod),
@@ -375,7 +382,7 @@ func main() {
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
 		kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
-		kubernetes.WithSuppliedConditions(*conditions),
+		kubernetes.WithGlobalConfig(globalConfig),
 		kubernetes.WithAPICordonDrainerLogger(log),
 	)
 
@@ -393,7 +400,7 @@ func main() {
 		kubernetes.WithSchedulingBackoffDelay(*schedulingRetryBackoffDelay),
 		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 		kubernetes.WithDrainGroups(*drainGroupLabelKey),
-		kubernetes.WithConditionsFilter(*conditions),
+		kubernetes.WithGlobalConfigHandler(globalConfig),
 		kubernetes.WithCordonPodFilter(podFilteringFunc),
 		kubernetes.WithGlobalBlocking(globalLocker),
 		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod, AllNodesByDefault: *preprovisioningActivatedByDefault}))
@@ -412,7 +419,7 @@ func main() {
 				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
 				kubernetes.WithDrainGroups(*drainGroupLabelKey),
 				kubernetes.WithGlobalBlocking(globalLocker),
-				kubernetes.WithConditionsFilter(*conditions)),
+				kubernetes.WithGlobalConfigHandler(globalConfig)),
 		}
 	}
 
@@ -450,7 +457,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	scopeObserver := kubernetes.NewScopeObserver(cs, *configName, kubernetes.ParseConditions(*conditions), runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	scopeObserver := kubernetes.NewScopeObserver(cs, globalConfig, runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
 	if *resetScopeLabel == true {
 		go scopeObserver.Reset()

@@ -139,8 +139,8 @@ func TestOffendingConditions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewDrainingResourceEventHandler(fake.NewSimpleClientset(), &NoopCordonDrainer{}, nil, NewEventRecorder(&record.FakeRecorder{}), WithConditionsFilter(tc.conditions))
-			badConditions := GetNodeOffendingConditions(tc.obj, h.conditions)
+			h := NewDrainingResourceEventHandler(fake.NewSimpleClientset(), &NoopCordonDrainer{}, nil, NewEventRecorder(&record.FakeRecorder{}), WithGlobalConfigHandler(GlobalConfig{SuppliedConditions: ParseConditions(tc.conditions)}))
+			badConditions := GetNodeOffendingConditions(tc.obj, h.globalConfig.SuppliedConditions)
 			if !reflect.DeepEqual(badConditions, tc.expected) {
 				t.Errorf("offendingConditions(tc.obj): want %#v, got %#v", tc.expected, badConditions)
 			}
