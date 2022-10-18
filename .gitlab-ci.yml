@@ -11,7 +11,7 @@ variables:
   # https://gitlab.com/gitlab-org/gitlab/-/issues/301061
   KPR_GIT_REF: master
   KPR_CHART_NAME: k8s-platform-draino
-  IMG_TAG_VALUE_PATH: draino.image.tag
+  IMG_TAG_VALUE_PATH: draino.image.tags.staging
   CLUSTER_FQDN: sasquatch.us1.staging.dog
 
 include: https://gitlab-templates.ddbuild.io/compute-delivery/v1/compute-delivery.yml
