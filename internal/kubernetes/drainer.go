@@ -85,14 +85,19 @@ const (
 type nodeMutatorFn func(*core.Node)
 
 type EvictionEndpointError struct {
-	Message string
+	StatusCode          int
+	AfterSeveralRetries bool
 }
 
 func (e EvictionEndpointError) Error() string {
-	if e.Message == "" {
-		return "Eviction endpoint error"
+	msg := "eviction endpoint error"
+	if e.StatusCode > 0 {
+		msg += fmt.Sprintf(": code=%d", e.StatusCode)
 	}
-	return "eviction endpoint error: " + e.Message
+	if e.AfterSeveralRetries {
+		msg += " after several retries"
+	}
+	return msg
 }
 
 type NodePreprovisioningTimeoutError struct {
@@ -604,7 +609,7 @@ func GetDrainConditionStatus(n *core.Node) (DrainConditionStatus, error) {
 		drainStatus.FailedCount = 0
 		msg := strings.Split(condition.Message, " | ")
 		msgPrefix := msg[0]
-		if len(msgPrefix) > 0 && msgPrefix[0] == '[' { //Detect new prefix format
+		if len(msgPrefix) > 0 && msgPrefix[0] == '[' { // Detect new prefix format
 			_, err := fmt.Sscanf(msgPrefix, "[%d]", &drainStatus.FailedCount)
 			if err != nil {
 				return drainStatus, fmt.Errorf("cannot parse failedCount on node%s: %w", n.GetName(), err)
@@ -617,7 +622,7 @@ func GetDrainConditionStatus(n *core.Node) (DrainConditionStatus, error) {
 				return drainStatus, nil
 			}
 			if strings.Contains(condition.Message, FailedStr) {
-				//[1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00
+				// [1] | Drain activity scheduled 2020-03-20T15:50:34+01:00 | Failed: 2020-03-20T15:55:50+01:00
 				drainStatus.Failed = true
 				return drainStatus, nil
 			}
@@ -751,14 +756,14 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(ctx context.Context, node *cor
 
 	gracePeriod := d.getGracePeriod(pod)
 	return d.evictionSequence(ctx, node, pod, abort,
-		//eviction function
+		// eviction function
 		func() error {
 			return d.c.CoreV1().Pods(pod.GetNamespace()).Evict(&policy.Eviction{
 				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
 				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
 			})
 		},
-		//error handling function
+		// error handling function
 		func(err error) error {
 			// The eviction API returns 500 if a pod
 			// matches more than one pod disruption budgets.
@@ -789,7 +794,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 	gracePeriod := d.getGracePeriod(pod)
 	maxRetryOn500 := 4
 	return d.evictionSequence(ctx, node, pod, abort,
-		//eviction function
+		// eviction function
 		func() error {
 			evictionPayload := &policy.Eviction{
 				ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName(),
@@ -805,7 +810,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 			resp, err := client.Do(req)
 			if err != nil {
 				d.l.Info("custom eviction endpoint response error", zap.Error(err))
-				return fmt.Errorf("cannot evict pod %s/%s, %w", pod.GetNamespace(), pod.GetName(), err)
+				return &EvictionEndpointError{}
 			}
 			defer resp.Body.Close()
 			d.l.Info("custom eviction endpoint response", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
@@ -826,14 +831,14 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 					return apierrors.NewTooManyRequests("retry later following endpoint error", 20)
 				}
 				d.l.Error("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d after several retries", resp.StatusCode)}
+				return &EvictionEndpointError{StatusCode: resp.StatusCode, AfterSeveralRetries: true}
 			default:
 				respContent, _ := ioutil.ReadAll(resp.Body)
 				d.l.Error("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return &EvictionEndpointError{Message: fmt.Sprintf("code=%d", resp.StatusCode)}
+				return &EvictionEndpointError{StatusCode: resp.StatusCode}
 			}
 		},
-		//error handling function
+		// error handling function
 		func(err error) error {
 			return err
 		},

@@ -465,6 +465,14 @@ func getFailureCause(err error) FailureCause {
 	if errors.As(err, &VolumeCleanupError{}) {
 		return VolumeCleanup
 	}
+	var eeErr EvictionEndpointError
+	if errors.As(err, &eeErr) {
+		cause := "eviction_endpoint"
+		if eeErr.StatusCode > 0 {
+			cause += fmt.Sprintf("_%d", eeErr.StatusCode)
+		}
+		return FailureCause(cause)
+	}
 	return ""
 }
 
