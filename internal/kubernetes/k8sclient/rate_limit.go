@@ -78,6 +78,10 @@ func NewRateLimiterWithMetric(name string, rateLimiter flowcontrol.RateLimiter) 
 	}
 }
 
+func (r *rateLimiterWithMetric) Wait(ctx context.Context) error {
+	return r.limiter.Wait(ctx)
+}
+
 func (r *rateLimiterWithMetric) TryAccept() bool {
 	r.rateLimiter.Lock()
 	defer r.rateLimiter.Unlock()

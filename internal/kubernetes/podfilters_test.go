@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -664,7 +665,7 @@ func TestPodFilters(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tc.objects...)
-			store, closingFunc := RunStoreForTest(kclient)
+			store, closingFunc := RunStoreForTest(context.Background(), kclient)
 			defer closingFunc()
 
 			filter := tc.filterBuilderFunc(store, tc.objects...)

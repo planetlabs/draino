@@ -190,7 +190,7 @@ func TestCordon(t *testing.T) {
 				t.Errorf("d.Cordon(%v): %v", tc.node.Name, err)
 			}
 			{
-				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
 				if err != nil {
 					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 				}
@@ -278,7 +278,7 @@ func TestUncordon(t *testing.T) {
 				t.Errorf("d.Uncordon(%v): %v", tc.node.Name, err)
 			}
 			{
-				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
 				if err != nil {
 					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 				}
@@ -646,7 +646,7 @@ func TestGetDrainConditionStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fake.NewSimpleClientset(tc.node)
 			{
-				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
 				if err != nil {
 					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 				}
@@ -760,7 +760,7 @@ func TestMarkDrain(t *testing.T) {
 			c := fake.NewSimpleClientset(tc.node)
 			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
 			{
-				n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+				n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
 				if err != nil {
 					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 				}
@@ -773,7 +773,7 @@ func TestMarkDrain(t *testing.T) {
 						t.Errorf("d.MarkDrain(%v): %v", tc.node.Name, err)
 					}
 					{
-						n, err := c.CoreV1().Nodes().Get(tc.node.GetName(), meta.GetOptions{})
+						n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
 						if err != nil {
 							t.Errorf("node.Get(%v): %v", tc.node.Name, err)
 						}
@@ -900,7 +900,7 @@ func TestAPICordonDrainer_MarkDrainDelete(t *testing.T) {
 			if err := d.MarkDrainDelete(ctx, tt.node); (err != nil) != tt.wantErr {
 				t.Errorf("MarkDrainDelete() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			newNode, err := d.c.CoreV1().Nodes().Get(tt.node.Name, meta.GetOptions{})
+			newNode, err := d.c.CoreV1().Nodes().Get(context.Background(), tt.node.Name, meta.GetOptions{})
 			if err != nil {
 				t.Errorf("MarkDrainDelete(), can't retrieve node error = %v", err)
 			}

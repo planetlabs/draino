@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -624,7 +625,7 @@ func TestGetPodsBoundToNodeByPV(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			store, closeCh := RunStoreForTest(kclient)
+			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
 			got, err := GetUnscheduledPodsBoundToNodeByPV(tt.node, store, false, zap.NewNop())
 			if (err != nil) != tt.wantErr {

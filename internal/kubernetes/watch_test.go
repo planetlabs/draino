@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"sort"
@@ -258,7 +259,7 @@ func TestPodWatch_ListPodsForNode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := NewPodWatch(fake.NewSimpleClientset(tt.objects...))
+			w := NewPodWatch(context.Background(), fake.NewSimpleClientset(tt.objects...))
 			stop := make(chan struct{})
 			defer close(stop)
 			go w.SharedIndexInformer.Run(stop)
@@ -334,7 +335,7 @@ func Test_GetPVForNode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			store, closeCh := RunStoreForTest(kclient)
+			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
 			if got := store.PersistentVolumes().GetPVForNode(tt.node); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("GetPVForNode() = %v, want %v", got, tt.want)

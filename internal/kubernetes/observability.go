@@ -279,12 +279,13 @@ func NodeInScopeWithConditionCheck(conditions []SuppliedCondition, node *v1.Node
 	return (len(node.Labels[ConfigurationLabelKey]) > 0 && node.Labels[ConfigurationLabelKey] != OutOfScopeLabelValue) && atLeastOneConditionAcceptedByTheNode(conditionsStr, node)
 }
 
-//updateGauges is in charge of updating the gauges values and purging the series that do not exist anymore
+// updateGauges is in charge of updating the gauges values and purging the series that do not exist anymore
 //
 // Note: with opencensus unregistering/registering the view would clean-up the old series. The problem is that a metrics has to be registered to be recorded.
-//       As a consequence there is a risk of concurrency between the goroutine that populates the fresh registered metric and the one that expose the metric for the scape.
-//       There is no other way around I could find for the moment to cleanup old series. The concurrency risk is clearly acceptable if we look at the frequency of metric poll versus the frequency and a speed of metric generation.
-//       In worst case the server will be missing series for a given scrape (not even report a bad value, just missing series). So the impact if it happens is insignificant.
+//
+//	As a consequence there is a risk of concurrency between the goroutine that populates the fresh registered metric and the one that expose the metric for the scape.
+//	There is no other way around I could find for the moment to cleanup old series. The concurrency risk is clearly acceptable if we look at the frequency of metric poll versus the frequency and a speed of metric generation.
+//	In worst case the server will be missing series for a given scrape (not even report a bad value, just missing series). So the impact if it happens is insignificant.
 func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, metricsCPU inScopeCPUMetrics) {
 	if err := s.metricsObjects.reset(); err != nil {
 		s.logger.Error("Unable to purger previous metrics series")
@@ -440,7 +441,7 @@ func (s *DrainoConfigurationObserverImpl) patchNodeLabels(nodeName string) error
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
 		}
-		err := PatchNodeLabelKey(s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
+		err := PatchNodeLabelKey(s.globalConfig.Context, s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil
@@ -469,7 +470,7 @@ func (s *DrainoConfigurationObserverImpl) Reset() {
 		if node.Labels[ConfigurationLabelKey] != "" {
 			if err := RetryWithTimeout(func() error {
 				time.Sleep(2 * time.Second)
-				err := PatchDeleteNodeLabelKey(s.kclient, node.Name, ConfigurationLabelKey)
+				err := PatchDeleteNodeLabelKey(s.globalConfig.Context, s.kclient, node.Name, ConfigurationLabelKey)
 				if err != nil {
 					s.logger.Info("Failed attempt to reset labels", zap.String("node", node.Name),
 						zap.Error(err))

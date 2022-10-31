@@ -298,37 +298,37 @@ type LabelDeletePatch struct {
 	} `json:"metadata"`
 }
 
-func PatchNode(kclient kubernetes.Interface, nodeName string, patch interface{}) error {
+func PatchNode(ctx context.Context, kclient kubernetes.Interface, nodeName string, patch interface{}) error {
 	payloadBytes, _ := json.Marshal(patch)
 	_, err := kclient.
 		CoreV1().
 		Nodes().
-		Patch(nodeName, types.MergePatchType, payloadBytes)
+		Patch(ctx, nodeName, types.MergePatchType, payloadBytes, metav1.PatchOptions{})
 	return err
 }
 
-func PatchNodeAnnotationKey(kclient kubernetes.Interface, nodeName string, key string, value string) error {
+func PatchNodeAnnotationKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string, value string) error {
 	var annotationPatch AnnotationPatch
 	annotationPatch.Metadata.Annotations = map[string]string{key: value}
-	return PatchNode(kclient, nodeName, annotationPatch)
+	return PatchNode(ctx, kclient, nodeName, annotationPatch)
 }
 
-func PatchDeleteNodeAnnotationKey(kclient kubernetes.Interface, nodeName string, key string) error {
+func PatchDeleteNodeAnnotationKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string) error {
 	var annotationDeletePatch AnnotationDeletePatch
 	annotationDeletePatch.Metadata.Annotations = map[string]interface{}{key: nil}
-	return PatchNode(kclient, nodeName, annotationDeletePatch)
+	return PatchNode(ctx, kclient, nodeName, annotationDeletePatch)
 }
 
-func PatchNodeLabelKey(kclient kubernetes.Interface, nodeName string, key string, value string) error {
+func PatchNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string, value string) error {
 	var labelPatch LabelPatch
 	labelPatch.Metadata.Labels = map[string]string{key: value}
-	return PatchNode(kclient, nodeName, labelPatch)
+	return PatchNode(ctx, kclient, nodeName, labelPatch)
 }
 
-func PatchDeleteNodeLabelKey(kclient kubernetes.Interface, nodeName string, key string) error {
+func PatchDeleteNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string) error {
 	var annotationDeletePatch AnnotationDeletePatch
 	annotationDeletePatch.Metadata.Annotations = map[string]interface{}{key: nil}
-	return PatchNode(kclient, nodeName, annotationDeletePatch)
+	return PatchNode(ctx, kclient, nodeName, annotationDeletePatch)
 }
 
 // GetAnnotationFromPodOrController check if an annotation is present on the pod or the associated controller object

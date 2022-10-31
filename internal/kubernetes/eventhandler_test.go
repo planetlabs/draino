@@ -387,7 +387,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tc.obj)
-			store, closeCh := RunStoreForTest(kclient)
+			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
 			cordonDrainer := &mockCordonDrainer{}
 			h := NewDrainingResourceEventHandler(kclient, cordonDrainer, store, NewEventRecorder(&record.FakeRecorder{}), WithDrainBuffer(0*time.Second), WithGlobalConfigHandler(GlobalConfig{SuppliedConditions: ParseConditions(tc.conditions)}))
@@ -457,7 +457,7 @@ func TestDrainingResourceEventHandler_checkCordonFilters(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.pods...)
-			store, closeCh := RunStoreForTest(kclient)
+			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
 
 			h := &DrainingResourceEventHandler{

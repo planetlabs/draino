@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -101,10 +102,10 @@ var _ NodeStore = &NodeWatch{}
 
 // NewNodeWatch creates a watch on node resources. Nodes are cached and the
 // provided ResourceEventHandlers are called when the cache changes.
-func NewNodeWatch(c kubernetes.Interface, rs ...cache.ResourceEventHandler) *NodeWatch {
+func NewNodeWatch(ctx context.Context, c kubernetes.Interface, rs ...cache.ResourceEventHandler) *NodeWatch {
 	lw := &cache.ListWatch{
-		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().Nodes().List(o) },
-		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Nodes().Watch(o) },
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().Nodes().List(ctx, o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Nodes().Watch(ctx, o) },
 	}
 	i := cache.NewSharedInformer(lw, &core.Node{}, 30*time.Minute)
 	for _, r := range rs {
@@ -158,10 +159,10 @@ const podClaimIndexField = ".spec.phase"
 
 // NewPodWatch creates a watch on pod resources. Pods are cached and the
 // provided ResourceEventHandlers are called when the cache changes.
-func NewPodWatch(c kubernetes.Interface) *PodWatch {
+func NewPodWatch(ctx context.Context, c kubernetes.Interface) *PodWatch {
 	lw := &cache.ListWatch{
-		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().Pods("").List(o) },
-		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Pods("").Watch(o) },
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().Pods("").List(ctx, o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Pods("").Watch(ctx, o) },
 	}
 
 	i := cache.NewSharedIndexInformer(lw, &core.Pod{}, 30*time.Minute, cache.Indexers{
@@ -285,10 +286,10 @@ type StatefulSetWatch struct {
 var _ StatefulSetStore = &StatefulSetWatch{}
 
 // NewStatefulsetWatch creates a watch on sts resources.
-func NewStatefulsetWatch(c kubernetes.Interface) *StatefulSetWatch {
+func NewStatefulsetWatch(ctx context.Context, c kubernetes.Interface) *StatefulSetWatch {
 	lw := &cache.ListWatch{
-		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.AppsV1().StatefulSets("").List(o) },
-		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.AppsV1().StatefulSets("").Watch(o) },
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.AppsV1().StatefulSets("").List(ctx, o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.AppsV1().StatefulSets("").Watch(ctx, o) },
 	}
 
 	i := cache.NewSharedInformer(lw, &v1.StatefulSet{}, 30*time.Minute)
@@ -335,10 +336,10 @@ const (
 )
 
 // NewPersistentVolumeWatch creates a watch on persistentVolume resources.
-func NewPersistentVolumeWatch(c kubernetes.Interface) *PersistentVolumeWatch {
+func NewPersistentVolumeWatch(ctx context.Context, c kubernetes.Interface) *PersistentVolumeWatch {
 	lw := &cache.ListWatch{
-		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().PersistentVolumes().List(o) },
-		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().PersistentVolumes().Watch(o) },
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().PersistentVolumes().List(ctx, o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().PersistentVolumes().Watch(ctx, o) },
 	}
 
 	i := cache.NewSharedIndexInformer(lw, &core.PersistentVolume{}, 30*time.Minute,
@@ -383,11 +384,13 @@ type PersistentVolumeClaimWatch struct {
 var _ PersistentVolumeClaimStore = &PersistentVolumeClaimWatch{}
 
 // NewPersistentVolumeClaimWatch creates a watch on persistentVolumeClaim resources.
-func NewPersistentVolumeClaimWatch(c kubernetes.Interface) *PersistentVolumeClaimWatch {
+func NewPersistentVolumeClaimWatch(ctx context.Context, c kubernetes.Interface) *PersistentVolumeClaimWatch {
 	lw := &cache.ListWatch{
-		ListFunc: func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().PersistentVolumeClaims("").List(o) },
+		ListFunc: func(o meta.ListOptions) (runtime.Object, error) {
+			return c.CoreV1().PersistentVolumeClaims("").List(ctx, o)
+		},
 		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) {
-			return c.CoreV1().PersistentVolumeClaims("").Watch(o)
+			return c.CoreV1().PersistentVolumeClaims("").Watch(ctx, o)
 		},
 	}
 
@@ -417,13 +420,13 @@ func (p *PersistentVolumeClaimWatch) Get(namespace, name string) (*core.Persiste
 }
 
 // RunStoreForTest can be used in test to get a running and synched store
-func RunStoreForTest(kclient kubernetes.Interface) (store RuntimeObjectStore, closingFunc func()) {
+func RunStoreForTest(ctx context.Context, kclient kubernetes.Interface) (store RuntimeObjectStore, closingFunc func()) {
 	stopCh := make(chan struct{})
-	stsWatch := NewStatefulsetWatch(kclient)
-	podWatch := NewPodWatch(kclient)
-	nodeWatch := NewNodeWatch(kclient)
-	pvWatch := NewPersistentVolumeWatch(kclient)
-	pvcWatch := NewPersistentVolumeClaimWatch(kclient)
+	stsWatch := NewStatefulsetWatch(ctx, kclient)
+	podWatch := NewPodWatch(ctx, kclient)
+	nodeWatch := NewNodeWatch(ctx, kclient)
+	pvWatch := NewPersistentVolumeWatch(ctx, kclient)
+	pvcWatch := NewPersistentVolumeClaimWatch(ctx, kclient)
 
 	go stsWatch.Run(stopCh)
 	go podWatch.Run(stopCh)

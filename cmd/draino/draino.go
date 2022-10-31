@@ -19,6 +19,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/DataDog/compute-go/controllerruntime"
+	"github.com/DataDog/compute-go/infraparameters"
+	"k8s.io/apimachinery/pkg/runtime"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -51,6 +54,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 )
 
 // Default leader election settings.
@@ -241,10 +245,14 @@ func main() {
 	cs, err := client.NewForConfig(c)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
 
-	pods := kubernetes.NewPodWatch(cs)
-	statefulSets := kubernetes.NewStatefulsetWatch(cs)
-	persistentVolumes := kubernetes.NewPersistentVolumeWatch(cs)
-	persistentVolumeClaims := kubernetes.NewPersistentVolumeClaimWatch(cs)
+	// use a Go context so we can tell the leaderelection and other pieces when we want to step down
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pods := kubernetes.NewPodWatch(ctx, cs)
+	statefulSets := kubernetes.NewStatefulsetWatch(ctx, cs)
+	persistentVolumes := kubernetes.NewPersistentVolumeWatch(ctx, cs)
+	persistentVolumeClaims := kubernetes.NewPersistentVolumeClaimWatch(ctx, cs)
 	runtimeObjectStoreImpl := &kubernetes.RuntimeObjectStoreImpl{
 		StatefulSetsStore:          statefulSets,
 		PodsStore:                  pods,
@@ -363,6 +371,7 @@ func main() {
 	consolidatedOptInAnnotations := append(*optInPodAnnotations, *shortLivedPodAnnotations...)
 
 	globalConfig := kubernetes.GlobalConfig{
+		Context:                            ctx,
 		ConfigName:                         *configName,
 		SuppliedConditions:                 kubernetes.ParseConditions(*conditions),
 		PVCManagementEnableIfNoEvictionUrl: *pvcManagementByDefault,
@@ -442,7 +451,7 @@ func main() {
 	}
 
 	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
-	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
+	nodes := kubernetes.NewNodeWatch(ctx, cs, nodeLabelFilter)
 	runtimeObjectStoreImpl.NodesStore = nodes
 	//storeCloserFunc := runtimeObjectStoreImpl.Run(log)
 	//defer storeCloserFunc()
@@ -451,11 +460,6 @@ func main() {
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")
-
-	// use a Go context so we can tell the leaderelection code when we
-	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	scopeObserver := kubernetes.NewScopeObserver(cs, globalConfig, runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
@@ -518,4 +522,38 @@ func (r *httpRunner) Run(stop <-chan struct{}) {
 		r.logger.Error("Failed to ListenAndServe httpRunner", zap.Error(err))
 	}
 	cancel()
+}
+
+// controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
+func controllerRuntimeBootstrap() {
+	cfg, fs := controllerruntime.ConfigFromFlags(false, false)
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Printf("error getting arguments: %v\n", err)
+		os.Exit(1)
+	}
+	cfg.InfraParam.UpdateWithKubeContext(cfg.KubeClientConfig.ConfigFile, "")
+	validationOptions := infraparameters.GetValidateAll()
+	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject = false, false, false
+	if err := cfg.InfraParam.Validate(validationOptions); err != nil {
+		fmt.Printf("infra param validation error: %v\n", err)
+		os.Exit(1)
+	}
+
+	cfg.ManagerOptions.Scheme = runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(cfg.ManagerOptions.Scheme); err != nil {
+		fmt.Printf("error while adding client-go scheme: %v\n", err)
+		os.Exit(1)
+	}
+	if err := core.AddToScheme(cfg.ManagerOptions.Scheme); err != nil {
+		fmt.Printf("error while adding v1 scheme: %v\n", err)
+		os.Exit(1)
+	}
+
+	mgr, logger, _, err := controllerruntime.NewManager(cfg)
+	if err != nil {
+		fmt.Printf("error while creating manager: %v\n", err)
+		os.Exit(1)
+	}
+	mgr.GetClient() // just to consume mgr
+	logger.Info("ControllerRuntime bootstrap")
 }
