@@ -1,4 +1,4 @@
-FROM golang:1.17-alpine3.13
+FROM golang:1.19-alpine3.15
 
 RUN apk add --no-cache \
     bash \
@@ -17,3 +17,5 @@ RUN apk add --no-cache \
 RUN set -x && update-ca-certificates
 
 ENV GO111MODULE="on"
+
+RUN pip3 install awscli
