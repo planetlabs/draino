@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -160,7 +161,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			runtimeObjectStore, closeFunc := RunStoreForTest(kclient)
+			runtimeObjectStore, closeFunc := RunStoreForTest(context.Background(), kclient)
 			defer closeFunc()
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
@@ -241,7 +242,7 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			runtimeObjectStore, closeFunc := RunStoreForTest(kclient)
+			runtimeObjectStore, closeFunc := RunStoreForTest(context.Background(), kclient)
 			defer closeFunc()
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
@@ -275,7 +276,7 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 			require.NoError(t, err)
 			if err := wait.PollImmediate(50*time.Millisecond, 5*time.Second,
 				func() (bool, error) {
-					n, err := kclient.CoreV1().Nodes().Get(tt.nodeName, meta.GetOptions{})
+					n, err := kclient.CoreV1().Nodes().Get(context.Background(), tt.nodeName, meta.GetOptions{})
 					if err != nil {
 						return false, nil
 					}
@@ -355,7 +356,7 @@ func TestPVCStorageClassCleanupEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.p)
-			store, closingFunc := RunStoreForTest(kclient)
+			store, closingFunc := RunStoreForTest(context.Background(), kclient)
 			defer closingFunc()
 
 			assert.Equalf(t, tt.want, PVCStorageClassCleanupEnabled(tt.p, store, tt.defaultTrueIfNoEvictionUrl), "PVCStorageClassCleanupEnabled test=%s", tt.name)

@@ -1,6 +1,11 @@
 package kubernetes
 
+import "context"
+
 type GlobalConfig struct {
+	// Main context
+	Context context.Context
+
 	// ConfigName name of the configuration running this controller, we can have different configuration and multiple draino pods (one per config)
 	ConfigName string
 

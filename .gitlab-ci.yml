@@ -1,27 +1,21 @@
-variables:
-  CI_APP: draino
-  CURRENT_CI_IMAGE: 1
-  # required for K8s runners and must match project name
-  KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: k8s-draino
-  # the following variables can be overwritten in the UI when starting the manual jobs
-  # by clicking on the jobs first, not on the play buttons shortcut
-  # unfortunately, the variables are not pre-filled, so the user must know about them
-  # until these GitLab issues are fixed
-  # https://gitlab.com/gitlab-org/gitlab/-/issues/32712
-  # https://gitlab.com/gitlab-org/gitlab/-/issues/301061
-  KPR_GIT_REF: master
-  KPR_CHART_NAME: k8s-platform-draino
-  IMG_TAG_VALUE_PATH: draino.image.tags.staging
-  CLUSTER_FQDN: sasquatch.us1.staging.dog
+include: https://gitlab-templates.ddbuild.io/compute-delivery/v2/compute-delivery.yml
 
-include: https://gitlab-templates.ddbuild.io/compute-delivery/v1/compute-delivery.yml
+# shared variables for the cnab-diff/apply jobs below
+variables:
+  KPR_CHART_NAME: "k8s-platform-draino" # if different than k8s-platform-$CI_PROJECT_NAME (CI_PROJECT_NAME is the repo name)
+  IMG_TAG_VALUE_PATH: "draino.image.tag.prod " # something like volume_manager.image.tag
+  CI_APP: draino
+  CURRENT_CI_IMAGE: "v1.0.1"
+
+.export-github-token: &export-github-token export GITHUB_TOKEN=$(aws ssm get-parameter --region us-east-1 --name github.user.datadog-compute-robot --with-decryption --query "Parameter.Value" --out text) && git config --global url."https://${GITHUB_TOKEN}@github.com/DataDog".insteadOf https://github.com/DataDog
+.export-cnab-token: &export-cnab-token export CNAB_API_TOKEN=$(aws ssm get-parameter --region us-east-1 --name sdm.production_deploy.token --with-decryption --query "Parameter.Value" --out text)
 
 .ci-variables: &ci-variables
   variables:
     GOPRIVATE: github.com/DataDog/*
     GO111MODULE: "on"
 
-.app-ci: &app-ci
+.ci: &ci
   image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/$CI_APP:$CURRENT_CI_IMAGE
   <<: *ci-variables
 
@@ -35,54 +29,32 @@ ci-image:
     - docker build --tag 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/$CI_APP:$CURRENT_CI_IMAGE ci
     - docker push 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/$CI_APP:$CURRENT_CI_IMAGE
 
-.export-github-token: &export-github-token export GITHUB_TOKEN=$(aws ssm get-parameter --region us-east-1 --name github.user.datadog-compute-robot --with-decryption --query "Parameter.Value" --out text) && git config --global url."https://${GITHUB_TOKEN}@github.com/DataDog".insteadOf https://github.com/DataDog
-.export-cnab-token: &export-cnab-token export CNAB_API_TOKEN=$(aws ssm get-parameter --region us-east-1 --name sdm.production_deploy.token --with-decryption --query "Parameter.Value" --out text)
-
-.before-release: &before-release
-- *export-github-token
-- aws ssm get-parameter --region us-east-1 --name prod.gcr.push.key --with-decryption --query "Parameter.Value" --out text > /google-application-credentials.json
-- export GOOGLE_APPLICATION_CREDENTIALS=/google-application-credentials.json
-
 goreleaser-snapshot:
-  <<: *ci-variables
   extends: .compute-ci.goreleaser-snapshot
-  before_script: *before-release
+  before_script:
+    - *export-github-token
 
 goreleaser:
-  <<: *ci-variables
   extends: .compute-ci.goreleaser
-  before_script: *before-release
-
-build:
-  <<: *app-ci
-  tags: ["runner:main"]
-  artifacts:
-    name: "$CI_JOB_NAME-$CI_JOB_STAGE-$CI_COMMIT_REF_NAME"
-    untracked: true
-    paths:
-    - bin
-    expire_in: 20 min
-  stage: build
-  script:
+  before_script:
     - *export-github-token
-    - make build
+
+cnab-diff:
+  extends: .cnab-diff
+  before_script:
+    - *export-github-token
+    - *export-cnab-token
+
+cnab-apply:
+  extends: .cnab-apply
+  before_script:
+    - *export-github-token
+    - *export-cnab-token
 
 test:
-  <<: *app-ci
+  <<: *ci
   tags: ["runner:main"]
   stage: verify
   script:
     - *export-github-token
     - make test
-
-cnab-diff:
-  extends: .cnab-diff
-  before_script:
-  - *export-github-token
-  - *export-cnab-token
-
-cnab-apply:
-  extends: .cnab-apply
-  before_script:
-  - *export-github-token
-  - *export-cnab-token

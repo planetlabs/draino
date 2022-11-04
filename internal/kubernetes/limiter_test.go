@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -453,7 +454,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 				objects = append(objects, n)
 			}
 			kclient := fake.NewSimpleClientset(objects...)
-			store, closeCh := RunStoreForTest(kclient)
+			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
 			selector := labels.NewSelector()
 			if tt.skipLimiterSelector != nil {
@@ -638,7 +639,7 @@ func TestPodLimiter(t *testing.T) {
 				objects = append(objects, n)
 			}
 			kclient := fake.NewSimpleClientset(objects...)
-			store, closeCh := RunStoreForTest(kclient)
+			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
 
 			l := &Limiter{
