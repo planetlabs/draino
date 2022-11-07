@@ -19,15 +19,16 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/DataDog/compute-go/controllerruntime"
-	"github.com/DataDog/compute-go/infraparameters"
-	"k8s.io/apimachinery/pkg/runtime"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/DataDog/compute-go/controllerruntime"
+	"github.com/DataDog/compute-go/infraparameters"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -52,6 +53,8 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/analyser"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -554,6 +557,14 @@ func controllerRuntimeBootstrap() {
 		fmt.Printf("error while creating manager: %v\n", err)
 		os.Exit(1)
 	}
-	mgr.GetClient() // just to consume mgr
+
+	indexer, err := index.New(mgr.GetClient(), mgr.GetCache())
+	if err != nil {
+		fmt.Printf("error while initializing informer: %v\n", err)
+		os.Exit(1)
+	}
+
+	// just to consume analyzer
+	_ = analyser.NewPDBAnalyser(indexer)
 	logger.Info("ControllerRuntime bootstrap")
 }
