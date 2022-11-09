@@ -3,7 +3,7 @@ include: https://gitlab-templates.ddbuild.io/compute-delivery/v2/compute-deliver
 # shared variables for the cnab-diff/apply jobs below
 variables:
   KPR_CHART_NAME: "k8s-platform-draino" # if different than k8s-platform-$CI_PROJECT_NAME (CI_PROJECT_NAME is the repo name)
-  IMG_TAG_VALUE_PATH: "draino.image.tag.prod " # something like volume_manager.image.tag
+  IMG_TAG_VALUE_PATH: "draino.image.tags.staging"
   CI_APP: draino
   CURRENT_CI_IMAGE: "v1.0.1"
 
