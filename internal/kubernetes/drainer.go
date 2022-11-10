@@ -817,7 +817,9 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 				tg := authnclient.NewEmissaryTokenGetter("runtime-metadata-service")
 
 				tlsConfig := &tls.Config{
-					// This option should typically be omitted and TLS should be properly configured
+					// We are not trying to verify the server side for the moment
+					// Men in the middle risk is low if not null: CNP helps here.
+					// We can add more verification later if needed
 					InsecureSkipVerify: true,
 				}
 
