@@ -811,26 +811,27 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 				d.l.Info("custom eviction endpoint response error, can't parse URL", zap.Error(err))
 				return &EvictionEndpointError{}
 			}
-			if urlParsed.Scheme == "https" {
-				// Uses Emissary to get JWTs.  This is for a production scenario.
-				// Other token getters are available for testing and CLI tools.
-				tg := authnclient.NewEmissaryTokenGetter("runtime-metadata-service")
 
+			// Uses Emissary to get JWTs.  This is for a production scenario.
+			// Other token getters are available for testing and CLI tools.
+			tg := authnclient.NewEmissaryTokenGetter("runtime-metadata-service")
+
+			if urlParsed.Scheme == "https" {
 				tlsConfig := &tls.Config{
 					// We are not trying to verify the server side for the moment
 					// Men in the middle risk is low if not null: CNP helps here.
 					// We can add more verification later if needed
 					InsecureSkipVerify: true,
 				}
-
 				// Creates a round-tripper using the Token Getter.
 				roundTripper := authnclient.NewRoundTripper(&http.Transport{
 					TLSClientConfig: tlsConfig,
 				}, tg)
-
 				client = &http.Client{Transport: roundTripper, Timeout: 10 * time.Second}
 			} else {
-				client = &http.Client{Timeout: 10 * time.Second}
+				// Creates a round-tripper using the Token Getter.
+				roundTripper := authnclient.NewRoundTripper(http.DefaultTransport, tg)
+				client = &http.Client{Transport: roundTripper, Timeout: 10 * time.Second}
 			}
 
 			req, err := http.NewRequest("POST", url, GetEvictionJsonPayload(evictionPayload))
