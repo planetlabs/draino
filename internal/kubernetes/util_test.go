@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	openapi_v2 "github.com/googleapis/gnostic/openapiv2"
+	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
@@ -220,7 +221,7 @@ func TestGetAPIResourcesForGVK(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GetAPIResourcesForGVK(newFakeDiscoveryClient(), tt.gvks)
+			got, err := GetAPIResourcesForGVK(newFakeDiscoveryClient(), tt.gvks, zap.NewNop())
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetAPIResourcesForGVK() error = %v, wantErr %v", err, tt.wantErr)
 				return

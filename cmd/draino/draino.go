@@ -52,12 +52,13 @@ import (
 	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 )
 
 // Default leader election settings.
@@ -271,7 +272,7 @@ func main() {
 	if !*evictLocalStoragePods {
 		pf = append(pf, kubernetes.LocalStoragePodFilter)
 	}
-	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotEvictPodControlledBy)
+	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotEvictPodControlledBy, log)
 	if err != nil {
 		kingpin.FatalIfError(err, "can't get resources for controlby filtering for eviction")
 	}
@@ -296,7 +297,7 @@ func main() {
 	if !*cordonLocalStoragePods {
 		podFilterCordon = append(podFilterCordon, kubernetes.LocalStoragePodFilter)
 	}
-	apiResourcesCordon, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotCordonPodControlledBy)
+	apiResourcesCordon, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotCordonPodControlledBy, log)
 	if err != nil {
 		kingpin.FatalIfError(err, "can't get resources for 'controlledBy' filtering for cordon")
 	}
@@ -456,8 +457,8 @@ func main() {
 	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
 	nodes := kubernetes.NewNodeWatch(ctx, cs, nodeLabelFilter)
 	runtimeObjectStoreImpl.NodesStore = nodes
-	//storeCloserFunc := runtimeObjectStoreImpl.Run(log)
-	//defer storeCloserFunc()
+	// storeCloserFunc := runtimeObjectStoreImpl.Run(log)
+	// defer storeCloserFunc()
 	cordonLimiter.SetNodeLister(nodes)
 	cordonDrainer.SetRuntimeObjectStore(runtimeObjectStoreImpl)
 

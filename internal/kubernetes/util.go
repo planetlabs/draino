@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +29,7 @@ import (
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -99,7 +99,7 @@ func RetryWithTimeout(f func() error, retryPeriod, timeout time.Duration) error 
 
 var DummyErrorForRetry = errors.New("retry on error")
 
-func GetAPIResources(discoveryClient discovery.DiscoveryInterface) ([]metav1.APIResource, error) {
+func GetAPIResources(discoveryClient discovery.DiscoveryInterface, logger *zap.Logger) ([]metav1.APIResource, error) {
 	groupList, err := discoveryClient.ServerGroups()
 	if groupList == nil || err != nil || groupList.Groups == nil {
 		return nil, fmt.Errorf("Fail to discover groups. Error: %v\n", err)
@@ -115,7 +115,10 @@ func GetAPIResources(discoveryClient discovery.DiscoveryInterface) ([]metav1.API
 			}
 			resourceLists, err := discoveryClient.ServerResourcesForGroupVersion(gvd.GroupVersion)
 			if err != nil {
-				return nil, fmt.Errorf("cannot list server resources, %s", err)
+				// we shouldn't be concerned if e.g. v1beta1.external.metrics.k8s.io FailedDiscoveryCheck
+				// if a resource that we care about fails, GetAPIResourcesForGroupsKindVersion will fail
+				logger.Error("cannot list server resources", zap.Error(err))
+				continue
 			}
 
 			if resourceLists == nil {
@@ -174,7 +177,7 @@ func GetAPIResourcesForGroupsKindVersion(apiResources []metav1.APIResource, gvks
 // GetAPIResourcesForGVK retrieves the apiResources that match the given 'Kind.Version.Group'
 // taking into account the empty case that associate a nil value in the list (used for uncontrolled pod filtering)
 // and filtering out subresources
-func GetAPIResourcesForGVK(discoveryInterface discovery.DiscoveryInterface, gvks []string) ([]*metav1.APIResource, error) {
+func GetAPIResourcesForGVK(discoveryInterface discovery.DiscoveryInterface, gvks []string, logger *zap.Logger) ([]*metav1.APIResource, error) {
 	hasEmptyGVK := false
 	var nonEmptyGVKs []string
 	for _, v := range gvks {
@@ -185,7 +188,7 @@ func GetAPIResourcesForGVK(discoveryInterface discovery.DiscoveryInterface, gvks
 		nonEmptyGVKs = append(nonEmptyGVKs, v)
 	}
 
-	allAPIResources, err := GetAPIResources(discoveryInterface)
+	allAPIResources, err := GetAPIResources(discoveryInterface, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +340,7 @@ func PatchDeleteNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, 
 //
 // Method made generic to be able to extend to deployments and other controllers later
 func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store RuntimeObjectStore) (value string, found bool) {
-	//Check directly on the pod and return if any value
+	// Check directly on the pod and return if any value
 	if pod.Annotations != nil {
 		if value, ok := pod.Annotations[annotationKey]; ok {
 			return value, ok
