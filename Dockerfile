@@ -16,7 +16,7 @@
 #COPY --from=build /draino /draino
 #ENV PATH="/:${PATH}"
 
-FROM alpine:3.15.4
+FROM alpine:3.15.6
 
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
