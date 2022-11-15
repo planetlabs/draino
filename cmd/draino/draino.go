@@ -290,7 +290,7 @@ func main() {
 		// https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
 		"cluster-autoscaler.kubernetes.io/safe-to-evict=false",
 	}
-	pf = append(pf, kubernetes.UnprotectedPodFilter(append(systemKnownAnnotations, *protectedPodAnnotations...)...))
+	pf = append(pf, kubernetes.UnprotectedPodFilter(runtimeObjectStoreImpl, false, append(systemKnownAnnotations, *protectedPodAnnotations...)...))
 
 	// Cordon Filtering
 	podFilterCordon := []kubernetes.PodFilterFunc{}
@@ -311,7 +311,7 @@ func main() {
 		}
 		podFilterCordon = append(podFilterCordon, kubernetes.NewPodControlledByFilter(apiResourcesCordon))
 	}
-	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(*cordonProtectedPodAnnotations...))
+	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(runtimeObjectStoreImpl, true, *cordonProtectedPodAnnotations...))
 
 	// Cordon limiter
 	cordonLimiter := kubernetes.NewCordonLimiter(log)

@@ -75,7 +75,7 @@ func NewPodControlledByFilter(controlledByAPIResources []*meta.APIResource) PodF
 // UnprotectedPodFilter returns a FilterFunc that returns true if the
 // supplied pod does not have any of the user-specified annotations for
 // protection from eviction
-func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
+func UnprotectedPodFilter(store RuntimeObjectStore, checkController bool, annotations ...string) PodFilterFunc {
 	return func(p core.Pod) (bool, string, error) {
 		for _, annot := range annotations {
 			selector, err := labels.Parse(annot)
@@ -84,6 +84,13 @@ func UnprotectedPodFilter(annotations ...string) PodFilterFunc {
 			}
 			if selector.Matches(labels.Set(p.GetAnnotations())) {
 				return false, "pod-annotation", nil
+			}
+			if checkController {
+				if ctrl, found := GetControllerForPod(&p, store); found {
+					if selector.Matches(labels.Set(ctrl.GetAnnotations())) {
+						return false, "ctrl-annotation", nil
+					}
+				}
 			}
 		}
 		return true, "", nil
