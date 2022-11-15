@@ -304,8 +304,10 @@ func TestPodFilters(t *testing.T) {
 					Annotations: map[string]string{"Random": "true"},
 				},
 			},
-			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc { return UnprotectedPodFilter() },
-			passesFilter:      true,
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter(store, false)
+			},
+			passesFilter: true,
 		},
 		{
 			name: "NoPodAnnotations",
@@ -315,7 +317,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("Protect")
+				return UnprotectedPodFilter(store, false, "Protect")
 			},
 			passesFilter: true,
 		},
@@ -327,7 +329,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("Protect=")
+				return UnprotectedPodFilter(store, false, "Protect=")
 			},
 			passesFilter: true,
 		},
@@ -340,7 +342,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("Protect", "ProtectTwo=true")
+				return UnprotectedPodFilter(store, false, "Protect", "ProtectTwo=true")
 			},
 			passesFilter: true,
 		},
@@ -353,7 +355,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("Protect", "ProtectTwo=true", "NeedsAValue=true")
+				return UnprotectedPodFilter(store, false, "Protect", "ProtectTwo=true", "NeedsAValue=true")
 			},
 			passesFilter: true,
 		},
@@ -366,7 +368,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("Protect")
+				return UnprotectedPodFilter(store, false, "Protect")
 			},
 			passesFilter: false,
 		},
@@ -379,7 +381,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("ProtectOne", "ProtectTwo")
+				return UnprotectedPodFilter(store, false, "ProtectOne", "ProtectTwo")
 			},
 			passesFilter: false,
 		},
@@ -392,7 +394,33 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("Protect=true")
+				return UnprotectedPodFilter(store, false, "Protect=true")
+			},
+			passesFilter: false,
+		},
+		{
+			name: "SingleProtectionAnnotationOnController",
+			objects: []runtime.Object{&v1.StatefulSet{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        "mysts",
+					Namespace:   "myns",
+					Annotations: map[string]string{"Protect": "true"},
+				},
+			}},
+			pod: core.Pod{
+				ObjectMeta: meta.ObjectMeta{
+					Name:      podName,
+					Namespace: "myns",
+					OwnerReferences: []meta.OwnerReference{
+						{
+							Kind: "StatefulSet",
+							Name: "mysts",
+						},
+					},
+				},
+			},
+			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
+				return UnprotectedPodFilter(store, true, "Protect=true")
 			},
 			passesFilter: false,
 		},
@@ -405,7 +433,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("ProtectOne=true", "ProtectTwo=true")
+				return UnprotectedPodFilter(store, false, "ProtectOne=true", "ProtectTwo=true")
 			},
 			passesFilter: false,
 		},
@@ -418,7 +446,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("ProtectOne=true", "ProtectTwo")
+				return UnprotectedPodFilter(store, false, "ProtectOne=true", "ProtectTwo")
 			},
 			passesFilter: false,
 		},
@@ -431,7 +459,7 @@ func TestPodFilters(t *testing.T) {
 				},
 			},
 			filterBuilderFunc: func(store RuntimeObjectStore, obj ...runtime.Object) PodFilterFunc {
-				return UnprotectedPodFilter("ProtectOne", "ProtectTwo=true")
+				return UnprotectedPodFilter(store, false, "ProtectOne", "ProtectTwo=true")
 			},
 			passesFilter: false,
 		},
