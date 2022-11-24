@@ -812,27 +812,32 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 				return &EvictionEndpointError{}
 			}
 
-			// Uses Emissary to get JWTs.  This is for a production scenario.
-			// Other token getters are available for testing and CLI tools.
-			tg := authnclient.NewEmissaryTokenGetter("runtime-metadata-service")
-
+			// building the base roundTripper
+			var roundTripper http.RoundTripper
 			if urlParsed.Scheme == "https" {
-				tlsConfig := &tls.Config{
-					// We are not trying to verify the server side for the moment
-					// Men in the middle risk is low if not null: CNP helps here.
-					// We can add more verification later if needed
-					InsecureSkipVerify: true,
+				roundTripper = &http.Transport{
+					TLSClientConfig: &tls.Config{
+						// We are not trying to verify the server side for the moment
+						// Men in the middle risk is low if not null: CNP helps here.
+						// We can add more verification later if needed
+						InsecureSkipVerify: true,
+					},
 				}
-				// Creates a round-tripper using the Token Getter.
-				roundTripper := authnclient.NewRoundTripper(&http.Transport{
-					TLSClientConfig: tlsConfig,
-				}, tg)
-				client = &http.Client{Transport: roundTripper, Timeout: 10 * time.Second}
 			} else {
-				// Creates a round-tripper using the Token Getter.
-				roundTripper := authnclient.NewRoundTripper(http.DefaultTransport, tg)
-				client = &http.Client{Transport: roundTripper, Timeout: 10 * time.Second}
+				roundTripper = http.DefaultTransport
 			}
+
+			// If the user specify a parameter "token-audience" on the URL then we will forge a token that is using the value of the parameter as audience in the token
+			// If the user do not specify the audience then that means that he does not want the token (audience is mandatory)
+			tokenAudience := urlParsed.Query().Get("token-audience")
+			if tokenAudience != "" {
+				// Uses Emissary to get JWTs.
+				roundTripper = authnclient.NewRoundTripper(roundTripper, authnclient.NewEmissaryTokenGetter(tokenAudience))
+				// Removing this token parameter so that the server don't get it on the URL. The value is now available for the server inside the bearer token
+				urlParsed.Query().Del("token-audience")
+			}
+
+			client = &http.Client{Transport: roundTripper, Timeout: 10 * time.Second}
 
 			req, err := http.NewRequest("POST", url, GetEvictionJsonPayload(evictionPayload))
 			req = req.WithContext(ctx)
