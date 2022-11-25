@@ -9,6 +9,8 @@ require (
 	github.com/DataDog/compute-go v1.3.7
 	github.com/DataDog/go-service-authn v1.3.0
 	github.com/antonmedv/expr v1.8.8
+	github.com/go-logr/logr v1.2.2
+	github.com/go-logr/zapr v1.2.3
 	github.com/go-test/deep v1.0.2
 	github.com/googleapis/gnostic v0.5.5
 	github.com/julienschmidt/httprouter v1.3.0
@@ -43,8 +45,6 @@ require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
-	github.com/go-logr/logr v1.2.2 // indirect
-	github.com/go-logr/zapr v1.2.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/glog v1.0.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect

@@ -2,6 +2,8 @@ package index
 
 import (
 	"context"
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -98,12 +100,13 @@ func Test_PDBIndexer(t *testing.T) {
 		},
 	}
 
+	testLogger := zapr.NewLogger(zap.NewNop())
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
 			ch := make(chan struct{})
 			defer close(ch)
 
-			informer, err := NewFakePDBIndexer(ch, tt.Objects)
+			informer, err := NewFakePDBIndexer(ch, tt.Objects, testLogger)
 			assert.NoError(t, err)
 
 			pdbs, err := informer.GetPDBsBlockedByPod(context.TODO(), tt.TestPodName, tt.TestPodNamespace)

@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"github.com/go-logr/logr"
 
 	cachek "k8s.io/client-go/tools/cache"
 	cachecr "sigs.k8s.io/controller-runtime/pkg/cache"
@@ -21,11 +22,12 @@ var (
 type Indexer struct {
 	client clientcr.Client
 	cache  cachecr.Cache
+	logger logr.Logger
 }
 
 // New creates and initializes a new Indexer object
-func New(client clientcr.Client, cache cachecr.Cache) (*Indexer, error) {
-	informer := &Indexer{client, cache}
+func New(client clientcr.Client, cache cachecr.Cache, logger logr.Logger) (*Indexer, error) {
+	informer := &Indexer{client: client, cache: cache, logger: logger}
 
 	if err := informer.Init(); err != nil {
 		return nil, err

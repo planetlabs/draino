@@ -559,7 +559,7 @@ func controllerRuntimeBootstrap() {
 		os.Exit(1)
 	}
 
-	indexer, err := index.New(mgr.GetClient(), mgr.GetCache())
+	indexer, err := index.New(mgr.GetClient(), mgr.GetCache(), logger)
 	if err != nil {
 		fmt.Printf("error while initializing informer: %v\n", err)
 		os.Exit(1)

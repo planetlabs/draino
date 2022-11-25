@@ -2,6 +2,8 @@ package index
 
 import (
 	"context"
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,12 +56,13 @@ func Test_PodIndexer(t *testing.T) {
 		},
 	}
 
+	testLogger := zapr.NewLogger(zap.NewNop())
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
 			ch := make(chan struct{})
 			defer close(ch)
 
-			informer, err := NewFakePodIndexer(ch, tt.Objects)
+			informer, err := NewFakePodIndexer(ch, tt.Objects, testLogger)
 			assert.NoError(t, err)
 
 			pods, err := informer.GetPodsByNode(context.TODO(), tt.TestNodeName)

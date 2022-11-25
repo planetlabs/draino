@@ -1,6 +1,7 @@
 package index
 
 import (
+	"github.com/go-logr/logr"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,14 +30,14 @@ func createCache(inf informers.SharedInformerFactory, scheme *runtime.Scheme) ca
 
 }
 
-func NewFakeIndexer(ch chan struct{}, objects []runtime.Object) (*Indexer, error) {
+func NewFakeIndexer(ch chan struct{}, objects []runtime.Object, logger logr.Logger) (*Indexer, error) {
 	fakeClient := fake.NewFakeClient(objects...)
 	fakeKubeClient := fakeclient.NewSimpleClientset(objects...)
 
 	inf := informers.NewSharedInformerFactory(fakeKubeClient, 10*time.Second)
 	cache := createCache(inf, fakeClient.Scheme())
 
-	informer, err := New(fakeClient, cache)
+	informer, err := New(fakeClient, cache, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -47,12 +48,12 @@ func NewFakeIndexer(ch chan struct{}, objects []runtime.Object) (*Indexer, error
 	return informer, nil
 }
 
-func NewFakePDBIndexer(ch chan struct{}, objects []runtime.Object) (PDBIndexer, error) {
-	return NewFakeIndexer(ch, objects)
+func NewFakePDBIndexer(ch chan struct{}, objects []runtime.Object, logger logr.Logger) (PDBIndexer, error) {
+	return NewFakeIndexer(ch, objects, logger)
 }
 
-func NewFakePodIndexer(ch chan struct{}, objects []runtime.Object) (PodIndexer, error) {
-	return NewFakeIndexer(ch, objects)
+func NewFakePodIndexer(ch chan struct{}, objects []runtime.Object, logger logr.Logger) (PodIndexer, error) {
+	return NewFakeIndexer(ch, objects, logger)
 }
 
 type createPodOptions struct {
