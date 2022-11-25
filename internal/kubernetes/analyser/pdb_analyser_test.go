@@ -167,6 +167,41 @@ func TestPDBAnalyser(t *testing.T) {
 	}
 }
 
+func TestPDBAnalyser_IsPDBBlocked(t *testing.T) {
+	tests := []struct {
+		Name      string
+		IsBlocked bool
+		Pod       *corev1.Pod
+		PDB       *policyv1.PodDisruptionBudget
+	}{
+		{
+			Name:      "Should succeed if PDB has budget",
+			IsBlocked: false,
+			Pod:       createPodWithStatus(true),
+			PDB:       createPDBWithStatus(1, 3),
+		},
+		{
+			Name:      "Should succeed as pod is taking the budget",
+			IsBlocked: false,
+			Pod:       createPodWithStatus(false),
+			PDB:       createPDBWithStatus(1, 1),
+		},
+		{
+			Name:      "Should fail because there is no budget left",
+			IsBlocked: true,
+			Pod:       createPodWithStatus(true),
+			PDB:       createPDBWithStatus(1, 0),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			res := IsPDBBlocked(context.Background(), tt.Pod, tt.PDB)
+			assert.Equal(t, tt.IsBlocked, res)
+		})
+	}
+}
+
 func createNode(name string) *corev1.Node {
 	return &corev1.Node{
 		TypeMeta: metav1.TypeMeta{
@@ -224,4 +259,21 @@ func createPod(name, ns, nodeName string, isReady bool, ls labels.Set) *corev1.P
 			},
 		},
 	}
+}
+
+type pdbStatus struct {
+	Ls      labels.Set
+	Des     int32
+	Healthy int32
+}
+
+func createPDBWithStatus(des, healthy int32) *policyv1.PodDisruptionBudget {
+	pdb := createPDB("test-pdb", "default", map[string]string{})
+	pdb.Status.DesiredHealthy = des
+	pdb.Status.CurrentHealthy = healthy
+	return pdb
+}
+
+func createPodWithStatus(isReady bool) *corev1.Pod {
+	return createPod("test", "test", "test", isReady, map[string]string{})
 }

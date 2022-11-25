@@ -23,7 +23,6 @@ type PDBIndexer interface {
 	// GetPDBsBlockedByPod will return a list of PDBs that are blocked by the given pod.
 	// This means that the disruption budget are used by the Pod.
 	GetPDBsBlockedByPod(ctx context.Context, podName, ns string) ([]*policyv1.PodDisruptionBudget, error)
-
 	// GetPDBsForPods will return a map indexed by podnames
 	// with associated PDBs as value
 	GetPDBsForPods(ctx context.Context, pods []*corev1.Pod) (map[string][]*policyv1.PodDisruptionBudget, error)
@@ -83,6 +82,7 @@ func (i *Indexer) GetPDBsForPods(ctx context.Context, pods []*corev1.Pod) (map[s
 	}
 	return result, nil
 }
+
 func initPDBIndexer(client clientcr.Client, cache cachecr.Cache) error {
 	informer, err := cache.GetInformer(context.Background(), &policyv1.PodDisruptionBudget{})
 	if err != nil {

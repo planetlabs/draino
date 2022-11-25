@@ -56,6 +56,7 @@ import (
 
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
+	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
@@ -567,5 +568,11 @@ func controllerRuntimeBootstrap() {
 
 	// just to consume analyzer
 	_ = analyser.NewPDBAnalyser(indexer)
+	_ = drain.NewDrainSimulator(
+		context.Background(),
+		mgr.GetClient(),
+		indexer,
+		func(p core.Pod) (pass bool, reason string, err error) { return true, "", nil },
+	)
 	logger.Info("ControllerRuntime bootstrap")
 }
