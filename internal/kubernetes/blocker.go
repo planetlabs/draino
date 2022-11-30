@@ -25,6 +25,7 @@ type GlobalBlocker interface {
 
 // ComputeBlockStateFunction a function that would analyse the system state and return true if we should lock draino to prevent any cordon/drain activity
 type ComputeBlockStateFunction func() bool
+type ComputeBlockStateFunctionFactory func(store RuntimeObjectStore, logger *zap.Logger) ComputeBlockStateFunction
 
 // GetBlockStateFunction a function that would return the current state of the lock using the cached value (no analysis) true=blocked
 type GetBlockStateFunction func() bool

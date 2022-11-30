@@ -184,15 +184,15 @@ func ParseCordonMax(param string) (max int, isPercent bool, err error) {
 }
 
 func ParseCordonMaxForKeys(param string) (max int, isPercent bool, splittedKeys []string, err error) {
-	tokens := strings.SplitN(param, ",", 2)
+	tokens := strings.SplitN(param, ";", 2)
 	if len(tokens) < 2 {
-		return -1, false, nil, errors.New("can't Parse argument for cordon limiter, at least 2 tokens are expected in field max-simultaneous-cordon-for-labels")
+		return -1, false, nil, fmt.Errorf("can't Parse argument for cordon limiter, at least 2 tokens are expected in field max-simultaneous-cordon-for-labels: %s", param)
 	}
 	max, percent, err := ParseCordonMax(tokens[0])
 	if err != nil {
 		return max, percent, nil, err
 	}
-	return max, percent, strings.Split(tokens[1], ","), nil
+	return max, percent, strings.Split(tokens[1], ";"), nil
 }
 
 func MaxSimultaneousCordonLimiterFunc(max int, percent bool) LimiterFunc {

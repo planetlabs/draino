@@ -30,16 +30,16 @@ import (
 )
 
 // NewNodeLabelFilter returns a filter that returns true if the supplied node satisfies the boolean expression
-func NewNodeLabelFilter(expressionStr *string, log *zap.Logger) (func(o interface{}) bool, error) {
+func NewNodeLabelFilter(expressionStr string, log *zap.Logger) (func(o interface{}) bool, error) {
 	//This feels wrong but this is how the previous behavior worked so I'm only keeping it to maintain compatibility.
-	expression, err := expr.Compile(*expressionStr)
-	if err != nil && *expressionStr != "" {
+	expression, err := expr.Compile(expressionStr)
+	if err != nil && expressionStr != "" {
 		return nil, err
 	}
 
 	return func(o interface{}) bool {
 		//This feels wrong but this is how the previous behavior worked so I'm only keeping it to maintain compatibility.
-		if *expressionStr == "" {
+		if expressionStr == "" {
 			return true
 		}
 
@@ -64,23 +64,32 @@ func NewNodeLabelFilter(expressionStr *string, log *zap.Logger) (func(o interfac
 	}, nil
 }
 
+const (
+	SuppliedConditionDurationSeparator = ";"
+)
+
 // ParseConditions can parse the string array of conditions to a list of
-// SuppliedContion to support particular status value and duration.
-func ParseConditions(conditions []string) []SuppliedCondition {
+// SuppliedCondition to support particular status value and duration.
+func ParseConditions(conditions []string) ([]SuppliedCondition, error) {
 	parsed := make([]SuppliedCondition, len(conditions))
 	for i, c := range conditions {
 		ts := strings.SplitN(c, "=", 2)
 		if len(ts) != 2 {
 			// Keep backward compatibility
-			ts = []string{c, "True,0s"}
+			ts = []string{c, "True;0s"}
 		}
-		sm := strings.SplitN(ts[1], ",", 2)
+		sm := strings.SplitN(ts[1], SuppliedConditionDurationSeparator, 2)
+		if len(sm) < 2 {
+			return nil, fmt.Errorf("failed to parse SuppliedCondition %s", c)
+		}
 		duration, err := time.ParseDuration(sm[1])
-		if err == nil {
-			parsed[i] = SuppliedCondition{core.NodeConditionType(ts[0]), core.ConditionStatus(sm[0]), duration}
+		if err != nil {
+			return nil, err
 		}
+		parsed[i] = SuppliedCondition{core.NodeConditionType(ts[0]), core.ConditionStatus(sm[0]), duration}
+
 	}
-	return parsed
+	return parsed, nil
 }
 
 // NodeProcessed tracks whether nodes have been processed before using a map.

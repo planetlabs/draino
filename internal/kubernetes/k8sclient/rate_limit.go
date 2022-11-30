@@ -3,6 +3,7 @@ package k8sclient
 import (
 	"context"
 	"fmt"
+	"github.com/DataDog/compute-go/kubeclient"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -11,7 +12,6 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"golang.org/x/time/rate"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
 )
 
@@ -39,7 +39,7 @@ func init() {
 	view.Register(v)
 }
 
-func DecorateWithRateLimiter(config *rest.Config, name string) error {
+func DecorateWithRateLimiter(config *kubeclient.Config, name string) error {
 	if config.QPS == 0 {
 		return fmt.Errorf("rest.Config qps must be set")
 	}
@@ -47,7 +47,7 @@ func DecorateWithRateLimiter(config *rest.Config, name string) error {
 		return fmt.Errorf("rest.Config burst must be set")
 	}
 	rateLimiter := flowcontrol.NewTokenBucketRateLimiter(config.QPS, config.Burst)
-	config.RateLimiter = NewRateLimiterWithMetric(name, rateLimiter)
+	config.CustomRateLimiter = NewRateLimiterWithMetric(name, rateLimiter)
 	return nil
 }
 

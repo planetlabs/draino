@@ -106,7 +106,7 @@ func TestOffendingConditions(t *testing.T) {
 					{Type: "Cool", Status: core.ConditionUnknown},
 				}},
 			},
-			conditions: []string{"Cool=Unknown,10m"},
+			conditions: []string{"Cool=Unknown" + SuppliedConditionDurationSeparator + "10m"},
 			expected: []SuppliedCondition{
 				{Type: "Cool", Status: core.ConditionUnknown, MinimumDuration: 10 * time.Minute},
 			},
@@ -119,7 +119,7 @@ func TestOffendingConditions(t *testing.T) {
 					{Type: "Cool", Status: core.ConditionUnknown, LastTransitionTime: meta.NewTime(time.Now().Add(time.Duration(-9) * time.Minute))},
 				}},
 			},
-			conditions: []string{"Cool=Unknown,10m"},
+			conditions: []string{"Cool=Unknown" + SuppliedConditionDurationSeparator + "10m"},
 			expected:   nil,
 		},
 		{
@@ -130,7 +130,7 @@ func TestOffendingConditions(t *testing.T) {
 					{Type: "Cool", Status: core.ConditionUnknown, LastTransitionTime: meta.NewTime(time.Now().Add(time.Duration(-15) * time.Minute))},
 				}},
 			},
-			conditions: []string{"Cool=Unknown,14m"},
+			conditions: []string{"Cool=Unknown" + SuppliedConditionDurationSeparator + "14m"},
 			expected: []SuppliedCondition{
 				{Type: "Cool", Status: core.ConditionUnknown, MinimumDuration: 14 * time.Minute},
 			},
@@ -139,7 +139,8 @@ func TestOffendingConditions(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewDrainingResourceEventHandler(fake.NewSimpleClientset(), &NoopCordonDrainer{}, nil, NewEventRecorder(&record.FakeRecorder{}), WithGlobalConfigHandler(GlobalConfig{SuppliedConditions: ParseConditions(tc.conditions)}))
+			suppliedConditions, _ := ParseConditions(tc.conditions)
+			h := NewDrainingResourceEventHandler(fake.NewSimpleClientset(), &NoopCordonDrainer{}, nil, NewEventRecorder(&record.FakeRecorder{}), WithGlobalConfigHandler(GlobalConfig{SuppliedConditions: suppliedConditions}))
 			badConditions := GetNodeOffendingConditions(tc.obj, h.globalConfig.SuppliedConditions)
 			if !reflect.DeepEqual(badConditions, tc.expected) {
 				t.Errorf("offendingConditions(tc.obj): want %#v, got %#v", tc.expected, badConditions)

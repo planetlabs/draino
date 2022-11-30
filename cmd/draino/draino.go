@@ -19,10 +19,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/DataDog/compute-go/kubeclient"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -32,7 +33,6 @@ import (
 
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
@@ -43,7 +43,6 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/alecthomas/kingpin.v2"
 	core "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
@@ -58,7 +57,6 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
 )
 
@@ -76,80 +74,22 @@ func main() {
 	defer tracer.Stop()
 	mux := httptrace.NewServeMux()
 	go http.ListenAndServe("localhost:8085", mux) // for go profiler
-	//nolint:lll // accept long lines in option declarations
-	var (
-		app = kingpin.New(filepath.Base(os.Args[0]), "Automatically cordons and drains nodes that match the supplied conditions.").DefaultEnvars()
 
-		debug                       = app.Flag("debug", "Run with debug logging.").Short('d').Bool()
-		listen                      = app.Flag("listen", "Address at which to expose /metrics and /healthz.").Default(":10002").String()
-		kubecfg                     = app.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
-		apiserver                   = app.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
-		dryRun                      = app.Flag("dry-run", "Emit an event without cordoning or draining matching nodes.").Bool()
-		maxGracePeriod              = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
-		evictionHeadroom            = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
-		drainBuffer                 = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
-		schedulingRetryBackoffDelay = app.Flag("retry-backoff-delay", "Additional delay to add between retry schedules.").Default(kubernetes.DefaultSchedulingRetryBackoffDelay.String()).Duration()
-		nodeLabels                  = app.Flag("node-label", "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times").Strings()
-		nodeLabelsExpr              = app.Flag("node-label-expr", "Nodes that match this expression will be eligible for cordoning and draining.").String()
-		namespace                   = app.Flag("namespace", "Namespace used to create leader election lock object.").Default("kube-system").String()
+	// Read application flags
+	options, fs := optionsFromFlags()
+	config := &kubeclient.Config{}
+	kubeclient.BindConfigToFlags(config, fs)
 
-		leaderElectionLeaseDuration = app.Flag("leader-election-lease-duration", "Lease duration for leader election.").Default(DefaultLeaderElectionLeaseDuration.String()).Duration()
-		leaderElectionRenewDeadline = app.Flag("leader-election-renew-deadline", "Leader election renew deadline.").Default(DefaultLeaderElectionRenewDeadline.String()).Duration()
-		leaderElectionRetryPeriod   = app.Flag("leader-election-retry-period", "Leader election retry period.").Default(DefaultLeaderElectionRetryPeriod.String()).Duration()
-		leaderElectionTokenName     = app.Flag("leader-election-token-name", "Leader election token name.").Default(kubernetes.Component).String()
+	fmt.Println(os.Args[1:])
 
-		// Eviction filtering flags
-		skipDrain                 = app.Flag("skip-drain", "Whether to skip draining nodes after cordoning.").Default("false").Bool()
-		doNotEvictPodControlledBy = app.Flag("do-not-evict-pod-controlled-by", "Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.").PlaceHolder("kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1").Default("", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet).Strings()
-		evictLocalStoragePods     = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
-		protectedPodAnnotations   = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
-		drainGroupLabelKey        = app.Flag("drain-group-labels", "Comma separated list of label keys to be used to form draining groups.").PlaceHolder("KEY1,KEY2,...").Default("").String()
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Printf("error getting arguments: %v\n", err)
+		os.Exit(1)
+	}
 
-		// Cordon filtering flags
-		doNotCordonPodControlledBy    = app.Flag("do-not-cordon-pod-controlled-by", "Do not cordon nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.").PlaceHolder("kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1").Default("", kubernetes.KindStatefulSet).Strings()
-		cordonLocalStoragePods        = app.Flag("cordon-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Default("true").Bool()
-		cordonProtectedPodAnnotations = app.Flag("cordon-protected-pod-annotation", "Protect nodes hosting pods with this annotation from cordon. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
-
-		// Cordon limiter flags
-		skipCordonLimiterNodeAnnotation = app.Flag("skip-cordon-limiter-node-annotation", "Skip all limiter logic if node has annotation.").PlaceHolder("KEY[=VALUE]").String()
-		maxSimultaneousCordon           = app.Flag("max-simultaneous-cordon", "Maximum number of cordoned nodes in the cluster.").PlaceHolder("(Value|Value%)").Strings()
-		maxSimultaneousCordonForLabels  = app.Flag("max-simultaneous-cordon-for-labels", "Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'").PlaceHolder("(Value|Value%),keys...").Strings()
-		maxSimultaneousCordonForTaints  = app.Flag("max-simultaneous-cordon-for-taints", "Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'").PlaceHolder("(Value|Value%),keys...").Strings()
-		maxNotReadyNodes                = app.Flag("max-notready-nodes", "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
-		maxNotReadyNodesPeriod          = app.Flag("max-notready-nodes-period", "Polling period to check all nodes readiness").Default(kubernetes.DefaultMaxNotReadyNodesPeriod.String()).Duration()
-		maxPendingPodsPeriod            = app.Flag("max-pending-pods-period", "Polling period to check volume of pending pods").Default(kubernetes.DefaultMaxPendingPodsPeriod.String()).Duration()
-		maxPendingPods                  = app.Flag("max-pending-pods", "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions.").PlaceHolder("(Value|Value%)").Strings()
-		maxDrainAttemptsBeforeFail      = app.Flag("max-drain-attempts-before-fail", "Maximum number of failed drain attempts before giving-up on draining the node.").Default("8").Int()
-
-		// Pod Opt-in flags
-		optInPodAnnotations      = app.Flag("opt-in-pod-annotation", "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
-		shortLivedPodAnnotations = app.Flag("short-lived-pod-annotation", "Pod that have a short live, just like job; we prefer let them run till the end instead of evicting them; node is cordon. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
-
-		// NodeReplacement limiter flags
-		maxNodeReplacementPerHour = app.Flag("max-node-replacement-per-hour", "Maximum number of nodes per hour for which draino can ask replacement.").Default("2").Int()
-		durationBeforeReplacement = app.Flag("duration-before-replacement", "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.").Default(kubernetes.DefaultDurationBeforeReplacement.String()).Duration()
-
-		// Preprovisioning flags
-		preprovisioningTimeout            = app.Flag("preprovisioning-timeout", "Timeout for a node to be preprovisioned before draining").Default(kubernetes.DefaultPreprovisioningTimeout.String()).Duration()
-		preprovisioningCheckPeriod        = app.Flag("preprovisioning-check-period", "Period to check if a node has been preprovisioned").Default(kubernetes.DefaultPreprovisioningCheckPeriod.String()).Duration()
-		preprovisioningActivatedByDefault = app.Flag("preprovisioning-by-default", "Set this flag to activate pre-provisioning by default for all nodes").Default("false").Bool()
-
-		// PV/PVC management
-		storageClassesAllowingVolumeDeletion = app.Flag("storage-class-allows-pv-deletion", "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.").PlaceHolder("storageClassName").Strings()
-		pvcManagementByDefault               = app.Flag("pvc-management-by-default", "PVC management is automatically activated for a workload that do not use eviction++").Default("false").Bool()
-
-		configName          = app.Flag("config-name", "Name of the draino configuration").Required().String()
-		resetScopeLabel     = app.Flag("reset-config-labels", "Reset the scope label on the nodes").Bool()
-		scopeAnalysisPeriod = app.Flag("scope-analysis-period", "Period to run the scope analysis and generate metric").Default((5 * time.Minute).String()).Duration()
-
-		klogVerbosity = app.Flag("klog-verbosity", "Verbosity to run klog at").Default("4").Int32()
-
-		k8sClientQPS   = app.Flag("k8s-client-qps", "Queries per second allowed by the kubernetes clientset. This qps is shared between all clients in the k8s clientset.").Default(fmt.Sprintf("%f", rest.DefaultQPS)).Float32()
-		k8sClientBurst = app.Flag("k8s-client-burst", "Burst allowed by the kubernetes clientset. This qps is shared between all clients in the k8s clientset.").Default("150").Int()
-
-		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
-	)
-	kingpin.MustParse(app.Parse(os.Args[1:]))
+	if errOptions := options.Validate(); errOptions != nil {
+		panic(errOptions)
+	}
 
 	var (
 		nodesCordoned = &view.View{
@@ -219,14 +159,14 @@ func main() {
 	view.RegisterExporter(p)
 
 	log, err := zap.NewProduction()
-	if *debug {
+	if options.debug {
 		log, err = zap.NewDevelopment()
 	}
 
-	drainoklog.InitializeKlog(*klogVerbosity)
+	drainoklog.InitializeKlog(options.klogVerbosity)
 	drainoklog.RedirectToLogger(log)
 
-	web := &httpRunner{address: *listen, logger: log, h: map[string]http.Handler{
+	web := &httpRunner{address: options.listen, logger: log, h: map[string]http.Handler{
 		"/metrics": p,
 		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:errcheck // no err management in health check
 	}}
@@ -235,16 +175,14 @@ func main() {
 	defer log.Sync() // nolint:errcheck // no check required on program exit
 
 	go func() {
-		log.Info("web server is running", zap.String("listen", *listen))
+		log.Info("web server is running", zap.String("listen", options.listen))
 		kingpin.FatalIfError(kubernetes.Await(web), "error serving")
 	}()
 
-	c, err := kubernetes.BuildConfigFromFlags(*apiserver, *kubecfg)
+	err = k8sclient.DecorateWithRateLimiter(config, "default")
+	c, err := kubeclient.NewKubeConfig(config)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client configuration")
 
-	c.QPS = *k8sClientQPS
-	c.Burst = *k8sClientBurst
-	err = k8sclient.DecorateWithRateLimiter(c, "default")
 	kingpin.FatalIfError(err, "failed to decorate kubernetes clientset config")
 
 	cs, err := client.NewForConfig(c)
@@ -266,14 +204,15 @@ func main() {
 	}
 
 	// Sanitize user input
-	sort.Strings(*conditions)
+	sort.Strings(options.conditions)
 
 	// Eviction Filtering
 	pf := []kubernetes.PodFilterFunc{kubernetes.MirrorPodFilter}
-	if !*evictLocalStoragePods {
+	if !options.evictLocalStoragePods {
 		pf = append(pf, kubernetes.LocalStoragePodFilter)
 	}
-	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotEvictPodControlledBy, log)
+
+	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, options.doNotEvictPodControlledBy, log)
 	if err != nil {
 		kingpin.FatalIfError(err, "can't get resources for controlby filtering for eviction")
 	}
@@ -291,14 +230,14 @@ func main() {
 		// https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
 		"cluster-autoscaler.kubernetes.io/safe-to-evict=false",
 	}
-	pf = append(pf, kubernetes.UnprotectedPodFilter(runtimeObjectStoreImpl, false, append(systemKnownAnnotations, *protectedPodAnnotations...)...))
+	pf = append(pf, kubernetes.UnprotectedPodFilter(runtimeObjectStoreImpl, false, append(systemKnownAnnotations, options.protectedPodAnnotations...)...))
 
 	// Cordon Filtering
 	podFilterCordon := []kubernetes.PodFilterFunc{}
-	if !*cordonLocalStoragePods {
+	if !options.cordonLocalStoragePods {
 		podFilterCordon = append(podFilterCordon, kubernetes.LocalStoragePodFilter)
 	}
-	apiResourcesCordon, err := kubernetes.GetAPIResourcesForGVK(cs, *doNotCordonPodControlledBy, log)
+	apiResourcesCordon, err := kubernetes.GetAPIResourcesForGVK(cs, options.doNotCordonPodControlledBy, log)
 	if err != nil {
 		kingpin.FatalIfError(err, "can't get resources for 'controlledBy' filtering for cordon")
 	}
@@ -312,53 +251,26 @@ func main() {
 		}
 		podFilterCordon = append(podFilterCordon, kubernetes.NewPodControlledByFilter(apiResourcesCordon))
 	}
-	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(runtimeObjectStoreImpl, true, *cordonProtectedPodAnnotations...))
+	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(runtimeObjectStoreImpl, true, options.cordonProtectedPodAnnotations...))
 
 	// Cordon limiter
 	cordonLimiter := kubernetes.NewCordonLimiter(log)
-	if *skipCordonLimiterNodeAnnotation != "" {
-		selector, err := labels.Parse(*skipCordonLimiterNodeAnnotation)
-		if err != nil {
-			kingpin.FatalIfError(err, "cannot parse 'skip-cordon-limiter-node-annotation' argument")
-		}
-		cordonLimiter.SetSkipLimiterSelector(selector)
+	cordonLimiter.SetSkipLimiterSelector(options.skipCordonLimiterNodeAnnotationSelector)
+	for p, f := range options.maxSimultaneousCordonFunctions {
+		cordonLimiter.AddLimiter("MaxSimultaneousCordon:"+p, f)
 	}
-	for _, p := range *maxSimultaneousCordon {
-		max, percent, parseErr := kubernetes.ParseCordonMax(p)
-		if parseErr != nil {
-			kingpin.FatalIfError(parseErr, "cannot parse 'max-simultaneous-cordon' argument")
-		}
-		cordonLimiter.AddLimiter("MaxSimultaneousCordon:"+p, kubernetes.MaxSimultaneousCordonLimiterFunc(max, percent))
+	for p, f := range options.maxSimultaneousCordonForLabelsFunctions {
+		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForLabels:"+p, f)
 	}
-	for _, p := range *maxSimultaneousCordonForLabels {
-		max, percent, keys, parseErr := kubernetes.ParseCordonMaxForKeys(p)
-		if parseErr != nil {
-			kingpin.FatalIfError(parseErr, "cannot parse 'max-simultaneous-cordon-for-labels' argument")
-		}
-		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForLabels:"+p, kubernetes.MaxSimultaneousCordonLimiterForLabelsFunc(max, percent, keys))
-	}
-	for _, p := range *maxSimultaneousCordonForTaints {
-		max, percent, keys, parseErr := kubernetes.ParseCordonMaxForKeys(p)
-		if parseErr != nil {
-			kingpin.FatalIfError(parseErr, "cannot parse 'max-simultaneous-cordon-for-taints' argument")
-		}
-		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, kubernetes.MaxSimultaneousCordonLimiterForTaintsFunc(max, percent, keys))
+	for p, f := range options.maxSimultaneousCordonForTaintsFunctions {
+		cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, f)
 	}
 	globalLocker := kubernetes.NewGlobalBlocker(log)
-	for _, p := range *maxNotReadyNodes {
-		max, percent, parseErr := kubernetes.ParseCordonMax(p)
-		if parseErr != nil {
-			kingpin.FatalIfError(parseErr, "cannot parse 'max-notready-nodes' argument")
-		}
-		globalLocker.AddBlocker("MaxNotReadyNodes:"+p, kubernetes.MaxNotReadyNodesCheckFunc(max, percent, runtimeObjectStoreImpl, log), *maxNotReadyNodesPeriod)
+	for p, f := range options.maxNotReadyNodesFunctions {
+		globalLocker.AddBlocker("MaxNotReadyNodes:"+p, f(runtimeObjectStoreImpl, log), options.maxNotReadyNodesPeriod)
 	}
-	for _, p := range *maxPendingPods {
-		max, percent, parseErr := kubernetes.ParseCordonMax(p)
-		if parseErr != nil {
-			kingpin.FatalIfError(parseErr, "cannot parse 'max-pending-pods' argument")
-		}
-		fmt.Println(max, percent)
-		globalLocker.AddBlocker("MaxPendingPods:"+p, kubernetes.MaxPendingPodsCheckFunc(max, percent, runtimeObjectStoreImpl, log), *maxPendingPodsPeriod)
+	for p, f := range options.maxPendingPodsFunctions {
+		globalLocker.AddBlocker("MaxPendingPods:"+p, f(runtimeObjectStoreImpl, log), options.maxPendingPodsPeriod)
 	}
 
 	for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {
@@ -366,36 +278,36 @@ func main() {
 		cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 	}
 
-	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(*maxNodeReplacementPerHour, time.Now())
+	nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(options.maxNodeReplacementPerHour, time.Now())
 
 	b := record.NewBroadcaster()
 	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")})
 	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: kubernetes.Component})
 	eventRecorder := kubernetes.NewEventRecorder(k8sEventRecorder)
 
-	consolidatedOptInAnnotations := append(*optInPodAnnotations, *shortLivedPodAnnotations...)
+	consolidatedOptInAnnotations := append(options.optInPodAnnotations, options.shortLivedPodAnnotations...)
 
 	globalConfig := kubernetes.GlobalConfig{
 		Context:                            ctx,
-		ConfigName:                         *configName,
-		SuppliedConditions:                 kubernetes.ParseConditions(*conditions),
-		PVCManagementEnableIfNoEvictionUrl: *pvcManagementByDefault,
+		ConfigName:                         options.configName,
+		SuppliedConditions:                 options.suppliedConditions,
+		PVCManagementEnableIfNoEvictionUrl: options.pvcManagementByDefault,
 	}
 
 	cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 		eventRecorder,
-		kubernetes.MaxGracePeriod(*maxGracePeriod),
-		kubernetes.EvictionHeadroom(*evictionHeadroom),
-		kubernetes.WithSkipDrain(*skipDrain),
+		kubernetes.MaxGracePeriod(options.maxGracePeriod),
+		kubernetes.EvictionHeadroom(options.evictionHeadroom),
+		kubernetes.WithSkipDrain(options.skipDrain),
 		kubernetes.WithPodFilter(
 			kubernetes.NewPodFiltersIgnoreCompletedPods(
 				kubernetes.NewPodFiltersIgnoreShortLivedPods(
 					kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)),
-					runtimeObjectStoreImpl, *shortLivedPodAnnotations...))),
+					runtimeObjectStoreImpl, options.shortLivedPodAnnotations...))),
 		kubernetes.WithCordonLimiter(cordonLimiter),
 		kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
-		kubernetes.WithStorageClassesAllowingDeletion(*storageClassesAllowingVolumeDeletion),
-		kubernetes.WithMaxDrainAttemptsBeforeFail(*maxDrainAttemptsBeforeFail),
+		kubernetes.WithStorageClassesAllowingDeletion(options.storageClassesAllowingVolumeDeletion),
+		kubernetes.WithMaxDrainAttemptsBeforeFail(options.maxDrainAttemptsBeforeFail),
 		kubernetes.WithGlobalConfig(globalConfig),
 		kubernetes.WithAPICordonDrainerLogger(log),
 	)
@@ -410,16 +322,16 @@ func main() {
 		runtimeObjectStoreImpl,
 		eventRecorder,
 		kubernetes.WithLogger(log),
-		kubernetes.WithDrainBuffer(*drainBuffer),
-		kubernetes.WithSchedulingBackoffDelay(*schedulingRetryBackoffDelay),
-		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
-		kubernetes.WithDrainGroups(*drainGroupLabelKey),
+		kubernetes.WithDrainBuffer(options.drainBuffer),
+		kubernetes.WithSchedulingBackoffDelay(options.schedulingRetryBackoffDelay),
+		kubernetes.WithDurationWithCompletedStatusBeforeReplacement(options.durationBeforeReplacement),
+		kubernetes.WithDrainGroups(options.drainGroupLabelKey),
 		kubernetes.WithGlobalConfigHandler(globalConfig),
 		kubernetes.WithCordonPodFilter(podFilteringFunc),
 		kubernetes.WithGlobalBlocking(globalLocker),
-		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: *preprovisioningTimeout, CheckPeriod: *preprovisioningCheckPeriod, AllNodesByDefault: *preprovisioningActivatedByDefault}))
+		kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: options.preprovisioningTimeout, CheckPeriod: options.preprovisioningCheckPeriod, AllNodesByDefault: options.preprovisioningActivatedByDefault}))
 
-	if *dryRun {
+	if options.dryRun {
 		h = cache.FilteringResourceEventHandler{
 			FilterFunc: kubernetes.NewNodeProcessed().Filter,
 			Handler: kubernetes.NewDrainingResourceEventHandler(
@@ -428,29 +340,33 @@ func main() {
 				runtimeObjectStoreImpl,
 				eventRecorder,
 				kubernetes.WithLogger(log),
-				kubernetes.WithDrainBuffer(*drainBuffer),
-				kubernetes.WithSchedulingBackoffDelay(*schedulingRetryBackoffDelay),
-				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(*durationBeforeReplacement),
-				kubernetes.WithDrainGroups(*drainGroupLabelKey),
+				kubernetes.WithDrainBuffer(options.drainBuffer),
+				kubernetes.WithSchedulingBackoffDelay(options.schedulingRetryBackoffDelay),
+				kubernetes.WithDurationWithCompletedStatusBeforeReplacement(options.durationBeforeReplacement),
+				kubernetes.WithDrainGroups(options.drainGroupLabelKey),
 				kubernetes.WithGlobalBlocking(globalLocker),
 				kubernetes.WithGlobalConfigHandler(globalConfig)),
 		}
 	}
 
-	if len(*nodeLabels) > 0 {
-		log.Info("node labels", zap.Any("labels", nodeLabels))
-		if *nodeLabelsExpr != "" {
+	if len(options.nodeLabels) > 0 {
+		log.Info("node labels", zap.Any("labels", options.nodeLabels))
+		if options.nodeLabelsExpr != "" {
 			kingpin.Fatalf("nodeLabels and NodeLabelsExpr cannot both be set")
 		}
-		if nodeLabelsExpr, err = kubernetes.ConvertLabelsToFilterExpr(*nodeLabels); err != nil {
+		ptrStr, err := kubernetes.ConvertLabelsToFilterExpr(options.nodeLabels)
+		if err != nil {
 			kingpin.Fatalf(err.Error())
+		}
+		if ptrStr != nil {
+			options.nodeLabelsExpr = *ptrStr
 		}
 	}
 
 	var nodeLabelFilter cache.ResourceEventHandler
-	log.Debug("label expression", zap.Any("expr", nodeLabelsExpr))
+	log.Debug("label expression", zap.Any("expr", options.nodeLabelsExpr))
 
-	nodeLabelFilterFunc, err := kubernetes.NewNodeLabelFilter(nodeLabelsExpr, log)
+	nodeLabelFilterFunc, err := kubernetes.NewNodeLabelFilter(options.nodeLabelsExpr, log)
 	if err != nil {
 		log.Sugar().Fatalf("Failed to parse node label expression: %v", err)
 	}
@@ -466,16 +382,19 @@ func main() {
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")
 
-	scopeObserver := kubernetes.NewScopeObserver(cs, globalConfig, runtimeObjectStoreImpl, *scopeAnalysisPeriod, podFilteringFunc, kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *optInPodAnnotations...), kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, *cordonProtectedPodAnnotations...), nodeLabelFilterFunc, log)
+	scopeObserver := kubernetes.NewScopeObserver(cs, globalConfig, runtimeObjectStoreImpl, options.scopeAnalysisPeriod, podFilteringFunc,
+		kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, options.optInPodAnnotations...),
+		kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, options.cordonProtectedPodAnnotations...),
+		nodeLabelFilterFunc, log)
 	go scopeObserver.Run(ctx.Done())
-	if *resetScopeLabel == true {
+	if options.resetScopeLabel == true {
 		go scopeObserver.Reset()
 	}
 
 	lock, err := resourcelock.New(
 		resourcelock.EndpointsResourceLock,
-		*namespace,
-		*leaderElectionTokenName,
+		options.namespace,
+		options.leaderElectionTokenName,
 		cs.CoreV1(),
 		cs.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
@@ -487,9 +406,9 @@ func main() {
 
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:          lock,
-		LeaseDuration: *leaderElectionLeaseDuration,
-		RenewDeadline: *leaderElectionRenewDeadline,
-		RetryPeriod:   *leaderElectionRetryPeriod,
+		LeaseDuration: options.leaderElectionLeaseDuration,
+		RenewDeadline: options.leaderElectionRenewDeadline,
+		RetryPeriod:   options.leaderElectionRetryPeriod,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Info("watchers are running")
