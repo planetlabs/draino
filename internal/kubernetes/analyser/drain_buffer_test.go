@@ -2,9 +2,13 @@ package analyser
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/go-logr/zapr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -13,9 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"testing"
-	"time"
 )
 
 func Test_getLatestDisruption(t *testing.T) {
@@ -382,20 +383,27 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 	testLogger := zapr.NewLogger(zap.NewNop())
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ch := make(chan struct{})
-			defer close(ch)
 			tt.objects = append(tt.objects, tt.node)
 
-			fakeClient := fake.NewClientBuilder().WithRuntimeObjects(tt.objects...).Build()
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.objects})
+			assert.NoError(t, err)
+
 			fakeKubeClient := fakeclient.NewSimpleClientset(tt.objects...)
 			er := kubernetes.NewEventRecorder(record.NewFakeRecorder(1000))
 			store, closeFunc := kubernetes.RunStoreForTest(context.Background(), fakeKubeClient)
 			defer closeFunc()
-			fakeIndexer, err := index.NewFakeIndexer(ch, tt.objects, testLogger)
+
+			fakeIndexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			assert.NoError(t, err)
+
+			ch := make(chan struct{})
+			defer close(ch)
+			wrapper.Start(ch)
+
 			if err != nil {
 				t.Fatalf("can't create fakeIndexer: %#v", err)
 			}
-			d := NewDrainBufferChecker(context.Background(), testLogger, fakeClient, er, store, *fakeIndexer,
+			d := NewDrainBufferChecker(context.Background(), testLogger, wrapper.GetManagerClient(), er, store, *fakeIndexer,
 				DrainBufferCheckerConfiguration{
 					DefaultDrainBuffer: tt.defaultDrainBuffer,
 				})

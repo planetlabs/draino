@@ -2,9 +2,11 @@ package index
 
 import (
 	"context"
-	"github.com/go-logr/zapr"
-	"go.uber.org/zap"
 	"testing"
+
+	"github.com/go-logr/zapr"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/slices"
@@ -103,11 +105,15 @@ func Test_PDBIndexer(t *testing.T) {
 	testLogger := zapr.NewLogger(zap.NewNop())
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.Objects})
+			assert.NoError(t, err)
+
+			informer, err := New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			assert.NoError(t, err)
+
 			ch := make(chan struct{})
 			defer close(ch)
-
-			informer, err := NewFakePDBIndexer(ch, tt.Objects, testLogger)
-			assert.NoError(t, err)
+			wrapper.Start(ch)
 
 			pdbs, err := informer.GetPDBsBlockedByPod(context.TODO(), tt.TestPodName, tt.TestPodNamespace)
 			assert.NoError(t, err)

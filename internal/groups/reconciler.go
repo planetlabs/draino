@@ -3,6 +3,8 @@ package groups
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	v1 "k8s.io/api/core/v1"
@@ -12,7 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -29,19 +30,28 @@ type GroupRegistry struct {
 	logger        logr.Logger
 	eventRecorder kubernetes.EventRecorder
 
-	nodeWarmUpDelay time.Duration
-	keyGetter       GroupKeyGetter
-	groupRunner     *GroupsRunner
+	nodeWarmUpDelay           time.Duration
+	keyGetter                 GroupKeyGetter
+	groupDrainRunner          *GroupsRunner
+	groupDrainCandidateRunner *GroupsRunner
 }
 
-func NewGroupRegistry(ctx context.Context, kclient client.Client, logger logr.Logger, eventRecorder kubernetes.EventRecorder, factory RunnerFactory) *GroupRegistry {
+func NewGroupRegistry(
+	ctx context.Context,
+	kclient client.Client,
+	logger logr.Logger,
+	eventRecorder kubernetes.EventRecorder,
+	keyGetter GroupKeyGetter,
+	drainFactory, drainCandidateFactory RunnerFactory,
+) *GroupRegistry {
 	return &GroupRegistry{
-		kclient:         kclient,
-		logger:          logger,
-		nodeWarmUpDelay: nodeWarmUpDelay,
-		keyGetter:       factory.GroupKeyGetter(),
-		groupRunner:     NewGroupsRunner(ctx, factory, logger),
-		eventRecorder:   eventRecorder,
+		kclient:                   kclient,
+		logger:                    logger,
+		nodeWarmUpDelay:           nodeWarmUpDelay,
+		keyGetter:                 keyGetter,
+		groupDrainRunner:          NewGroupsRunner(ctx, drainFactory, logger, "drain"),
+		groupDrainCandidateRunner: NewGroupsRunner(ctx, drainCandidateFactory, logger, "drain_candidate"),
+		eventRecorder:             eventRecorder,
 	}
 }
 
@@ -60,7 +70,8 @@ func (r *GroupRegistry) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		r.logger.Info(eventGroupOverrideMisconfiguration+": default applies, no group override", "node", node.Name)
 	}
 
-	r.groupRunner.RunForGroup(r.keyGetter.GetGroupKey(node))
+	r.groupDrainRunner.RunForGroup(r.keyGetter.GetGroupKey(node))
+	r.groupDrainCandidateRunner.RunForGroup(r.keyGetter.GetGroupKey(node))
 
 	return ctrl.Result{}, nil
 }
@@ -68,7 +79,7 @@ func (r *GroupRegistry) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 // SetupWithManager setups the controller with goroutine and predicates
 func (r *GroupRegistry) SetupWithManager(mgr ctrl.Manager) error {
 
-	initSchedulingGroupIndexer(r.kclient, mgr.GetCache(), r.keyGetter)
+	InitSchedulingGroupIndexer(mgr.GetCache(), r.keyGetter)
 
 	return ctrl.NewControllerManagedBy(mgr).WithOptions(controller.Options{MaxConcurrentReconciles: 2}).
 		For(&v1.Node{}).

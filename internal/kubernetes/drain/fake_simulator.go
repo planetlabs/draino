@@ -6,12 +6,13 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 type FakeSimulatorOptions struct {
+	Chan            chan struct{}
 	CleanupDuration *time.Duration
 	CacheTTL        *time.Duration
 
@@ -28,20 +29,25 @@ func (opts *FakeSimulatorOptions) applyDefaults() {
 	}
 }
 
-func NewFakeDrainSimulator(ch chan struct{}, opts *FakeSimulatorOptions) (DrainSimulator, error) {
+func NewFakeDrainSimulator(opts *FakeSimulatorOptions) (DrainSimulator, error) {
 	opts.applyDefaults()
 
-	fakeIndexer, err := index.NewFakeIndexer(ch, opts.Objects, logr.Discard())
+	wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: opts.Objects})
 	if err != nil {
 		return nil, err
 	}
 
-	fakeClient := fake.NewFakeClient(opts.Objects...)
+	fakeIndexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), logr.Discard())
+	if err != nil {
+		return nil, err
+	}
+
+	wrapper.Start(opts.Chan)
 
 	simulator := &drainSimulatorImpl{
 		podIndexer:     fakeIndexer,
 		pdbIndexer:     fakeIndexer,
-		client:         fakeClient,
+		client:         wrapper.GetManagerClient(),
 		podResultCache: utils.NewTTLCache[simulationResult](*opts.CacheTTL, *opts.CleanupDuration),
 		skipPodFilter:  opts.PodFilter,
 	}

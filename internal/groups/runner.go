@@ -2,15 +2,15 @@ package groups
 
 import (
 	"context"
+	"sync"
+
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"sync"
 )
 
 type RunnerInfo struct {
-	context    context.Context
-	cancelFunc context.CancelFunc
-	key        GroupKey
+	Context context.Context
+	Key     GroupKey
 }
 
 // Runner is in charge of a set of nodes for a given group
@@ -21,7 +21,6 @@ type Runner interface {
 
 type RunnerFactory interface {
 	BuildRunner() Runner
-	GroupKeyGetter() GroupKeyGetter
 }
 
 type GroupsRunner struct {
@@ -32,12 +31,12 @@ type GroupsRunner struct {
 	logger        logr.Logger
 }
 
-func NewGroupsRunner(ctx context.Context, factory RunnerFactory, logger logr.Logger) *GroupsRunner {
+func NewGroupsRunner(ctx context.Context, factory RunnerFactory, logger logr.Logger, groupName string) *GroupsRunner {
 	gr := &GroupsRunner{
 		parentContext: ctx,
 		running:       map[GroupKey]*RunnerInfo{},
 		factory:       factory,
-		logger:        logger,
+		logger:        logger.WithValues("group_name", groupName),
 	}
 
 	go gr.observe()
@@ -61,12 +60,11 @@ func (g *GroupsRunner) RunForGroup(key GroupKey) {
 func (g *GroupsRunner) runForGroup(key GroupKey) *RunnerInfo {
 	ctx, cancel := context.WithCancel(g.parentContext)
 	r := &RunnerInfo{
-		key:        key,
-		context:    ctx,
-		cancelFunc: cancel,
+		Key:     key,
+		Context: ctx,
 	}
-	go func(runInfo *RunnerInfo) {
-		defer runInfo.cancelFunc()
+	go func(runInfo *RunnerInfo, cancel context.CancelFunc) {
+		defer cancel()
 		g.logger.Info("Scheduling group opened", "groupKey", key)
 		err := g.factory.BuildRunner().Run(runInfo)
 		if err != nil {
@@ -74,10 +72,10 @@ func (g *GroupsRunner) runForGroup(key GroupKey) *RunnerInfo {
 		}
 
 		g.Lock()
-		delete(g.running, runInfo.key)
+		delete(g.running, runInfo.Key)
 		g.logger.Info("Scheduling group closed", "groupKey", key)
 		g.Unlock()
-	}(r)
+	}(r, cancel)
 	return r
 }
 

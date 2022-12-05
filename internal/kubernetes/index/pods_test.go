@@ -2,9 +2,11 @@ package index
 
 import (
 	"context"
-	"github.com/go-logr/zapr"
-	"go.uber.org/zap"
 	"testing"
+
+	"github.com/go-logr/zapr"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/slices"
@@ -61,9 +63,12 @@ func Test_PodIndexer(t *testing.T) {
 		t.Run(tt.Name, func(t *testing.T) {
 			ch := make(chan struct{})
 			defer close(ch)
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.Objects})
 
-			informer, err := NewFakePodIndexer(ch, tt.Objects, testLogger)
+			informer, err := New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
 			assert.NoError(t, err)
+
+			wrapper.Start(ch)
 
 			pods, err := informer.GetPodsByNode(context.TODO(), tt.TestNodeName)
 			assert.NoError(t, err)

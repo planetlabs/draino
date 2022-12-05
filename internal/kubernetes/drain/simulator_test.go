@@ -123,8 +123,8 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 			ch := make(chan struct{})
 			defer close(ch)
 			simulator, err := NewFakeDrainSimulator(
-				ch,
 				&FakeSimulatorOptions{
+					Chan:      ch,
 					Objects:   append(tt.Objects, &tt.Node),
 					PodFilter: tt.PodFilter,
 				},

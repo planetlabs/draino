@@ -2,11 +2,13 @@ package analyser
 
 import (
 	"context"
-	"github.com/go-logr/zapr"
-	"go.uber.org/zap"
 	"testing"
 
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
+
 	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/slices"
 	corev1 "k8s.io/api/core/v1"
@@ -145,10 +147,14 @@ func TestPDBAnalyser(t *testing.T) {
 	testLogger := zapr.NewLogger(zap.NewNop())
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.Objects})
+			assert.NoError(t, err)
+			indexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			assert.NoError(t, err)
+
 			ch := make(chan struct{})
 			defer close(ch)
-			indexer, err := index.NewFakeIndexer(ch, tt.Objects, testLogger)
-			assert.NoError(t, err)
+			wrapper.Start(ch)
 
 			analyser := NewPDBAnalyser(indexer)
 			pods, err := analyser.BlockingPodsOnNode(context.Background(), tt.NodeName)
