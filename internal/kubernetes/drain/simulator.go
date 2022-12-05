@@ -17,6 +17,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	PositiveCacheResTTL = time.Minute
+	NegativeCacheResTTL = 3 * time.Minute
+)
+
 type DrainSimulator interface {
 	// SimulateDrain will simulate a drain for the given node.
 	// This means that it will perform an eviction simulation of all pods running on the node.
@@ -69,6 +74,14 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 		return false, err
 	}
 
+	// As we are  caching the positive results for one minute and negative ones for three minutes, we might make a lot of unneeded API calls
+	// As an optimization we are iterating over all pods and check if at least one has a negative cache entry, before simulating the drain for all the pods.
+	for _, pod := range pods {
+		if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist && !res.result {
+			return false, nil
+		}
+	}
+
 	reasons := []string{}
 	for _, pod := range pods {
 		if _, err := sim.SimulatePodDrain(ctx, pod); err != nil {
@@ -86,7 +99,7 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 }
 
 func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod) (bool, error) {
-	if res, exist := sim.podResultCache.Get(string(pod.UID), time.Now()); exist {
+	if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist {
 		return res.result, res.reason
 	}
 
@@ -144,6 +157,15 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 }
 
 func (sim *drainSimulatorImpl) writePodCache(pod *corev1.Pod, result bool, err error) (bool, error) {
-	sim.podResultCache.Add(string(pod.GetUID()), simulationResult{result: result, reason: err})
+	ttl := NegativeCacheResTTL
+	if result {
+		ttl = PositiveCacheResTTL
+	}
+
+	sim.podResultCache.AddCustomTTL(createCacheKey(pod), simulationResult{result: result, reason: err}, ttl)
 	return result, err
+}
+
+func createCacheKey(pod *corev1.Pod) string {
+	return string(pod.UID)
 }
