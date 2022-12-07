@@ -799,6 +799,8 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 	return d.evictionSequence(ctx, node, pod, abort,
 		// eviction function
 		func() error {
+
+			logger := d.l.With(zap.String("node", node.Name)).With(zap.String("pod", pod.Namespace+"/"+pod.Name))
 			evictionPayload := &policy.Eviction{
 				ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName(),
 					Annotations: map[string]string{EvictionNodeConditionsAnnotationKey: strings.Join(conditions, ",")}},
@@ -808,7 +810,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 			var client *http.Client
 			urlParsed, err := url2.Parse(url)
 			if err != nil {
-				d.l.Info("custom eviction endpoint response error, can't parse URL", zap.Error(err))
+				logger.Info("custom eviction endpoint response error, can't parse URL", zap.Error(err))
 				return &EvictionEndpointError{}
 			}
 
@@ -835,22 +837,23 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 				roundTripper = authnclient.NewRoundTripper(roundTripper, authnclient.NewEmissaryTokenGetter(tokenAudience))
 				// Removing this token parameter so that the server don't get it on the URL. The value is now available for the server inside the bearer token
 				urlParsed.Query().Del("token-audience")
+				logger.Info("Using token-audience parameter", zap.String("token-audience", tokenAudience))
 			}
 
 			client = &http.Client{Transport: roundTripper, Timeout: 10 * time.Second}
-
-			req, err := http.NewRequest("POST", url, GetEvictionJsonPayload(evictionPayload))
+			logger.Info("calling eviction++", zap.String("url", urlParsed.String()))
+			req, err := http.NewRequest("POST", urlParsed.String(), GetEvictionJsonPayload(evictionPayload))
 			req = req.WithContext(ctx)
 			req.Header.Set("Content-Type", "application/json")
 
 			client = httptrace.WrapClient(client)
 			resp, err := client.Do(req)
 			if err != nil {
-				d.l.Info("custom eviction endpoint response error", zap.Error(err))
+				logger.Info("custom eviction endpoint response error", zap.Error(err))
 				return &EvictionEndpointError{}
 			}
 			defer resp.Body.Close()
-			d.l.Info("custom eviction endpoint response", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
+			logger.Info("custom eviction endpoint response", zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
 			switch {
 			case resp.StatusCode == http.StatusOK:
 				return nil
@@ -864,14 +867,14 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 				respContent, _ := ioutil.ReadAll(resp.Body)
 				if maxRetryOn500 > 0 {
 					maxRetryOn500--
-					d.l.Info("Custom eviction endpoint returned an error", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+					logger.Info("Custom eviction endpoint returned an error", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
 					return apierrors.NewTooManyRequests("retry later following endpoint error", 20)
 				}
-				d.l.Error("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+				logger.Error("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
 				return &EvictionEndpointError{StatusCode: resp.StatusCode, AfterSeveralRetries: true}
 			default:
 				respContent, _ := ioutil.ReadAll(resp.Body)
-				d.l.Error("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+				logger.Error("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
 				return &EvictionEndpointError{StatusCode: resp.StatusCode}
 			}
 		},
