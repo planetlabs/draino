@@ -225,7 +225,7 @@ func main() {
 
 		cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 			eventRecorder,
-			kubernetes.MaxGracePeriod(options.maxGracePeriod),
+			kubernetes.MaxGracePeriod(options.minEvictionTimeout),
 			kubernetes.EvictionHeadroom(options.evictionHeadroom),
 			kubernetes.WithSkipDrain(options.skipDrain),
 			kubernetes.WithPodFilter(

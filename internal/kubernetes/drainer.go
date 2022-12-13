@@ -49,7 +49,7 @@ import (
 
 // Default pod eviction settings.
 const (
-	DefaultMaxGracePeriod               = 8 * time.Minute
+	DefaultMinEvictionTimeout           = 8 * time.Minute
 	DefaultEvictionOverhead             = 30 * time.Second
 	DefaultPVCRecreateTimeout           = 3 * time.Minute
 	DefaultPodDeletePeriodWaitingForPVC = 10 * time.Second
@@ -263,7 +263,7 @@ type APICordonDrainer struct {
 	cordonLimiter          CordonLimiter
 	nodeReplacementLimiter NodeReplacementLimiter
 
-	maxGracePeriod             time.Duration
+	minEvictionTimeout         time.Duration
 	evictionHeadroom           time.Duration
 	skipDrain                  bool
 	maxDrainAttemptsBeforeFail int32
@@ -281,7 +281,7 @@ type APICordonDrainerOption func(d *APICordonDrainer)
 // SIGTERM before they are sent a SIGKILL.
 func MaxGracePeriod(m time.Duration) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
-		d.maxGracePeriod = m
+		d.minEvictionTimeout = m
 	}
 }
 
@@ -358,13 +358,13 @@ func WithGlobalConfig(globalConfig GlobalConfig) APICordonDrainerOption {
 // the Kubernetes API.
 func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder EventRecorder, ao ...APICordonDrainerOption) *APICordonDrainer {
 	d := &APICordonDrainer{
-		c:                c,
-		l:                zap.NewNop(),
-		filter:           NewPodFilters(),
-		maxGracePeriod:   DefaultMaxGracePeriod,
-		evictionHeadroom: DefaultEvictionOverhead,
-		skipDrain:        DefaultSkipDrain,
-		eventRecorder:    eventRecorder,
+		c:                  c,
+		l:                  zap.NewNop(),
+		filter:             NewPodFilters(),
+		minEvictionTimeout: DefaultMinEvictionTimeout,
+		evictionHeadroom:   DefaultEvictionOverhead,
+		skipDrain:          DefaultSkipDrain,
+		eventRecorder:      eventRecorder,
 	}
 	for _, o := range ao {
 		o(d)
@@ -374,10 +374,6 @@ func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder EventRecorder, ao
 
 func (d *APICordonDrainer) SetRuntimeObjectStore(store RuntimeObjectStore) {
 	d.runtimeObjectStore = store
-}
-
-func (d *APICordonDrainer) deleteTimeout() time.Duration {
-	return d.maxGracePeriod + d.evictionHeadroom
 }
 
 func GetNodeRetryMaxAttempt(n *core.Node) (customValue int32, usedDefault bool, err error) {
@@ -746,18 +742,27 @@ func (d *APICordonDrainer) evict(ctx context.Context, node *core.Node, pod *core
 	return d.evictWithKubernetesAPI(ctx, node, pod, abort)
 }
 
-func (d *APICordonDrainer) getGracePeriod(pod *core.Pod) int64 {
-	gracePeriod := int64(d.maxGracePeriod.Seconds())
-	if pod.Spec.TerminationGracePeriodSeconds != nil && *pod.Spec.TerminationGracePeriodSeconds < gracePeriod {
+func (d *APICordonDrainer) getGracePeriodWithEvictionHeadRoom(pod *core.Pod) time.Duration {
+	gracePeriod := int64(core.DefaultTerminationGracePeriodSeconds)
+	if pod.Spec.TerminationGracePeriodSeconds != nil {
 		gracePeriod = *pod.Spec.TerminationGracePeriodSeconds
 	}
-	return gracePeriod
+	return time.Duration(gracePeriod) + d.evictionHeadroom
 }
+
+func (d *APICordonDrainer) getMinEvictionTimeoutWithEvictionHeadRoom(pod *core.Pod) time.Duration {
+	gracePeriod := d.minEvictionTimeout
+	if pod.Spec.TerminationGracePeriodSeconds != nil && time.Duration(*pod.Spec.TerminationGracePeriodSeconds)*time.Second > gracePeriod {
+		gracePeriod = time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second
+	}
+	return gracePeriod + d.evictionHeadroom
+}
+
 func (d *APICordonDrainer) evictWithKubernetesAPI(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "evictWithKubernetesAPI")
 	defer span.Finish()
 
-	gracePeriod := d.getGracePeriod(pod)
+	gracePeriod := int64(d.getGracePeriodWithEvictionHeadRoom(pod).Seconds())
 	return d.evictionSequence(ctx, node, pod, abort,
 		// eviction function
 		func() error {
@@ -794,7 +799,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 
 	conditions := GetConditionsTypes(GetNodeOffendingConditions(node, d.globalConfig.SuppliedConditions))
 	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
-	gracePeriod := d.getGracePeriod(pod)
+	gracePeriod := int64(d.getGracePeriodWithEvictionHeadRoom(pod).Seconds())
 	maxRetryOn500 := 4
 	return d.evictionSequence(ctx, node, pod, abort,
 		// eviction function
@@ -889,7 +894,8 @@ func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node
 	span, ctx := tracer.StartSpanFromContext(ctx, "evictionSequence")
 	defer span.Finish()
 
-	ctx, cancel := context.WithTimeout(ctx, d.deleteTimeout())
+	// we will retry eviction till minEvictionTimeout (or podTerminationGracePeriod if it is bigger), augmented by evictionHeadroom
+	ctx, cancel := context.WithTimeout(ctx, d.getMinEvictionTimeoutWithEvictionHeadRoom(pod))
 	defer cancel()
 	backoff := wait.Backoff{
 		Duration: 10 * time.Second,
@@ -950,8 +956,9 @@ func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node
 				if eh := otherErrorsHandlerFunc(err); eh != nil {
 					return err
 				}
-			default:
-				err := d.awaitDeletion(ctx, pod, d.deleteTimeout())
+			default: // this means the API answered 200/201, we wait for the pod deletion
+				// now that the eviction is confirmed we can only wait for the pod terminationGracePeriod (and evictionHeadroom to give some buffer)
+				err := d.awaitDeletion(ctx, pod, d.getGracePeriodWithEvictionHeadRoom(pod))
 				if err != nil {
 					return fmt.Errorf("cannot confirm pod was deleted: %w", err)
 				}

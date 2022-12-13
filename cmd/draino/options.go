@@ -16,7 +16,7 @@ type Options struct {
 	kubecfg                     string
 	apiserver                   string
 	dryRun                      bool
-	maxGracePeriod              time.Duration
+	minEvictionTimeout          time.Duration
 	evictionHeadroom            time.Duration
 	drainBuffer                 time.Duration
 	schedulingRetryBackoffDelay time.Duration
@@ -105,7 +105,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.BoolVar(&opt.pvcManagementByDefault, "pvc-management-by-default", false, "PVC management is automatically activated for a workload that do not use eviction++")
 	fs.BoolVar(&opt.resetScopeLabel, "reset-config-labels", false, "Reset the scope label on the nodes")
 
-	fs.DurationVar(&opt.maxGracePeriod, "max-grace-period", kubernetes.DefaultMaxGracePeriod, "Maximum time evicted pods will be given to terminate gracefully.")
+	fs.DurationVar(&opt.minEvictionTimeout, "min-eviction-timeout", kubernetes.DefaultMinEvictionTimeout, "Minimum time we wait to evict a pod. The pod terminationGracePeriod will be used if it is bigger.")
 	fs.DurationVar(&opt.evictionHeadroom, "eviction-headroom", kubernetes.DefaultEvictionOverhead, "Additional time to wait after a pod's termination grace period for it to have been deleted.")
 	fs.DurationVar(&opt.drainBuffer, "drain-buffer", kubernetes.DefaultDrainBuffer, "Minimum time between starting each drain. Nodes are always cordoned immediately.")
 	fs.DurationVar(&opt.schedulingRetryBackoffDelay, "retry-backoff-delay", kubernetes.DefaultSchedulingRetryBackoffDelay, "Additional delay to add between retry schedules.")
