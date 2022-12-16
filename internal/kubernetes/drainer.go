@@ -747,7 +747,7 @@ func (d *APICordonDrainer) getGracePeriodWithEvictionHeadRoom(pod *core.Pod) tim
 	if pod.Spec.TerminationGracePeriodSeconds != nil {
 		gracePeriod = *pod.Spec.TerminationGracePeriodSeconds
 	}
-	return time.Duration(gracePeriod) + d.evictionHeadroom
+	return time.Duration(gracePeriod)*time.Second + d.evictionHeadroom
 }
 
 func (d *APICordonDrainer) getMinEvictionTimeoutWithEvictionHeadRoom(pod *core.Pod) time.Duration {
