@@ -19,15 +19,16 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/DataDog/compute-go/kubeclient"
-	"github.com/DataDog/compute-go/version"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	"github.com/spf13/cobra"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"sort"
 	"time"
+
+	"github.com/DataDog/compute-go/kubeclient"
+	"github.com/DataDog/compute-go/version"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"github.com/spf13/cobra"
 
 	"github.com/DataDog/compute-go/controllerruntime"
 	"github.com/DataDog/compute-go/infraparameters"
@@ -321,7 +322,7 @@ func main() {
 		}
 
 		lock, err := resourcelock.New(
-			resourcelock.EndpointsResourceLock,
+			resourcelock.EndpointsLeasesResourceLock,
 			options.namespace,
 			options.leaderElectionTokenName,
 			cs.CoreV1(),

@@ -155,17 +155,16 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 
 func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	var gracePeriod int64 = 30
-	err := sim.client.Create(ctx, &policyv1.Eviction{
+	err := sim.client.SubResource("eviction").Create(ctx, pod, &policyv1.Eviction{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      pod.GetName(),
 			Namespace: pod.GetNamespace(),
 		},
 		DeleteOptions: &metav1.DeleteOptions{
 			GracePeriodSeconds: &gracePeriod,
-			DryRun:             []string{"all"},
+			DryRun:             []string{"All"},
 		},
 	})
-
 	return err == nil, err
 }
 

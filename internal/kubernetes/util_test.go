@@ -4,11 +4,12 @@ import (
 	"reflect"
 	"testing"
 
-	openapi_v2 "github.com/googleapis/gnostic/openapiv2"
+	openapi_v2 "github.com/google/gnostic/openapiv2"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/openapi"
 	"k8s.io/client-go/rest"
 )
 
@@ -164,6 +165,14 @@ func (f fakeDiscoveryInterface) ServerVersion() (*version.Info, error) {
 
 func (f fakeDiscoveryInterface) OpenAPISchema() (*openapi_v2.Document, error) {
 	return nil, nil // not needed
+}
+
+func (f fakeDiscoveryInterface) OpenAPIV3() openapi.Client {
+	return nil
+}
+
+func (f fakeDiscoveryInterface) WithLegacy() discovery.DiscoveryInterface {
+	return nil
 }
 
 func newFakeDiscoveryClient() discovery.DiscoveryInterface {
