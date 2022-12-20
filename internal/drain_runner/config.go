@@ -8,6 +8,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/protector"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -23,6 +24,7 @@ type Config struct {
 	retryWall           drain.RetryWall
 	drainer             kubernetes.Drainer
 	sharedIndexInformer index.GetSharedIndexInformer
+	pvProtector         protector.PVProtector
 
 	// With defaults
 	clock         clock.Clock
@@ -56,6 +58,10 @@ func (conf *Config) Validate() error {
 	if conf.sharedIndexInformer == nil {
 		return errors.New("get shared index informer should be set")
 	}
+	if conf.pvProtector == nil {
+		return errors.New("pv protector should be set")
+	}
+
 	return nil
 }
 
@@ -104,5 +110,11 @@ func (conf *Config) WithDrainer(drainer kubernetes.Drainer) WithOption {
 func (conf *Config) WithSharedIndexInformer(inf index.GetSharedIndexInformer) WithOption {
 	return func(conf *Config) {
 		conf.sharedIndexInformer = inf
+	}
+}
+
+func WithPVProtector(protector protector.PVProtector) WithOption {
+	return func(conf *Config) {
+		conf.pvProtector = protector
 	}
 }

@@ -13,3 +13,11 @@ func IsPodReady(pod *corev1.Pod) bool {
 	}
 	return false
 }
+
+func GetPodNames(pods []*corev1.Pod) []string {
+	result := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		result = append(result, pod.Name)
+	}
+	return result
+}

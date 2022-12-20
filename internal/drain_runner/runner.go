@@ -2,6 +2,7 @@ package drain_runner
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -10,6 +11,8 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
+	"github.com/planetlabs/draino/internal/protector"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/clock"
@@ -31,6 +34,7 @@ type drainRunner struct {
 	drainer             kubernetes.Drainer
 	sharedIndexInformer index.GetSharedIndexInformer
 	runEvery            time.Duration
+	pvProtector         protector.PVProtector
 
 	preprocessors []DrainPreProzessor
 }
@@ -63,6 +67,18 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 }
 
 func (runner *drainRunner) handleCandidate(ctx context.Context, candidate *corev1.Node) error {
+	pods, err := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(candidate)
+	if err != nil {
+		return err
+	}
+
+	// TODO add metric to track how often this happens
+	if len(pods) > 0 {
+		runner.logger.Info("Removing candidate status, because node is hosting PV for pods", "node_name", candidate.Name, "pods", strings.Join(utils.GetPodNames(pods), "; "))
+		_, err := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
+		return err
+	}
+
 	allPreprocessorsDone := runner.checkPreprocessors(candidate)
 	if !allPreprocessorsDone {
 		runner.logger.Info("waiting for preprocessors to be done before draining", "node_name", candidate.Name)
@@ -73,7 +89,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, candidate *corev
 
 	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
 	// TODO add metric to show how many drains are successful / failed
-	err := runner.drainCandidate(ctx, candidate)
+	err = runner.drainCandidate(ctx, candidate)
 	if err != nil {
 		runner.logger.Error(err, "failed to drain node", "node_name", candidate.Name)
 		return runner.removeFailedCandidate(ctx, candidate, err.Error())

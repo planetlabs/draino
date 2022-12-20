@@ -33,6 +33,7 @@ func (factory *DrainRunnerFactory) BuildRunner() groups.Runner {
 		drainer:             factory.conf.drainer,
 		sharedIndexInformer: factory.conf.sharedIndexInformer,
 		runEvery:            factory.conf.rerunEvery,
+		pvProtector:         factory.conf.pvProtector,
 
 		preprocessors: factory.conf.preprocessors,
 	}
