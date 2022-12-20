@@ -2,6 +2,7 @@ package drain
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -20,6 +21,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 	tests := []struct {
 		Name        string
 		IsDrainable bool
+		Reason      []string
 		Node        corev1.Node
 		Objects     []runtime.Object
 		PodFilter   kubernetes.PodFilterFunc
@@ -27,6 +29,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should drain empty node",
 			IsDrainable: true,
+			Reason:      nil,
 			Node: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "foo-node",
@@ -38,6 +41,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should drain with pods that are not covered by PDBs",
 			IsDrainable: true,
+			Reason:      nil,
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -47,6 +51,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should drain if PDB has enough budget",
 			IsDrainable: true,
+			Reason:      nil,
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -57,6 +62,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should drain if failing pod is taking PDB budget",
 			IsDrainable: true,
+			Reason:      nil,
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -67,6 +73,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain with pods that are blocked by PDBs with missing budget",
 			IsDrainable: false,
+			Reason:      []string{"Cannot drain pod 'foo-pod', because: PDB 'foo-pdb' does not allow any disruptions"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -77,6 +84,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain if PDB is blocked (lockness)",
 			IsDrainable: false,
+			Reason:      []string{"Cannot drain pod 'foo-pod1', because: PDB 'foo-pdb' does not allow any disruptions", "Cannot drain pod 'foo-pod2', because: PDB 'foo-pdb' does not allow any disruptions"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -88,6 +96,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not care about pods on other nodes",
 			IsDrainable: true,
+			Reason:      nil,
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -98,6 +107,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should filter out pods using the pod filter",
 			IsDrainable: true,
+			Reason:      nil,
 			PodFilter:   kubernetes.LocalStoragePodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -108,6 +118,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain if one pod has multiple PDBs",
 			IsDrainable: false,
+			Reason:      []string{"Cannot drain pod 'foo-pod', because: Pod has more than one associated PDB 2 > 1"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -131,13 +142,10 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 			)
 			assert.NoError(t, err)
 
-			drainable, err := simulator.SimulateDrain(context.Background(), &tt.Node)
+			drainable, reason, err := simulator.SimulateDrain(context.Background(), &tt.Node)
+			sort.Strings(tt.Reason)
 			assert.Equal(t, tt.IsDrainable, drainable, "Node drainability is not as expected")
-			if tt.IsDrainable {
-				assert.NoError(t, err)
-			} else {
-				assert.Error(t, err)
-			}
+			assert.Equal(t, tt.Reason, reason, "Reason is not as expected")
 		})
 	}
 }
