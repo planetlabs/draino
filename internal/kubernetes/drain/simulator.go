@@ -3,16 +3,16 @@ package drain
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"time"
 )
 
 const (
@@ -148,7 +148,6 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 		sim.writePodCache(pod, false, reason)
 		return false, reason, nil
 	}
-
 	sim.writePodCache(pod, true, "")
 	return true, "", nil
 }
@@ -165,7 +164,24 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 			DryRun:             []string{"All"},
 		},
 	})
-	return err == nil, err
+	if err == nil {
+		return true, nil
+	}
+	err = sim.client.SubResource("eviction").Create(ctx, pod, &policyv1beta1.Eviction{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pod.GetName(),
+			Namespace: pod.GetNamespace(),
+		},
+		DeleteOptions: &metav1.DeleteOptions{
+			GracePeriodSeconds: &gracePeriod,
+			DryRun:             []string{"All"},
+		},
+	})
+	if err == nil {
+		return true, nil
+	}
+
+	return false, err
 }
 
 func (sim *drainSimulatorImpl) writePodCache(pod *corev1.Pod, result bool, reason string) {

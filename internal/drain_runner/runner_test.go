@@ -28,18 +28,8 @@ type failDrainer struct {
 
 func (d *failDrainer) Drain(ctx context.Context, n *v1.Node) error { return errors.New("myerr") }
 
-type testDrainPreprocessor interface {
-	DrainPreProzessor
-	Assert(*testing.T)
-}
-
 type testPreprocessor struct {
-	madeCalls int
-	// maxCalls is the amount of calls after Process will return true
-	maxCalls int
-	// expectedCalls is the amount we are expecting during the test
-	// expectedCalls might be bigger than maxCalls if there is a second preprocessor which takes longer
-	expectedCalls int
+	isDone bool
 }
 
 func (_ *testPreprocessor) GetName() string {
@@ -47,12 +37,7 @@ func (_ *testPreprocessor) GetName() string {
 }
 
 func (p *testPreprocessor) IsDone(node *corev1.Node) (bool, error) {
-	p.madeCalls += 1
-	return p.madeCalls >= p.maxCalls, nil
-}
-
-func (p *testPreprocessor) Assert(t *testing.T) {
-	assert.Equal(t, p.expectedCalls, p.madeCalls)
+	return p.isDone, nil
 }
 
 func TestDrainRunner(t *testing.T) {
@@ -60,7 +45,7 @@ func TestDrainRunner(t *testing.T) {
 		Name          string
 		Key           groups.GroupKey
 		Node          *corev1.Node
-		Preprocessors []testDrainPreprocessor
+		Preprocessors []DrainPreProzessor
 		Drainer       kubernetes.Drainer
 
 		ShoulHaveTaint  bool
@@ -106,17 +91,17 @@ func TestDrainRunner(t *testing.T) {
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
 			Drainer:         &kubernetes.NoopCordonDrainer{},
-			Preprocessors:   []testDrainPreprocessor{&testPreprocessor{expectedCalls: 2, maxCalls: 2}},
+			Preprocessors:   []DrainPreProzessor{&testPreprocessor{isDone: false}},
 			ShoulHaveTaint:  true,
-			ExpectedTaint:   k8sclient.TaintDrained,
+			ExpectedTaint:   k8sclient.TaintDrainCandidate,
 			ExpectedRetries: 0,
 		},
 		{
-			Name:            "Should wait for multiple preprocessors to finish even if one is taking longer than the other",
+			Name:            "Can finish if preprocessors are done",
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
 			Drainer:         &kubernetes.NoopCordonDrainer{},
-			Preprocessors:   []testDrainPreprocessor{&testPreprocessor{expectedCalls: 4, maxCalls: 2}, &testPreprocessor{expectedCalls: 4, maxCalls: 4}},
+			Preprocessors:   []DrainPreProzessor{&testPreprocessor{isDone: true}},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrained,
 			ExpectedRetries: 0,
@@ -145,16 +130,15 @@ func TestDrainRunner(t *testing.T) {
 			runner, err := NewFakeRunner(&FakeOptions{
 				Chan:          ch,
 				ClientWrapper: wrapper,
-				Preprocessors: convertPreProcessors(tt.Preprocessors),
+				Preprocessors: tt.Preprocessors,
 				Drainer:       tt.Drainer,
 				PVProtector:   protector.NewPVCProtector(store, zap.NewNop(), false),
 			})
 
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancel()
 
-			err = runner.Run(&groups.RunnerInfo{Context: ctx, Key: tt.Key})
-			assert.NoError(t, err)
+			runner.handleGroup(ctx, &groups.RunnerInfo{Context: ctx, Key: tt.Key})
 			assert.NoError(t, ctx.Err(), "context reached deadline")
 
 			var node corev1.Node
@@ -172,19 +156,8 @@ func TestDrainRunner(t *testing.T) {
 			drainAttempts := runner.retryWall.GetDrainRetryAttemptsCount(&node)
 			assert.Equal(t, tt.ExpectedRetries, drainAttempts)
 
-			for _, pre := range tt.Preprocessors {
-				pre.Assert(t)
-			}
 		})
 	}
-}
-
-func convertPreProcessors(tests []testDrainPreprocessor) []DrainPreProzessor {
-	res := make([]DrainPreProzessor, 0, len(tests))
-	for _, t := range tests {
-		res = append(res, t)
-	}
-	return res
 }
 
 func createNode(key string, taintVal k8sclient.DrainTaintValue) *corev1.Node {

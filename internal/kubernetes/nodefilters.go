@@ -29,8 +29,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+type NodeLabelFilterFunc func(o interface{}) bool
+
 // NewNodeLabelFilter returns a filter that returns true if the supplied node satisfies the boolean expression
-func NewNodeLabelFilter(expressionStr string, log *zap.Logger) (func(o interface{}) bool, error) {
+func NewNodeLabelFilter(expressionStr string, log *zap.Logger) (NodeLabelFilterFunc, error) {
 	//This feels wrong but this is how the previous behavior worked so I'm only keeping it to maintain compatibility.
 	expression, err := expr.Compile(expressionStr)
 	if err != nil && expressionStr != "" {
@@ -203,8 +205,8 @@ const (
 	allowedConditionAnnotationKey = "node-lifecycle.datadoghq.com/allowed-conditions"
 )
 
-// atLeastOneConditionAcceptedByTheNode check if at least one of the condition in the list is allowed. If the list of conditions is empty, but at least one allowed-condition is specified it returns false!
-func atLeastOneConditionAcceptedByTheNode(conditions []string, n *core.Node) bool {
+// AtLeastOneConditionAcceptedByTheNode check if at least one of the condition in the list is allowed. If the list of conditions is empty, but at least one allowed-condition is specified it returns false!
+func AtLeastOneConditionAcceptedByTheNode(conditions []string, n *core.Node) bool {
 	allowedConditions, ok := n.Annotations[allowedConditionAnnotationKey]
 	if !ok {
 		// no condition specify means "all accepted"

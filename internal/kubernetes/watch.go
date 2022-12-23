@@ -54,6 +54,7 @@ type RuntimeObjectStoreImpl struct {
 	StatefulSetsStore          *StatefulSetWatch
 	PersistentVolumeStore      *PersistentVolumeWatch
 	PersistentVolumeClaimStore *PersistentVolumeClaimWatch
+	hasSynced                  bool
 }
 
 func (r *RuntimeObjectStoreImpl) Nodes() NodeStore {
@@ -77,11 +78,15 @@ func (r *RuntimeObjectStoreImpl) PersistentVolumeClaims() PersistentVolumeClaimS
 }
 
 func (r *RuntimeObjectStoreImpl) HasSynced() bool {
-	return r.NodesStore.HasSynced() &&
+	if r.hasSynced {
+		return true
+	}
+	r.hasSynced = r.NodesStore.HasSynced() &&
 		r.StatefulSetsStore.HasSynced() &&
 		r.PodsStore.HasSynced() &&
 		r.PersistentVolumeStore.HasSynced() &&
 		r.PersistentVolumeClaimStore.HasSynced()
+	return r.hasSynced
 }
 
 // An NodeStore is a cache of node resources.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"contrib.go.opencensus.io/exporter/prometheus"
+	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"go.opencensus.io/stats/view"
@@ -84,6 +85,8 @@ func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
 		"/metrics": p,
 		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:errcheck // no err management in health check
 	}}
+
+	groups.RegisterMetrics(promOptions.Registry)
 
 	go func() {
 		logger.Info("web server is running", zap.String("listen", options.listen))

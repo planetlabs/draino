@@ -2,6 +2,7 @@ package drain_runner
 
 import (
 	"context"
+	"k8s.io/kubernetes/pkg/apis/core"
 	"strings"
 	"time"
 
@@ -19,7 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TODO is this a good value?
+// DrainTimeout how long is it acceptable for a drain to run
+// TODO is this a good value? ==> probably not because that depends on the terminationGracePeriod of the pods. See getGracePeriodWithEvictionHeadRoom and getMinEvictionTimeoutWithEvictionHeadRoom
 const DrainTimeout = 10 * time.Minute
 
 // Make sure that the drain runner is implementing the group runner interface
@@ -35,46 +37,55 @@ type drainRunner struct {
 	sharedIndexInformer index.GetSharedIndexInformer
 	runEvery            time.Duration
 	pvProtector         protector.PVProtector
-
-	preprocessors []DrainPreProzessor
+	eventRecorder       kubernetes.EventRecorder
+	preprocessors       []DrainPreProzessor
 }
 
 func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 	ctx, cancel := context.WithCancel(info.Context)
 	// run an endless loop until there are no drain candidates left
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
-		candidates, err := runner.getDrainCandidates(ctx, info.Key)
-		// in case of an error we'll just try it again
-		if err != nil {
-			runner.logger.Error(err, "cannot get drain candidates for group", "group_key", info.Key)
-			return
-		}
-		// TODO add metric to track amount of candidates
-		if len(candidates) == 0 {
-			// If there are no candidates left, we'll stop the loop
-			runner.logger.Info("no candidates in group left, stopping.", "group_key", info.Key)
+		if emptyGroup := runner.handleGroup(ctx, info); emptyGroup {
 			cancel()
 			return
-		}
-
-		for _, candidate := range candidates {
-			if err := runner.handleCandidate(info.Context, candidate); err != nil {
-				runner.logger.Error(err, "error during candidate evaluation", "node_name", candidate.Name)
-			}
 		}
 	}, runner.runEvery)
 	return nil
 }
 
+func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerInfo) (emptyGroup bool) {
+	candidates, groupHasAtLeastOneNode, err := runner.getDrainCandidates(ctx, info.Key)
+	// in case of an error we'll just try it again
+	if err != nil {
+		runner.logger.Error(err, "cannot get drain candidates for group", "group_key", info.Key)
+		return
+	}
+	// TODO add metric to track amount of candidates
+	if !groupHasAtLeastOneNode {
+		// If there are no candidates left, we'll stop the loop
+		runner.logger.Info("no node in group left, stopping.", "group_key", info.Key)
+		emptyGroup = true
+		return
+	}
+	runner.logger.Info("HandleGroup", "candidatesCount", len(candidates))
+	for _, candidate := range candidates {
+		if err := runner.handleCandidate(info.Context, candidate); err != nil {
+			runner.logger.Error(err, "error during candidate evaluation", "node_name", candidate.Name)
+		}
+	}
+	return
+}
+
 func (runner *drainRunner) handleCandidate(ctx context.Context, candidate *corev1.Node) error {
-	pods, err := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(candidate)
+	podsAssociatedWithPV, err := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(candidate)
 	if err != nil {
 		return err
 	}
 
 	// TODO add metric to track how often this happens
-	if len(pods) > 0 {
-		runner.logger.Info("Removing candidate status, because node is hosting PV for pods", "node_name", candidate.Name, "pods", strings.Join(utils.GetPodNames(pods), "; "))
+	if len(podsAssociatedWithPV) > 0 {
+		runner.logger.Info("Removing candidate status, because node is hosting PV for pods", "node", candidate.Name, "pods", strings.Join(utils.GetPodNames(podsAssociatedWithPV), "; "))
+		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonPendingPodWithLocalPV, "Pod(s) "+strings.Join(utils.GetPodNames(podsAssociatedWithPV), ", ")+" associated with local PV on that node")
 		_, err := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
 		return err
 	}
@@ -85,16 +96,18 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, candidate *corev
 		return nil
 	}
 
-	runner.logger.Info("all preprocessors of candidate are done; will start draining", "node_name", candidate.Name)
+	runner.logger.Info("start draining", "node_name", candidate.Name)
 
 	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
 	// TODO add metric to show how many drains are successful / failed
+	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainStarting, "Draining node")
 	err = runner.drainCandidate(ctx, candidate)
 	if err != nil {
 		runner.logger.Error(err, "failed to drain node", "node_name", candidate.Name)
+		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: %v", err)
 		return runner.removeFailedCandidate(ctx, candidate, err.Error())
 	}
-
+	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainSucceeded, "Drained node")
 	runner.logger.Info("successfully drained node", "node_name", candidate.Name)
 
 	return nil
@@ -125,6 +138,8 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, candidate *corev1
 	}
 
 	// This will make sure that the individual drain, will not block the loop forever
+	// TODO maybe we should deal with that timeout issue INSIDE the `drain` function because the timeout depends
+	// TODO on what is running in the node, there could be long terminationGracePeriod on pods.
 	drainContext, cancel := context.WithTimeout(ctx, DrainTimeout)
 	defer cancel()
 
@@ -142,15 +157,16 @@ func (runner *drainRunner) removeFailedCandidate(ctx context.Context, candidate 
 	if err != nil {
 		return err
 	}
-
+	rw := runner.retryWall.GetRetryWallTimestamp(candidate)
+	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: next attempt after %v", rw)
 	_, err = k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
 	return err
 }
 
-func (runner *drainRunner) getDrainCandidates(ctx context.Context, key groups.GroupKey) ([]*corev1.Node, error) {
+func (runner *drainRunner) getDrainCandidates(ctx context.Context, key groups.GroupKey) ([]*corev1.Node, bool, error) {
 	nodes, err := index.GetFromIndex[corev1.Node](ctx, runner.sharedIndexInformer, groups.SchedulingGroupIdx, string(key))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	candidates := make([]*corev1.Node, 0)
@@ -167,5 +183,5 @@ func (runner *drainRunner) getDrainCandidates(ctx context.Context, key groups.Gr
 		candidates = append(candidates, node.DeepCopy())
 	}
 
-	return candidates, nil
+	return candidates, len(nodes) > 0, nil
 }

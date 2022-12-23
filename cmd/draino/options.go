@@ -11,6 +11,7 @@ import (
 
 // Options collects the program options/parameters
 type Options struct {
+	noLegacyNodeHandler         bool
 	debug                       bool
 	listen                      string
 	kubecfg                     string
@@ -85,6 +86,8 @@ type Options struct {
 	resetScopeLabel     bool
 	scopeAnalysisPeriod time.Duration
 
+	groupRunnerPeriod time.Duration
+
 	klogVerbosity int32
 
 	conditions         []string
@@ -104,6 +107,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.BoolVar(&opt.preprovisioningActivatedByDefault, "preprovisioning-by-default", false, "Set this flag to activate pre-provisioning by default for all nodes")
 	fs.BoolVar(&opt.pvcManagementByDefault, "pvc-management-by-default", false, "PVC management is automatically activated for a workload that do not use eviction++")
 	fs.BoolVar(&opt.resetScopeLabel, "reset-config-labels", false, "Reset the scope label on the nodes")
+	fs.BoolVar(&opt.noLegacyNodeHandler, "no-legacy-node-handler", false, "Deactivate draino legacy node handler")
 
 	fs.DurationVar(&opt.minEvictionTimeout, "min-eviction-timeout", kubernetes.DefaultMinEvictionTimeout, "Minimum time we wait to evict a pod. The pod terminationGracePeriod will be used if it is bigger.")
 	fs.DurationVar(&opt.evictionHeadroom, "eviction-headroom", kubernetes.DefaultEvictionOverhead, "Additional time to wait after a pod's termination grace period for it to have been deleted.")
@@ -118,6 +122,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.preprovisioningTimeout, "preprovisioning-timeout", kubernetes.DefaultPreprovisioningTimeout, "Timeout for a node to be preprovisioned before draining")
 	fs.DurationVar(&opt.preprovisioningCheckPeriod, "preprovisioning-check-period", kubernetes.DefaultPreprovisioningCheckPeriod, "Period to check if a node has been preprovisioned")
 	fs.DurationVar(&opt.scopeAnalysisPeriod, "scope-analysis-period", 5*time.Minute, "Period to run the scope analysis and generate metric")
+	fs.DurationVar(&opt.groupRunnerPeriod, "group-runner-period", 10*time.Second, "Period for running the group runner")
 
 	fs.StringSliceVar(&opt.nodeLabels, "node-label", []string{}, "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times")
 	fs.StringSliceVar(&opt.doNotEvictPodControlledBy, "do-not-evict-pod-controlled-by", []string{"", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet},
@@ -225,6 +230,8 @@ func (o *Options) Validate() error {
 	if o.suppliedConditions, err = kubernetes.ParseConditions(o.conditions); err != nil {
 		return fmt.Errorf("one of the conditions is not correctly formatted: %#v", err)
 	}
-
+	if o.groupRunnerPeriod < time.Second {
+		return fmt.Errorf("group runner period should be at least 1s")
+	}
 	return nil
 }

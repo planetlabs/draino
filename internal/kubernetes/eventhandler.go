@@ -40,7 +40,7 @@ const (
 	eventReasonCordonBlockedByLimit = "CordonBlockedByLimit"
 	eventReasonCordonSucceeded      = "CordonSucceeded"
 	eventReasonCordonFailed         = "CordonFailed"
-	eventReasonCordonSkip           = "CordonSkip"
+	EventReasonCordonSkip           = "CordonSkip"
 
 	eventReasonUncordonStarting  = "UncordonStarting"
 	eventReasonUncordonSucceeded = "UncordonSucceeded"
@@ -48,14 +48,14 @@ const (
 
 	eventReasonConditionFiltered = "ConditionFiltered"
 
-	eventReasonUncordonDueToPendingPodWithLocalPV = "PodBoundToNodeViaLocalPV"
+	EventReasonPendingPodWithLocalPV = "PodBoundToNodeViaLocalPV"
 
 	eventReasonDrainScheduled        = "DrainScheduled"
 	eventReasonDrainScheduleDeleted  = "DrainScheduleDeleted"
 	eventReasonDrainSchedulingFailed = "DrainSchedulingFailed"
-	eventReasonDrainStarting         = "DrainStarting"
-	eventReasonDrainSucceeded        = "DrainSucceeded"
-	eventReasonDrainFailed           = "DrainFailed"
+	EventReasonDrainStarting         = "DrainStarting"
+	EventReasonDrainSucceeded        = "DrainSucceeded"
+	EventReasonDrainFailed           = "DrainFailed"
 	eventReasonDrainConfig           = "DrainConfig"
 
 	eventReasonNodePreprovisioning          = "NodePreprovisioning"
@@ -336,7 +336,7 @@ func (h *DrainingResourceEventHandler) HandleNode(ctx context.Context, n *core.N
 	if HasDrainRetryFailedAnnotation(n) {
 		LogForVerboseNode(hlogger, n, "Failed Retry Annotation")
 		if n.Spec.Unschedulable {
-			h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonDrainFailed, "Drain still failing after multiple retries; uncordoning and ignoring the node")
+			h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, EventReasonDrainFailed, "Drain still failing after multiple retries; uncordoning and ignoring the node")
 			h.drainScheduler.DeleteSchedule(ctx, n)
 			h.uncordon(ctx, n)
 			logger.Info("Uncordon, Drain still failing after multiple retries.")
@@ -368,7 +368,7 @@ func (h *DrainingResourceEventHandler) HandleNode(ctx context.Context, n *core.N
 		return
 	}
 	badConditionsStr := GetConditionsTypes(badConditions)
-	if !atLeastOneConditionAcceptedByTheNode(badConditionsStr, n) {
+	if !AtLeastOneConditionAcceptedByTheNode(badConditionsStr, n) {
 		LogForVerboseNode(hlogger, n, "Conditions filter rejects that node")
 		h.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, eventReasonConditionFiltered, fmt.Sprintf("Proposed condition(s) {%s} are not eligible for that node", strings.Join(badConditionsStr, ",")))
 		return
@@ -384,8 +384,8 @@ func (h *DrainingResourceEventHandler) HandleNode(ctx context.Context, n *core.N
 		}
 		LogForVerboseNode(hlogger, n, fmt.Sprintf("podsWithPVCBoundToThatNode count %d", len(podsWithPVCBoundToThatNode)))
 		if len(podsWithPVCBoundToThatNode) > 0 {
-			LogForVerboseNode(logger, n, "Cordon Skip: Pod"+podsWithPVCBoundToThatNode[0].ResourceVersion+" need to be scheduled on node")
-			h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+podsWithPVCBoundToThatNode[0].Name+" needs that node due to local PV, not cordoning the node")
+			LogForVerboseNode(logger, n, "Cordon Skip: Pod"+podsWithPVCBoundToThatNode[0].Name+" need to be scheduled on node")
+			h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, EventReasonPendingPodWithLocalPV, "Pod "+podsWithPVCBoundToThatNode[0].Name+" needs that node due to local PV, not cordoning the node")
 			return
 		}
 
@@ -505,8 +505,8 @@ func (h *DrainingResourceEventHandler) checkCordonFilters(ctx context.Context, n
 			if !ok {
 				tags, _ := tag.New(tags, tag.Upsert(TagReason, reason))
 				StatRecordForEachCondition(tags, n, h.globalConfig.SuppliedConditions, MeasureSkippedCordon.M(1))
-				h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonCordonSkip, "Pod %s/%s is not in eviction scope", pod.Namespace, pod.Name)
-				h.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, eventReasonCordonSkip, "Pod is blocking cordon/drain for node %s", n.Name)
+				h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, EventReasonCordonSkip, "Pod %s/%s is not in eviction scope", pod.Namespace, pod.Name)
+				h.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, EventReasonCordonSkip, "Pod is blocking cordon/drain for node %s", n.Name)
 				h.logger.Debug("Cordon filter triggered", zap.String("node", n.Name), zap.String("pod", pod.Name))
 				return false
 			}
@@ -559,7 +559,7 @@ func (h *DrainingResourceEventHandler) shouldUncordon(ctx context.Context, n *co
 	}
 	if len(pods) > 0 {
 		logger.Info("Pod needs to be scheduled on node", zap.String("pod", pods[0].Name))
-		h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonUncordonDueToPendingPodWithLocalPV, "Pod "+pods[0].Namespace+"/"+pods[0].Name+" needs that node due to local PV, uncordoning the node")
+		h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, EventReasonPendingPodWithLocalPV, "Pod "+pods[0].Namespace+"/"+pods[0].Name+" needs that node due to local PV, uncordoning the node")
 		return true, nil
 	}
 

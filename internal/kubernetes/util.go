@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-logr/logr"
 	"strconv"
 	"strings"
 	"time"
@@ -410,5 +411,11 @@ func GetReadinessState(node *core.Node) (isNodeReady bool, err error) {
 func LogForVerboseNode(logger *zap.Logger, node *core.Node, msg string, fields ...zap.Field) {
 	if node.Annotations["draino/logs"] == "verbose" {
 		logger.Info(msg, append(fields, zap.String("node", node.Name))...)
+	}
+}
+
+func LogrForVerboseNode(logger logr.Logger, node *core.Node, msg string, fields ...interface{}) {
+	if node.Annotations["draino/logs"] == "verbose" {
+		logger.Info(msg, append(fields, "node", node.Name))
 	}
 }

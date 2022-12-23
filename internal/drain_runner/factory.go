@@ -34,7 +34,7 @@ func (factory *DrainRunnerFactory) BuildRunner() groups.Runner {
 		sharedIndexInformer: factory.conf.sharedIndexInformer,
 		runEvery:            factory.conf.rerunEvery,
 		pvProtector:         factory.conf.pvProtector,
-
-		preprocessors: factory.conf.preprocessors,
+		eventRecorder:       factory.conf.eventRecorder,
+		preprocessors:       factory.conf.preprocessors,
 	}
 }

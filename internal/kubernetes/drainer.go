@@ -22,6 +22,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"io/ioutil"
 	"net/http"
 	url2 "net/url"
@@ -650,8 +651,11 @@ func (d *APICordonDrainer) Drain(ctx context.Context, node *core.Node) error {
 		return err
 	}
 
-	if !n.Spec.Unschedulable {
-		TracedLoggerForNode(ctx, node, d.l).Info("Aborting drain because the node is not cordoned")
+	taint, hasNLATaint := k8sclient.GetNLATaint(n)
+	drainCandidate := hasNLATaint && taint.Value == k8sclient.TaintDraining
+
+	if !n.Spec.Unschedulable && !drainCandidate {
+		TracedLoggerForNode(ctx, node, d.l).Info("Aborting drain because the node is not cordoned, or drain-candidate")
 		return NodeIsNotCordonError{NodeName: node.Name}
 	}
 

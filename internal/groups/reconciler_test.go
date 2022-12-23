@@ -99,8 +99,11 @@ func TestNewGroupRegistry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			nodeFilter := func(o interface{}) bool {
+				return true
+			}
 			fakeClient := fake.NewClientBuilder().WithRuntimeObjects(tt.nodes...).Build()
-			gr := NewGroupRegistry(context.Background(), fakeClient, testLogger, nil, tt.keyGetter, tt.drainFactory, tt.drainCandidateFactory)
+			gr := NewGroupRegistry(context.Background(), fakeClient, testLogger, nil, tt.keyGetter, tt.drainFactory, tt.drainCandidateFactory, nodeFilter, func() bool { return true })
 
 			// inject all the objects
 			for _, o := range tt.nodes {

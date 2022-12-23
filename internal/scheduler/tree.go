@@ -68,8 +68,8 @@ type sortingTreeImpl[T any] struct {
 	currentNode *node[T]
 }
 
-// NewSortingTree creates and initializes a SortingTree
-func NewSortingTree[T any](items []T, sorters []LessFunc[T]) SortingTree[T] {
+// NewSortingTreeWithInitialization creates and initializes a SortingTree
+func NewSortingTreeWithInitialization[T any](items []T, sorters []LessFunc[T]) SortingTree[T] {
 	t := &sortingTreeImpl[T]{}
 	t.Initialize(items, sorters)
 	return t

@@ -34,6 +34,9 @@ type GroupRegistry struct {
 	keyGetter                 GroupKeyGetter
 	groupDrainRunner          *GroupsRunner
 	groupDrainCandidateRunner *GroupsRunner
+	nodeFilteringFunc         kubernetes.NodeLabelFilterFunc
+
+	hasSyncedFunc func() bool
 }
 
 func NewGroupRegistry(
@@ -43,6 +46,8 @@ func NewGroupRegistry(
 	eventRecorder kubernetes.EventRecorder,
 	keyGetter GroupKeyGetter,
 	drainFactory, drainCandidateFactory RunnerFactory,
+	nodeFilteringFunc kubernetes.NodeLabelFilterFunc,
+	hasSyncedFunc func() bool,
 ) *GroupRegistry {
 	return &GroupRegistry{
 		kclient:                   kclient,
@@ -52,17 +57,38 @@ func NewGroupRegistry(
 		groupDrainRunner:          NewGroupsRunner(ctx, drainFactory, logger, "drain"),
 		groupDrainCandidateRunner: NewGroupsRunner(ctx, drainCandidateFactory, logger, "drain_candidate"),
 		eventRecorder:             eventRecorder,
+		nodeFilteringFunc:         nodeFilteringFunc,
+		hasSyncedFunc:             hasSyncedFunc,
 	}
 }
 
 // Reconcile register the node in the reverse index per ProviderIP
 func (r *GroupRegistry) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	if !r.hasSyncedFunc() {
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
 	node := &v1.Node{}
 	if err := r.kclient.Get(ctx, req.NamespacedName, node); err != nil {
 		if errors.IsNotFound(err) {
 			return reconcile.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get Node Fails: %v", err)
+	}
+
+	// We have to be sure that the node has a complete dataset before attempting any group creation
+	if time.Now().Sub(node.GetCreationTimestamp().Time) < r.nodeWarmUpDelay {
+		return ctrl.Result{
+			Requeue:      true,
+			RequeueAfter: r.nodeWarmUpDelay,
+		}, nil
+	}
+
+	// discard all node that do not match the node filtering function
+	if r.nodeFilteringFunc != nil && !r.nodeFilteringFunc(node) {
+		return ctrl.Result{}, nil
 	}
 
 	if valid, reason := r.keyGetter.ValidateGroupKey(node); !valid {
@@ -85,13 +111,12 @@ func (r *GroupRegistry) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1.Node{}).
 		WithEventFilter(
 			predicate.Funcs{
-				CreateFunc:  func(event.CreateEvent) bool { return false }, // to early in the process the node might not be complete
-				DeleteFunc:  func(event.DeleteEvent) bool { return false }, // we don't care about delete, the runner will stop if the groups is empty
+				CreateFunc: func(evt event.CreateEvent) bool {
+					return true
+				},
+				DeleteFunc:  func(event.DeleteEvent) bool { return false },
 				GenericFunc: func(event.GenericEvent) bool { return false },
 				UpdateFunc: func(evt event.UpdateEvent) bool {
-					if time.Now().Sub(evt.ObjectNew.GetCreationTimestamp().Time) < r.nodeWarmUpDelay {
-						return false // to early in the process the node might not be complete
-					}
 					return true
 				},
 			},

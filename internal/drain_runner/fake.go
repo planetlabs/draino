@@ -91,5 +91,6 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 		runEvery:            opts.RerunEvery,
 		preprocessors:       opts.Preprocessors,
 		pvProtector:         opts.PVProtector,
+		eventRecorder:       &kubernetes.NoopEventRecorder{},
 	}, nil
 }

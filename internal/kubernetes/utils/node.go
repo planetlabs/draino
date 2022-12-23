@@ -12,3 +12,11 @@ func FindNodeCondition(t corev1.NodeConditionType, node *corev1.Node) (pos int, 
 	}
 	return
 }
+
+func NodesNames(nodes []*corev1.Node) []string {
+	names := make([]string, len(nodes))
+	for i, c := range nodes {
+		names[i] = c.Name
+	}
+	return names
+}

@@ -73,3 +73,16 @@ func (e *eventRecorder) PersistentVolumeClaimEventf(ctx context.Context, obj *co
 
 	e.eventRecorder.Eventf(obj, eventType, reason, messageFmt, args...)
 }
+
+type NoopEventRecorder struct{}
+
+func (n NoopEventRecorder) NodeEventf(ctx context.Context, obj *core.Node, eventtype, reason, messageFmt string, args ...interface{}) {
+}
+func (n NoopEventRecorder) PodEventf(ctx context.Context, obj *core.Pod, eventtype, reason, messageFmt string, args ...interface{}) {
+}
+func (n NoopEventRecorder) PersistentVolumeEventf(ctx context.Context, obj *core.PersistentVolume, eventtype, reason, messageFmt string, args ...interface{}) {
+}
+func (n NoopEventRecorder) PersistentVolumeClaimEventf(ctx context.Context, obj *core.PersistentVolumeClaim, eventtype, reason, messageFmt string, args ...interface{}) {
+}
+
+var _ EventRecorder = &NoopEventRecorder{}

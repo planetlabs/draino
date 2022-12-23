@@ -337,7 +337,7 @@ func (d *DrainSchedules) newSchedule(ctx context.Context, node *v1.Node, when ti
 		if d.globalLocker != nil {
 			if locked, reason := d.globalLocker.IsBlocked(); locked {
 				log.Info("Drain cancelled due to globalLock", zap.String("reason", reason), zap.String("node", node.GetName()))
-				d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
+				d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, EventReasonDrainFailed, "Drain cancelled due to globalLock: %s", reason)
 				return
 			}
 		}
@@ -389,7 +389,7 @@ func (d *DrainSchedules) newSchedule(ctx context.Context, node *v1.Node, when ti
 		}
 
 		// Node drain
-		d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonDrainStarting, "Draining node")
+		d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, EventReasonDrainStarting, "Draining node")
 		if err := d.drainer.Drain(ctx, node); err != nil {
 			d.handleDrainFailure(ctx, sched, log, err, tags, node)
 			return
@@ -398,9 +398,9 @@ func (d *DrainSchedules) newSchedule(ctx context.Context, node *v1.Node, when ti
 		log.Info("Drained")
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 		StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
-		d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, eventReasonDrainSucceeded, "Drained node")
+		d.eventRecorder.NodeEventf(ctx, node, core.EventTypeNormal, EventReasonDrainSucceeded, "Drained node")
 		if err := d.drainer.MarkDrain(ctx, node, when, sched.finish, false, failedCount); err != nil {
-			d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonDrainFailed, "Failed to place drain condition following success: %v", err)
+			d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, EventReasonDrainFailed, "Failed to place drain condition following success: %v", err)
 			log.Error(fmt.Sprintf("Failed to place condition following drain success : %v", err))
 		}
 	})
@@ -414,7 +414,7 @@ func (d *DrainSchedules) handleDrainFailure(ctx context.Context, sched *schedule
 	log.Info("Failed to drain", zap.Error(drainError))
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
 	StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
-	d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonDrainFailed, "Drain failed: %v", drainError)
+	d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, EventReasonDrainFailed, "Drain failed: %v", drainError)
 	if err := d.drainer.MarkDrain(ctx, node, sched.when, sched.finish, true, sched.failedCount); err != nil {
 		log.Error("Failed to place condition following drain failure")
 	}

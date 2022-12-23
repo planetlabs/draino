@@ -98,7 +98,7 @@ func TestBucketSlice(t *testing.T) {
 func TestNewSortingTree2(t *testing.T) {
 	By10 := func(a, b int) bool { return a/10 < b/10 }
 	ReverseOnMod10 := func(a, b int) bool { return a%10 > b%10 }
-	tree := NewSortingTree(
+	tree := NewSortingTreeWithInitialization(
 		[]int{19, 55, 3, 13, 2, 21, 33, 15, 56, 21},
 		[]LessFunc[int]{By10, ReverseOnMod10})
 

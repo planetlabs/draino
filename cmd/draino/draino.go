@@ -19,16 +19,22 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/DataDog/compute-go/kubeclient"
+	"github.com/DataDog/compute-go/version"
+	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/drain_runner"
+	"github.com/planetlabs/draino/internal/groups"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	protector "github.com/planetlabs/draino/internal/protector"
+	"github.com/spf13/cobra"
+	"k8s.io/utils/clock"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sort"
+	"strings"
 	"time"
-
-	"github.com/DataDog/compute-go/kubeclient"
-	"github.com/DataDog/compute-go/version"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	"github.com/spf13/cobra"
 
 	"github.com/DataDog/compute-go/controllerruntime"
 	"github.com/DataDog/compute-go/infraparameters"
@@ -52,7 +58,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
@@ -74,9 +79,9 @@ func main() {
 	go http.ListenAndServe("localhost:8085", mux) // for go profiler
 
 	// Read application flags
-	options, fs := optionsFromFlags()
-	config := &kubeclient.Config{}
-	kubeclient.BindConfigToFlags(config, fs)
+	cfg, fs := controllerruntime.ConfigFromFlags(false, false)
+	options, optFlags := optionsFromFlags()
+	fs.AddFlagSet(optFlags)
 
 	root := &cobra.Command{
 		Short:        "disruption-budget-manager",
@@ -99,7 +104,6 @@ func main() {
 		if options.debug {
 			log, err = zap.NewDevelopment()
 		}
-
 		drainoklog.InitializeKlog(options.klogVerbosity)
 		drainoklog.RedirectToLogger(log)
 
@@ -107,15 +111,9 @@ func main() {
 
 		DrainoLegacyMetrics(options, log)
 
-		err = k8sclient.DecorateWithRateLimiter(config, "default")
-		c, err := kubeclient.NewKubeConfig(config)
-		if err != nil {
-			return fmt.Errorf("failed create Kubernetes client configuration: %v", err)
-		}
-
-		cs, err := client.NewForConfig(c)
-		if err != nil {
-			return fmt.Errorf("failed create Kubernetes client: %v", err)
+		cs, err2 := GetKubernetesClientSet(&cfg.KubeClientConfig)
+		if err2 != nil {
+			return err2
 		}
 
 		// use a Go context so we can tell the leaderelection and other pieces when we want to step down
@@ -224,16 +222,17 @@ func main() {
 			PVCManagementEnableIfNoEvictionUrl: options.pvcManagementByDefault,
 		}
 
+		drainerSkipPodFilter := kubernetes.NewPodFiltersIgnoreCompletedPods(
+			kubernetes.NewPodFiltersIgnoreShortLivedPods(
+				kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)),
+				runtimeObjectStoreImpl, options.shortLivedPodAnnotations...))
+
 		cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
 			eventRecorder,
 			kubernetes.MaxGracePeriod(options.minEvictionTimeout),
 			kubernetes.EvictionHeadroom(options.evictionHeadroom),
 			kubernetes.WithSkipDrain(options.skipDrain),
-			kubernetes.WithPodFilter(
-				kubernetes.NewPodFiltersIgnoreCompletedPods(
-					kubernetes.NewPodFiltersIgnoreShortLivedPods(
-						kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)),
-						runtimeObjectStoreImpl, options.shortLivedPodAnnotations...))),
+			kubernetes.WithPodFilter(drainerSkipPodFilter),
 			kubernetes.WithCordonLimiter(cordonLimiter),
 			kubernetes.WithNodeReplacementLimiter(nodeReplacementLimiter),
 			kubernetes.WithStorageClassesAllowingDeletion(options.storageClassesAllowingVolumeDeletion),
@@ -242,7 +241,8 @@ func main() {
 			kubernetes.WithAPICordonDrainerLogger(log),
 		)
 
-		podFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
+		// TODO do analysis and check if   drainerSkipPodFilter = NewPodFiltersIgnoreShortLivedPods(cordonPodFilteringFunc) ?
+		cordonPodFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
 			kubernetes.NewPodFiltersWithOptInFirst(
 				kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
 
@@ -257,7 +257,7 @@ func main() {
 			kubernetes.WithDurationWithCompletedStatusBeforeReplacement(options.durationBeforeReplacement),
 			kubernetes.WithDrainGroups(options.drainGroupLabelKey),
 			kubernetes.WithGlobalConfigHandler(globalConfig),
-			kubernetes.WithCordonPodFilter(podFilteringFunc),
+			kubernetes.WithCordonPodFilter(cordonPodFilteringFunc),
 			kubernetes.WithGlobalBlocking(globalLocker),
 			kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: options.preprovisioningTimeout, CheckPeriod: options.preprovisioningCheckPeriod, AllNodesByDefault: options.preprovisioningActivatedByDefault}))
 
@@ -299,7 +299,13 @@ func main() {
 			log.Sugar().Fatalf("Failed to parse node label expression: %v", err)
 		}
 
-		nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
+		if options.noLegacyNodeHandler {
+			nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: func(obj interface{}) bool {
+				return false
+			}, Handler: nil}
+		} else {
+			nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
+		}
 		nodes := kubernetes.NewNodeWatch(ctx, cs, nodeLabelFilter)
 		runtimeObjectStoreImpl.NodesStore = nodes
 		// storeCloserFunc := runtimeObjectStoreImpl.Run(log)
@@ -312,7 +318,7 @@ func main() {
 			return fmt.Errorf("failed to get hostname: %v", err)
 		}
 
-		scopeObserver := kubernetes.NewScopeObserver(cs, globalConfig, runtimeObjectStoreImpl, options.scopeAnalysisPeriod, podFilteringFunc,
+		scopeObserver := kubernetes.NewScopeObserver(cs, globalConfig, runtimeObjectStoreImpl, options.scopeAnalysisPeriod, cordonPodFilteringFunc,
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, options.optInPodAnnotations...),
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, options.cordonProtectedPodAnnotations...),
 			nodeLabelFilterFunc, log)
@@ -334,6 +340,15 @@ func main() {
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create lock: %v", err)
+		}
+
+		filters := filtersDefinitions{
+			cordonPodFilter: cordonPodFilteringFunc,
+			drainPodFilter:  drainerSkipPodFilter,
+			nodeLabelFilter: nodeLabelFilterFunc,
+		}
+		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log); err != nil {
+			return fmt.Errorf("failed to bootstrap the controller runtime section: %v", err)
 		}
 
 		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
@@ -365,6 +380,22 @@ func main() {
 
 }
 
+func GetKubernetesClientSet(config *kubeclient.Config) (*client.Clientset, error) {
+	if err := k8sclient.DecorateWithRateLimiter(config, "default"); err != nil {
+		return nil, err
+	}
+	c, err := kubeclient.NewKubeConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed create Kubernetes client configuration: %v", err)
+	}
+
+	cs, err := client.NewForConfig(c)
+	if err != nil {
+		return nil, fmt.Errorf("failed create Kubernetes client: %v", err)
+	}
+	return cs, nil
+}
+
 type httpRunner struct {
 	address string
 	logger  *zap.Logger
@@ -392,50 +423,123 @@ func (r *httpRunner) Run(stop <-chan struct{}) {
 	cancel()
 }
 
+// TODO should we put this in globalConfig ?
+type filtersDefinitions struct {
+	cordonPodFilter kubernetes.PodFilterFunc
+	drainPodFilter  kubernetes.PodFilterFunc
+
+	nodeLabelFilter kubernetes.NodeLabelFilterFunc
+}
+
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
-func controllerRuntimeBootstrap() {
-	cfg, fs := controllerruntime.ConfigFromFlags(false, false)
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		fmt.Printf("error getting arguments: %v\n", err)
-		os.Exit(1)
-	}
+func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filters filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger) error {
+
 	cfg.InfraParam.UpdateWithKubeContext(cfg.KubeClientConfig.ConfigFile, "")
 	validationOptions := infraparameters.GetValidateAll()
 	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject = false, false, false
 	if err := cfg.InfraParam.Validate(validationOptions); err != nil {
-		fmt.Printf("infra param validation error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("infra param validation error: %v\n", err)
 	}
 
 	cfg.ManagerOptions.Scheme = runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(cfg.ManagerOptions.Scheme); err != nil {
-		fmt.Printf("error while adding client-go scheme: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error while adding client-go scheme: %v\n", err)
 	}
 	if err := core.AddToScheme(cfg.ManagerOptions.Scheme); err != nil {
-		fmt.Printf("error while adding v1 scheme: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error while adding v1 scheme: %v\n", err)
 	}
 
 	mgr, logger, _, err := controllerruntime.NewManager(cfg)
 	if err != nil {
-		fmt.Printf("error while creating manager: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error while creating manager: %v\n", err)
 	}
 
 	indexer, err := index.New(mgr.GetClient(), mgr.GetCache(), logger)
 	if err != nil {
-		fmt.Printf("error while initializing informer: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error while initializing informer: %v\n", err)
 	}
 
-	// just to consume analyzer
-	_ = analyser.NewPDBAnalyser(indexer)
-	_ = drain.NewDrainSimulator(
-		context.Background(),
-		mgr.GetClient(),
-		indexer,
-		func(p core.Pod) (pass bool, reason string, err error) { return true, "", nil },
+	staticRetryStrategy := &drain.StaticRetryStrategy{
+		AlertThreashold: 7,
+		Delay:           options.schedulingRetryBackoffDelay,
+	}
+	retryWall, errRW := drain.NewRetryWall(mgr.GetClient(), mgr.GetLogger(), staticRetryStrategy)
+	if errRW != nil {
+		return errRW
+	}
+
+	ctx := context.Background()
+
+	cs, err := GetKubernetesClientSet(&cfg.KubeClientConfig)
+	if err != nil {
+		return err
+	}
+
+	b := record.NewBroadcaster()
+	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")})
+	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: kubernetes.Component})
+	eventRecorder := kubernetes.NewEventRecorder(k8sEventRecorder)
+
+	pvProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
+
+	drainRunnerFactory, err := drain_runner.NewFactory(
+		drain_runner.WithKubeClient(mgr.GetClient()),
+		drain_runner.WithClock(&clock.RealClock{}),
+		drain_runner.WithDrainer(drainer),
+		drain_runner.WithPreprocessors(), // TODO when we will add the pre-provisioning pre-processor
+		drain_runner.WithRerun(options.groupRunnerPeriod),
+		drain_runner.WithRetryWall(retryWall),
+		drain_runner.WithLogger(mgr.GetLogger()),
+		drain_runner.WithSharedIndexInformer(indexer),
+		drain_runner.WithPVProtector(pvProtector),
+		drain_runner.WithEventRecorder(eventRecorder),
 	)
-	logger.Info("ControllerRuntime bootstrap")
+	if err != nil {
+		return err
+	}
+
+	drainCandidateRunnerFactory, err := candidate_runner.NewFactory(
+		candidate_runner.WithDryRun(true), // TODO of course we want to remove that when we are ready
+		candidate_runner.WithKubeClient(mgr.GetClient()),
+		candidate_runner.WithClock(&clock.RealClock{}),
+		candidate_runner.WithRerun(options.groupRunnerPeriod),
+		candidate_runner.WithRetryWall(retryWall),
+		candidate_runner.WithLogger(mgr.GetLogger()),
+		candidate_runner.WithSharedIndexInformer(indexer),
+		candidate_runner.WithCordonPodFilter(filters.cordonPodFilter),
+		candidate_runner.WithEventRecorder(eventRecorder),
+		candidate_runner.WithRuntimeObjectStore(store),
+		candidate_runner.WithNodeLabelsFilterFunction(filters.nodeLabelFilter),
+		candidate_runner.WithGlobalConfig(globalConfig),
+		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
+		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filters.drainPodFilter)),
+		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{}),
+		candidate_runner.WithPVProtector(pvProtector),
+		candidate_runner.WithDryRun(options.dryRun),
+	)
+	if err != nil {
+		return err
+	}
+
+	keyGetter := groups.NewGroupKeyFromNodeMetadata(strings.Split(options.drainGroupLabelKey, ","), []string{kubernetes.DrainGroupAnnotation}, kubernetes.DrainGroupOverrideAnnotation)
+
+	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filters.nodeLabelFilter, store.HasSynced)
+	if err = groupRegistry.SetupWithManager(mgr); err != nil {
+		logger.Error(err, "failed to setup groupRegistry")
+		return err
+	}
+
+	logger.Info("ControllerRuntime bootstrap done, running the manager")
+	// Starting Manager
+	go func() {
+		logger.Info("Starting manager")
+		if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+			logger.Error(err, "Controller Manager did exit with error")
+			panic("Manager finished with error: " + err.Error()) // TODO remove this that is purely for testing and identifying an early exit of the code
+		}
+		logger.Info("Manager finished without error")
+		panic("Manager finished normally") // TODO remove this that is purely for testing and identifying an early exit of the code
+	}()
+
+	return nil
 }
