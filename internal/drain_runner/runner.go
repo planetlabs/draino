@@ -43,8 +43,14 @@ type drainRunner struct {
 
 func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 	ctx, cancel := context.WithCancel(info.Context)
+
+	runner.logger = runner.logger.WithValues("groupKey", info.Key)
+
 	// run an endless loop until there are no drain candidates left
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
+
+		runner.handleLeftOverDraining(ctx, info)
+
 		if emptyGroup := runner.handleGroup(ctx, info); emptyGroup {
 			cancel()
 			return
@@ -53,21 +59,45 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 	return nil
 }
 
+// handleLeftOverDraining perform cleanup of nodes blocked in `draining` phase.
+// If the controller was restarted, it is possible that some nodes were left
+// with a taint `draining`. They would be blocked with that taint if we do nothing.
+// Here we are searching for such cases and we are sending them back to the pool by removing the taint.
+// These nodes might become candidate again in a near future.
+func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *groups.RunnerInfo) {
+	draining, _, err := runner.getNodesForNLATaint(ctx, info.Key, k8sclient.TaintDraining)
+	if err != nil {
+		runner.logger.Error(err, "cannot get draining nodes for group")
+		return
+	}
+
+	if len(draining) > 0 {
+		runner.logger.Info("Found some nodes that were stuck in draining", "count", len(draining))
+	}
+	// TODO add metric to track amount of nodes blocked in draining
+	for _, n := range draining {
+		if errRmTaint := runner.removeFailedCandidate(ctx, n, "Node stuck in draining (controller restart?)"); errRmTaint != nil {
+			// we just log the error, it will come back at next iteration
+			runner.logger.Error(err, "Failed to remove 'draining' taint", "node", n.Name)
+		}
+	}
+}
+
 func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerInfo) (emptyGroup bool) {
-	candidates, groupHasAtLeastOneNode, err := runner.getDrainCandidates(ctx, info.Key)
+	candidates, groupHasAtLeastOneNode, err := runner.getNodesForNLATaint(ctx, info.Key, k8sclient.TaintDrainCandidate)
 	// in case of an error we'll just try it again
 	if err != nil {
-		runner.logger.Error(err, "cannot get drain candidates for group", "group_key", info.Key)
+		runner.logger.Error(err, "cannot get drain candidates for group")
 		return
 	}
 	// TODO add metric to track amount of candidates
 	if !groupHasAtLeastOneNode {
 		// If there are no candidates left, we'll stop the loop
-		runner.logger.Info("no node in group left, stopping.", "group_key", info.Key)
+		runner.logger.Info("no node in group left, stopping.")
 		emptyGroup = true
 		return
 	}
-	runner.logger.Info("HandleGroup", "candidatesCount", len(candidates))
+
 	for _, candidate := range candidates {
 		if err := runner.handleCandidate(info.Context, candidate); err != nil {
 			runner.logger.Error(err, "error during candidate evaluation", "node_name", candidate.Name)
@@ -90,6 +120,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, candidate *corev
 		return err
 	}
 
+	kubernetes.LogrForVerboseNode(runner.logger, candidate, "Node is candidate for drain, checking pre-activities")
 	allPreprocessorsDone := runner.checkPreprocessors(candidate)
 	if !allPreprocessorsDone {
 		runner.logger.Info("waiting for preprocessors to be done before draining", "node_name", candidate.Name)
@@ -163,7 +194,8 @@ func (runner *drainRunner) removeFailedCandidate(ctx context.Context, candidate 
 	return err
 }
 
-func (runner *drainRunner) getDrainCandidates(ctx context.Context, key groups.GroupKey) ([]*corev1.Node, bool, error) {
+// getNodesForNLATaint return nodes that match the taint. The boolean is set to true if some nodes are still present in the group, regardless of the taint.
+func (runner *drainRunner) getNodesForNLATaint(ctx context.Context, key groups.GroupKey, taintValue k8sclient.DrainTaintValue) ([]*corev1.Node, bool, error) {
 	nodes, err := index.GetFromIndex[corev1.Node](ctx, runner.sharedIndexInformer, groups.SchedulingGroupIdx, string(key))
 	if err != nil {
 		return nil, false, err
@@ -176,12 +208,10 @@ func (runner *drainRunner) getDrainCandidates(ctx context.Context, key groups.Gr
 		if !exist {
 			continue
 		}
-		// We only care about nodes that are "drain candidates" all the other states should be ignored
-		if taint.Value != k8sclient.TaintDrainCandidate {
+		if taint.Value != taintValue {
 			continue
 		}
-		candidates = append(candidates, node.DeepCopy())
+		candidates = append(candidates, node)
 	}
-
 	return candidates, len(nodes) > 0, nil
 }

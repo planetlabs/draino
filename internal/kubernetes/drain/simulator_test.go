@@ -144,6 +144,8 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 
 			drainable, reason, err := simulator.SimulateDrain(context.Background(), &tt.Node)
 			sort.Strings(tt.Reason)
+			sort.Strings(reason)
+
 			assert.Equal(t, tt.IsDrainable, drainable, "Node drainability is not as expected")
 			assert.Equal(t, tt.Reason, reason, "Reason is not as expected")
 		})

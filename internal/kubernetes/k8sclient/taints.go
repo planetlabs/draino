@@ -45,7 +45,7 @@ func AddNLATaint(ctx context.Context, client client.Client, node *corev1.Node, n
 // After the update is done, it will return the updated version of the node, which can be used for further updates.
 func RemoveNLATaint(ctx context.Context, client client.Client, node *corev1.Node) (*corev1.Node, error) {
 	// In this case neither the taint value nor the timestamp do really matter
-	taint := CreateNLATaint(TaintDrained, time.Time{})
+	taint := CreateNLATaint(DrainTaintValue("whatever"), time.Time{})
 	newNode, updated, err := taints.RemoveTaint(node, taint)
 	if err != nil {
 		return nil, err
