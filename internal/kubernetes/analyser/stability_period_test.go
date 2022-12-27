@@ -403,11 +403,11 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			if err != nil {
 				t.Fatalf("can't create fakeIndexer: %#v", err)
 			}
-			d := NewDrainBufferChecker(context.Background(), testLogger, wrapper.GetManagerClient(), er, store, *fakeIndexer,
-				DrainBufferCheckerConfiguration{
-					DefaultDrainBuffer: tt.defaultDrainBuffer,
+			d := NewStabilityPeriodChecker(context.Background(), testLogger, wrapper.GetManagerClient(), er, store, *fakeIndexer,
+				StabilityPeriodCheckerConfiguration{
+					DefaultStabilityPeriod: tt.defaultDrainBuffer,
 				})
-			assert.Equalf(t, tt.want, d.DrainBufferAcceptsDrain(context.Background(), tt.node, now), "DrainBufferAcceptsDrain bad result")
+			assert.Equalf(t, tt.want, d.StabilityPeriodAcceptsDrain(context.Background(), tt.node, now), "DrainBufferAcceptsDrain bad result")
 		})
 	}
 }

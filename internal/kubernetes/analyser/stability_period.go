@@ -3,6 +3,10 @@ package analyser
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
@@ -12,46 +16,44 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sort"
-	"strings"
-	"time"
 )
 
 const (
-	DrainBufferMisconfigured = "DrainBufferMisconfigured"
+	StabilityPeriodAnnotationKey = "node-lifecycle.datadoghq.com/stability-period"
+	StabilityPeriodMisconfigured = "StabilityPeriodMisconfigured"
 
 	DefaultEstimatedRecoveryRecordTTL = 15 * time.Minute
 	DefaultCacheCleanPeriod           = 3 * time.Minute
-	DefaultDrainBufferLength          = 3 * time.Minute
+	DefaultStabilityPeriodLength      = 3 * time.Minute
 )
 
-// DrainBufferChecker, can a node be drain and respect drain buffer configuration
-type DrainBufferChecker interface {
-	// DrainBufferAcceptsDrain check if the node can be drained, would we respect all the drain buffer set on the node or on the pods
+// StabilityPeriodChecker, can a node be drain and respect stability period configuration
+type StabilityPeriodChecker interface {
+	// StabilityPeriodAcceptsDrain check if the node can be drained, would we respect all the stability periods set on the node or on the pods
 	// the time value passed should represent "Now" on a live system. We are passing it to allow simulation (future) and ease unittesting
-	DrainBufferAcceptsDrain(context.Context, *v1.Node, time.Time) bool
+	StabilityPeriodAcceptsDrain(context.Context, *v1.Node, time.Time) bool
 }
 
-// drainBufferChecker, implementation for DrainBufferChecker
-// It retrieves the configuration for drain-buffer on node and pods. It compares this with the pdb transition changes.
-type drainBufferChecker struct {
-	logger            logr.Logger
-	kclient           client.Client
-	eventRecorder     kubernetes.EventRecorder
-	store             kubernetes.RuntimeObjectStore
-	indexer           index.Indexer
-	drainBufferConfig DrainBufferCheckerConfiguration
+// stabilityPeriodChecker, implementation for StabilityPeriodChecker
+// It retrieves the configuration for stability period on node and pods. It compares this with the pdb transition changes.
+type stabilityPeriodChecker struct {
+	logger                logr.Logger
+	kclient               client.Client
+	eventRecorder         kubernetes.EventRecorder
+	store                 kubernetes.RuntimeObjectStore
+	indexer               index.Indexer
+	stabilityPeriodConfig StabilityPeriodCheckerConfiguration
 
 	// cacheRecoveryTime for a combination {Node+Pods} this cache store the estimated recoveryTime
 	// Note the if a pod is delete from the node the key can't be used anymore, so that cacheclean will remove this key when the TTL expire
 	cacheRecoveryTime cache.ThreadSafeStore
 }
 
-var _ DrainBufferChecker = &drainBufferChecker{}
+var _ StabilityPeriodChecker = &stabilityPeriodChecker{}
 
-// drainBufferInfo, the drain buffer configuration can be set on the node, on the pod or the controller of the pod.
+// stabilityPeriodInfo, the stability period configuration can be set on the node, on the pod or the controller of the pod.
 // this structure allow us to carry the value and the source of the configuration
-type drainBufferInfo struct {
+type stabilityPeriodInfo struct {
 	length     time.Duration
 	sourceType string
 	sourceName string
@@ -63,10 +65,10 @@ type recoveryEstimationDate struct {
 	ttl               time.Time
 }
 
-// DrainBufferCheckerConfiguration Configuration used in the constructor of DrainBufferChecker
-type DrainBufferCheckerConfiguration struct {
-	// DefaultDrainBuffer, default value to be used if no configuration is given on pods or nodes
-	DefaultDrainBuffer *time.Duration
+// StabilityPeriodCheckerConfiguration Configuration used in the constructor of StabilityPeriodChecker
+type StabilityPeriodCheckerConfiguration struct {
+	// DefaultStabilityPeriod, default value to be used if no configuration is given on pods or nodes
+	DefaultStabilityPeriod *time.Duration
 	// EstimatedRecoveryRecordTTL, TTL value to be used to remove the record from the cache
 	EstimatedRecoveryRecordTTL *time.Duration
 	// CacheCleanupPeriod, how often we should attempt the cache cleanup
@@ -80,36 +82,36 @@ func defaultDuration(d **time.Duration, duration time.Duration) {
 	}
 }
 
-func (c *DrainBufferCheckerConfiguration) applyDefault() {
-	defaultDuration(&c.DefaultDrainBuffer, DefaultDrainBufferLength)
+func (c *StabilityPeriodCheckerConfiguration) applyDefault() {
+	defaultDuration(&c.DefaultStabilityPeriod, DefaultStabilityPeriodLength)
 	defaultDuration(&c.EstimatedRecoveryRecordTTL, DefaultEstimatedRecoveryRecordTTL)
 	defaultDuration(&c.CacheCleanupPeriod, DefaultCacheCleanPeriod)
 }
 
-// NewDrainBufferChecker constructor for the DrainBufferChecker
-func NewDrainBufferChecker(ctx context.Context, logger logr.Logger, kclient client.Client,
+// NewStabilityPeriodChecker constructor for the StabilityPeriodChecker
+func NewStabilityPeriodChecker(ctx context.Context, logger logr.Logger, kclient client.Client,
 	eventRecorder kubernetes.EventRecorder, store kubernetes.RuntimeObjectStore, indexer index.Indexer,
-	config DrainBufferCheckerConfiguration) DrainBufferChecker {
+	config StabilityPeriodCheckerConfiguration) StabilityPeriodChecker {
 	config.applyDefault()
 
-	d := &drainBufferChecker{
-		logger:            logger,
-		kclient:           kclient,
-		eventRecorder:     eventRecorder,
-		store:             store,
-		indexer:           indexer,
-		drainBufferConfig: config,
-		cacheRecoveryTime: cache.NewThreadSafeStore(nil, nil),
+	s := &stabilityPeriodChecker{
+		logger:                logger,
+		kclient:               kclient,
+		eventRecorder:         eventRecorder,
+		store:                 store,
+		indexer:               indexer,
+		stabilityPeriodConfig: config,
+		cacheRecoveryTime:     cache.NewThreadSafeStore(nil, nil),
 	}
 
-	go d.runCacheCleanup(ctx)
+	go s.runCacheCleanup(ctx)
 
-	return d
+	return s
 }
 
 // runCacheCleanup, delete all the record with an expired TTL
-func (d *drainBufferChecker) runCacheCleanup(ctx context.Context) {
-	logger := d.logger.WithName("drain-buffer-cache")
+func (d *stabilityPeriodChecker) runCacheCleanup(ctx context.Context) {
+	logger := d.logger.WithName("stability-period-cache")
 	logger.Info("starting cache cleanup")
 	defer logger.Info("stopping cache cleanup")
 	wait.Until(func() {
@@ -135,72 +137,72 @@ func (d *drainBufferChecker) runCacheCleanup(ctx context.Context) {
 			d.cacheRecoveryTime.Delete(k)
 		}
 	},
-		*d.drainBufferConfig.CacheCleanupPeriod,
+		*d.stabilityPeriodConfig.CacheCleanupPeriod,
 		ctx.Done())
 }
 
-// getDrainBuffersConfigurations retrieve the drain-buffers on the node and on the pods of the nodes.
+// getStabilityPeriodsConfigurations retrieve the stability-periods on the node and on the pods of the nodes.
 // if no configuration is found the default value is being used. The result is indexed by podKey
-func (d *drainBufferChecker) getDrainBuffersConfigurations(ctx context.Context, node *v1.Node) map[string]drainBufferInfo {
-	drainBufferNode := drainBufferInfo{
+func (d *stabilityPeriodChecker) getStabilityPeriodsConfigurations(ctx context.Context, node *v1.Node) map[string]stabilityPeriodInfo {
+	stabilityPeriodNode := stabilityPeriodInfo{
 		sourceType: "user/node",
 		sourceName: node.Name,
 	}
 	var found bool
-	if drainBufferNode.length, found = d.getNodeDrainBufferConfiguration(ctx, node); !found {
-		drainBufferNode.length = *d.drainBufferConfig.DefaultDrainBuffer
-		drainBufferNode.sourceType = "default/node"
+	if stabilityPeriodNode.length, found = d.getNodeStabilityPeriodConfiguration(ctx, node); !found {
+		stabilityPeriodNode.length = *d.stabilityPeriodConfig.DefaultStabilityPeriod
+		stabilityPeriodNode.sourceType = "default/node"
 	}
 
-	buffers := map[string]drainBufferInfo{}
+	periods := map[string]stabilityPeriodInfo{}
 
 	pods, err := d.indexer.GetPodsByNode(ctx, node.Name)
 	if err != nil {
 		d.logger.Error(err, "Failed to get pods for node", "node", node.Name)
-		return buffers
+		return periods
 	}
 
 	for _, p := range pods {
-		drainBufferPod := drainBufferNode // inherit from the node
-		podDrainBufferConfig, found := d.getPodDrainBufferConfiguration(ctx, p)
-		if found && podDrainBufferConfig > drainBufferPod.length {
-			drainBufferPod.length = podDrainBufferConfig
-			drainBufferPod.sourceType = "user/pod"
-			drainBufferPod.sourceName = p.Namespace + "/" + p.Name
+		stabilityPeriodPod := stabilityPeriodNode // inherit from the node
+		podStabilityPeriodConfig, found := d.getPodStabilityPeriodConfiguration(ctx, p)
+		if found && podStabilityPeriodConfig > stabilityPeriodPod.length {
+			stabilityPeriodPod.length = podStabilityPeriodConfig
+			stabilityPeriodPod.sourceType = "user/pod"
+			stabilityPeriodPod.sourceName = p.Namespace + "/" + p.Name
 
 		} else if ctrl, ok := kubernetes.GetControllerForPod(p, d.store); ok && ctrl != nil {
-			ctrlDrainBufferConfig, found, _ := d.getDrainBufferConfigurationFromAnnotation(ctrl) // Not doing any event on the controller in case of error: we are missing a good method for generic object in the eventRecorder
-			if found && ctrlDrainBufferConfig > drainBufferPod.length {
-				drainBufferPod.length = ctrlDrainBufferConfig
-				drainBufferPod.sourceType = "user/controller"
-				drainBufferPod.sourceName = p.Namespace + "/" + ctrl.GetName()
+			ctrlStabilityPeriodConfig, found, _ := d.getStabilityPeriodConfigurationFromAnnotation(ctrl) // Not doing any event on the controller in case of error: we are missing a good method for generic object in the eventRecorder
+			if found && ctrlStabilityPeriodConfig > stabilityPeriodPod.length {
+				stabilityPeriodPod.length = ctrlStabilityPeriodConfig
+				stabilityPeriodPod.sourceType = "user/controller"
+				stabilityPeriodPod.sourceName = p.Namespace + "/" + ctrl.GetName()
 			}
 		}
-		buffers[index.GeneratePodIndexKey(p.Name, p.Namespace)] = drainBufferPod
+		periods[index.GeneratePodIndexKey(p.Name, p.Namespace)] = stabilityPeriodPod
 	}
-	return buffers
+	return periods
 }
 
-func (d *drainBufferChecker) getNodeDrainBufferConfiguration(ctx context.Context, node *v1.Node) (time.Duration, bool) {
-	nodeDrainBuffer, found, err := d.getDrainBufferConfigurationFromAnnotation(node)
+func (d *stabilityPeriodChecker) getNodeStabilityPeriodConfiguration(ctx context.Context, node *v1.Node) (time.Duration, bool) {
+	nodeStabilityPeriod, found, err := d.getStabilityPeriodConfigurationFromAnnotation(node)
 	if err != nil {
-		d.eventRecorder.NodeEventf(ctx, node, v1.EventTypeWarning, DrainBufferMisconfigured, "the value for "+kubernetes.CustomDrainBufferAnnotation+" cannot be parsed as a duration: %#v", err)
+		d.eventRecorder.NodeEventf(ctx, node, v1.EventTypeWarning, StabilityPeriodMisconfigured, "the value for "+StabilityPeriodAnnotationKey+" cannot be parsed as a duration: %#v", err)
 	}
-	return nodeDrainBuffer, found
+	return nodeStabilityPeriod, found
 }
 
-func (d *drainBufferChecker) getPodDrainBufferConfiguration(ctx context.Context, pod *v1.Pod) (time.Duration, bool) {
-	podDrainBuffer, found, err := d.getDrainBufferConfigurationFromAnnotation(pod)
+func (d *stabilityPeriodChecker) getPodStabilityPeriodConfiguration(ctx context.Context, pod *v1.Pod) (time.Duration, bool) {
+	podStabilityPeriod, found, err := d.getStabilityPeriodConfigurationFromAnnotation(pod)
 	if err != nil {
-		d.eventRecorder.PodEventf(ctx, pod, v1.EventTypeWarning, DrainBufferMisconfigured, "the value for "+kubernetes.CustomDrainBufferAnnotation+" cannot be parsed as a duration: %#v", err)
+		d.eventRecorder.PodEventf(ctx, pod, v1.EventTypeWarning, StabilityPeriodMisconfigured, "the value for "+StabilityPeriodAnnotationKey+" cannot be parsed as a duration: %#v", err)
 	}
-	return podDrainBuffer, found
+	return podStabilityPeriod, found
 }
 
-func (d *drainBufferChecker) getDrainBufferConfigurationFromAnnotation(obj metav1.Object) (time.Duration, bool, error) {
+func (d *stabilityPeriodChecker) getStabilityPeriodConfigurationFromAnnotation(obj metav1.Object) (time.Duration, bool, error) {
 	annotations := obj.GetAnnotations()
-	if customDrainBuffer, ok := annotations[kubernetes.CustomDrainBufferAnnotation]; ok {
-		durationValue, err := time.ParseDuration(customDrainBuffer)
+	if customStabilityPeriod, ok := annotations[StabilityPeriodAnnotationKey]; ok {
+		durationValue, err := time.ParseDuration(customStabilityPeriod)
 		if err != nil {
 			return 0, false, err
 		}
@@ -209,10 +211,10 @@ func (d *drainBufferChecker) getDrainBufferConfigurationFromAnnotation(obj metav
 	return 0, false, nil
 }
 
-// DrainBufferAcceptsDrain checks if the node can be drained
-func (d *drainBufferChecker) DrainBufferAcceptsDrain(ctx context.Context, node *v1.Node, now time.Time) bool {
-	// retrieve the drain buffer configuration (from node and pods)
-	drainBuffers := d.getDrainBuffersConfigurations(ctx, node)
+// StabilityPeriodAcceptsDrain checks if the node can be drained
+func (d *stabilityPeriodChecker) StabilityPeriodAcceptsDrain(ctx context.Context, node *v1.Node, now time.Time) bool {
+	// retrieve the stability period configuration (from node and pods)
+	stabilityPeriods := d.getStabilityPeriodsConfigurations(ctx, node)
 
 	// retrieve all the associated pdb
 	pods, err := d.indexer.GetPodsByNode(ctx, node.Name)
@@ -221,7 +223,7 @@ func (d *drainBufferChecker) DrainBufferAcceptsDrain(ctx context.Context, node *
 		return false
 	}
 
-	cacheKey, err := buildNodePodsCacheKey(node, pods, drainBuffers)
+	cacheKey, err := buildNodePodsCacheKey(node, pods, stabilityPeriods)
 	if err != nil {
 		d.logger.Error(err, "Failed to build cache key", "node", node.Name)
 		return false
@@ -249,7 +251,7 @@ func (d *drainBufferChecker) DrainBufferAcceptsDrain(ctx context.Context, node *
 	var latestRecover time.Time
 	canDrain := true
 	for podKey, pdbs := range pdbsForPods {
-		drainBuffer := drainBuffers[podKey]
+		period := stabilityPeriods[podKey]
 		disruptionAllowed, stableSince, pdb := getLatestDisruption(d.logger, pdbs)
 		pdbName := ""
 		if pdb != nil {
@@ -267,16 +269,16 @@ func (d *drainBufferChecker) DrainBufferAcceptsDrain(ctx context.Context, node *
 			return false
 		}
 
-		recoverAt := stableSince.Add(drainBuffer.length)
+		recoverAt := stableSince.Add(period.length)
 		if recoverAt.After(now) && recoverAt.After(latestRecover) {
 			canDrain = false
-			loggerInLoop.Info("drain buffer blocking", "drain-buffer", drainBuffer)
+			loggerInLoop.Info("stability period blocking", "stability-period", period)
 			latestRecover = recoverAt
 			if d.cacheRecoveryTime != nil {
-				// add an entry into the cache to avoid recomputing this state before the drain buffer is respected.
+				// add an entry into the cache to avoid recomputing this state before the stability period is respected.
 				d.cacheRecoveryTime.Add(cacheKey, recoveryEstimationDate{
 					estimatedRecovery: recoverAt,
-					ttl:               now.Add(*d.drainBufferConfig.EstimatedRecoveryRecordTTL),
+					ttl:               now.Add(*d.stabilityPeriodConfig.EstimatedRecoveryRecordTTL),
 				})
 			}
 		}
@@ -284,17 +286,17 @@ func (d *drainBufferChecker) DrainBufferAcceptsDrain(ctx context.Context, node *
 
 	return canDrain
 }
-func buildNodePodsCacheKey(node *v1.Node, pods []*v1.Pod, drainBuffers map[string]drainBufferInfo) (string, error) {
+func buildNodePodsCacheKey(node *v1.Node, pods []*v1.Pod, periods map[string]stabilityPeriodInfo) (string, error) {
 	podsUIDs := make([]string, len(pods))
 	for i, p := range pods {
 		podkey := index.GeneratePodIndexKey(p.Name, p.Namespace)
-		dbuffer, found := drainBuffers[podkey]
+		sPeriod, found := periods[podkey]
 		if !found {
-			return "", fmt.Errorf("missing drain-buffer configuration for pod %s", index.GeneratePodIndexKey(p.Name, p.Namespace))
+			return "", fmt.Errorf("missing stability-period configuration for pod %s", index.GeneratePodIndexKey(p.Name, p.Namespace))
 		}
-		// We are using drain buffer because if the configuration change we want to use/introduce a different key.
-		// The cached result may change due to the drainBuffer configuration change
-		podsUIDs[i] = string(p.UID) + dbuffer.length.String()
+		// We are using stability period because if the configuration change we want to use/introduce a different key.
+		// The cached result may change due to the stability period configuration change
+		podsUIDs[i] = string(p.UID) + sPeriod.length.String()
 	}
 	sort.Strings(podsUIDs) // stable order
 	return string(node.UID) + "#" + strings.Join(podsUIDs, "#"), nil
