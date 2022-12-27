@@ -2,6 +2,7 @@ package groups
 
 import (
 	"context"
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -11,6 +12,7 @@ import (
 type RunnerInfo struct {
 	Context context.Context
 	Key     GroupKey
+	Data    *utils.DataMap
 }
 
 // Runner is in charge of a set of nodes for a given group
@@ -62,6 +64,7 @@ func (g *GroupsRunner) runForGroup(key GroupKey) *RunnerInfo {
 	r := &RunnerInfo{
 		Key:     key,
 		Context: ctx,
+		Data:    utils.NewDataMap(),
 	}
 	go func(runInfo *RunnerInfo, cancel context.CancelFunc) {
 		defer cancel()

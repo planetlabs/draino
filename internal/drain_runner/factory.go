@@ -24,7 +24,7 @@ func NewFactory(withOptions ...WithOption) (groups.RunnerFactory, error) {
 	return &DrainRunnerFactory{conf: conf}, nil
 }
 
-func (factory *DrainRunnerFactory) BuildRunner() groups.Runner {
+func (factory *DrainRunnerFactory) build() *drainRunner {
 	return &drainRunner{
 		client:              factory.conf.kubeClient,
 		logger:              *factory.conf.logger,
@@ -37,4 +37,12 @@ func (factory *DrainRunnerFactory) BuildRunner() groups.Runner {
 		eventRecorder:       factory.conf.eventRecorder,
 		preprocessors:       factory.conf.preprocessors,
 	}
+}
+
+func (factory *DrainRunnerFactory) BuildRunner() groups.Runner {
+	return factory.build()
+}
+
+func (factory *DrainRunnerFactory) BuildDrainInfo() DrainInfo {
+	return factory.build()
 }

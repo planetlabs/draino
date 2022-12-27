@@ -20,8 +20,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/DataDog/compute-go/kubeclient"
+	"github.com/DataDog/compute-go/service"
 	"github.com/DataDog/compute-go/version"
 	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	"github.com/planetlabs/draino/internal/cli"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
@@ -80,6 +83,10 @@ func main() {
 
 	// Read application flags
 	cfg, fs := controllerruntime.ConfigFromFlags(false, false)
+	cliHandlers := &cli.CLIHandlers{}
+	cliCommands := &cli.CLICommands{ServerAddr: &cfg.Service.ServiceAddr}
+
+	cfg.Service.RouteRegisterFunc = cliHandlers.RegisterRoute
 	options, optFlags := optionsFromFlags()
 	fs.AddFlagSet(optFlags)
 
@@ -90,6 +97,8 @@ func main() {
 	}
 	root.PersistentFlags().AddFlagSet(fs)
 	root.AddCommand(version.NewCommand())
+	root.AddCommand(service.NewLogLevelCommand())
+	root.AddCommand(cliCommands.Commands()...)
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 
@@ -347,7 +356,7 @@ func main() {
 			drainPodFilter:  drainerSkipPodFilter,
 			nodeLabelFilter: nodeLabelFilterFunc,
 		}
-		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log); err != nil {
+		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log, cliHandlers); err != nil {
 			return fmt.Errorf("failed to bootstrap the controller runtime section: %v", err)
 		}
 
@@ -432,7 +441,7 @@ type filtersDefinitions struct {
 }
 
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
-func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filters filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger) error {
+func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers) error {
 
 	cfg.InfraParam.UpdateWithKubeContext(cfg.KubeClientConfig.ConfigFile, "")
 	validationOptions := infraparameters.GetValidateAll()
@@ -495,6 +504,20 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithEventRecorder(eventRecorder),
 	)
 	if err != nil {
+		logger.Error(err, "failed to configure the drain_runner")
+		return err
+	}
+
+	filterFactory, err := filters.NewFactory(
+		filters.WithLogger(mgr.GetLogger()),
+		filters.WithRetryWall(retryWall),
+		filters.WithRuntimeObjectStore(store),
+		filters.WithCordonPodFilter(filtersDef.cordonPodFilter),
+		filters.WithNodeLabelsFilterFunction(filtersDef.nodeLabelFilter),
+		filters.WithGlobalConfig(globalConfig),
+	)
+	if err != nil {
+		logger.Error(err, "failed to configure the filters")
 		return err
 	}
 
@@ -503,30 +526,32 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithKubeClient(mgr.GetClient()),
 		candidate_runner.WithClock(&clock.RealClock{}),
 		candidate_runner.WithRerun(options.groupRunnerPeriod),
-		candidate_runner.WithRetryWall(retryWall),
 		candidate_runner.WithLogger(mgr.GetLogger()),
 		candidate_runner.WithSharedIndexInformer(indexer),
-		candidate_runner.WithCordonPodFilter(filters.cordonPodFilter),
 		candidate_runner.WithEventRecorder(eventRecorder),
-		candidate_runner.WithRuntimeObjectStore(store),
-		candidate_runner.WithNodeLabelsFilterFunction(filters.nodeLabelFilter),
-		candidate_runner.WithGlobalConfig(globalConfig),
 		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
-		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filters.drainPodFilter)),
+		candidate_runner.WithFilter(filterFactory.Build()),
+		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter)),
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{}),
 		candidate_runner.WithPVProtector(pvProtector),
 		candidate_runner.WithDryRun(options.dryRun),
 	)
 	if err != nil {
+		logger.Error(err, "failed to configure the candidate_runner")
 		return err
 	}
 
 	keyGetter := groups.NewGroupKeyFromNodeMetadata(strings.Split(options.drainGroupLabelKey, ","), []string{kubernetes.DrainGroupAnnotation}, kubernetes.DrainGroupOverrideAnnotation)
 
-	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filters.nodeLabelFilter, store.HasSynced)
+	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.nodeLabelFilter, store.HasSynced)
 	if err = groupRegistry.SetupWithManager(mgr); err != nil {
 		logger.Error(err, "failed to setup groupRegistry")
 		return err
+	}
+
+	if errCli := cliHandlers.Initialize(logger, groupRegistry, drainCandidateRunnerFactory.BuildCandidateInfo(), drainRunnerFactory.BuildRunner()); errCli != nil {
+		logger.Error(errCli, "Failed to initialize CLIHandlers")
+		return errCli
 	}
 
 	logger.Info("ControllerRuntime bootstrap done, running the manager")

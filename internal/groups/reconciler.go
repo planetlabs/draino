@@ -3,6 +3,7 @@ package groups
 import (
 	"context"
 	"fmt"
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -34,10 +35,41 @@ type GroupRegistry struct {
 	keyGetter                 GroupKeyGetter
 	groupDrainRunner          *GroupsRunner
 	groupDrainCandidateRunner *GroupsRunner
-	nodeFilteringFunc         kubernetes.NodeLabelFilterFunc
+
+	nodeFilteringFunc kubernetes.NodeLabelFilterFunc
 
 	hasSyncedFunc func() bool
 }
+
+type RunnerInfoGetter interface {
+	GetRunnerInfo() map[GroupKey]RunnerInfo
+}
+
+func (r *GroupRegistry) GetRunnerInfo() map[GroupKey]RunnerInfo {
+	m := make(map[GroupKey]RunnerInfo, len(r.groupDrainRunner.running))
+
+	for k, v := range r.groupDrainRunner.running {
+		m[k] = RunnerInfo{
+			Key:  k,
+			Data: utils.NewDataMap(),
+		}
+		m[k].Data.Inject(v.Data)
+	}
+	for k, v := range r.groupDrainCandidateRunner.running {
+		c, ok := m[k]
+		if !ok {
+			c = RunnerInfo{
+				Key:  k,
+				Data: utils.NewDataMap(),
+			}
+		}
+		c.Data.Inject(v.Data)
+		m[k] = c
+	}
+	return m
+}
+
+var _ RunnerInfoGetter = &GroupRegistry{}
 
 func NewGroupRegistry(
 	ctx context.Context,
