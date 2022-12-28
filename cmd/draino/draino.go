@@ -34,6 +34,7 @@ import (
 	"github.com/planetlabs/draino/internal/cli"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
+	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	protector "github.com/planetlabs/draino/internal/protector"
 	"github.com/spf13/cobra"
@@ -491,6 +492,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	eventRecorder := kubernetes.NewEventRecorder(k8sEventRecorder)
 
 	pvProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
+	stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{})
 
 	filterFactory, err := filters.NewFactory(
 		filters.WithLogger(mgr.GetLogger()),
@@ -499,6 +501,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		filters.WithCordonPodFilter(filtersDef.cordonPodFilter),
 		filters.WithNodeLabelsFilterFunction(filtersDef.nodeLabelFilter),
 		filters.WithGlobalConfig(globalConfig),
+		filters.WithStabilityPeriodChecker(stabilityPeriodChecker),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the filters")

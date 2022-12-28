@@ -41,7 +41,7 @@ type stabilityPeriodChecker struct {
 	kclient               client.Client
 	eventRecorder         kubernetes.EventRecorder
 	store                 kubernetes.RuntimeObjectStore
-	indexer               index.Indexer
+	indexer               *index.Indexer
 	stabilityPeriodConfig StabilityPeriodCheckerConfiguration
 
 	// cacheRecoveryTime for a combination {Node+Pods} this cache store the estimated recoveryTime
@@ -90,7 +90,7 @@ func (c *StabilityPeriodCheckerConfiguration) applyDefault() {
 
 // NewStabilityPeriodChecker constructor for the StabilityPeriodChecker
 func NewStabilityPeriodChecker(ctx context.Context, logger logr.Logger, kclient client.Client,
-	eventRecorder kubernetes.EventRecorder, store kubernetes.RuntimeObjectStore, indexer index.Indexer,
+	eventRecorder kubernetes.EventRecorder, store kubernetes.RuntimeObjectStore, indexer *index.Indexer,
 	config StabilityPeriodCheckerConfiguration) StabilityPeriodChecker {
 	config.applyDefault()
 
@@ -185,7 +185,7 @@ func (d *stabilityPeriodChecker) getStabilityPeriodsConfigurations(ctx context.C
 
 func (d *stabilityPeriodChecker) getNodeStabilityPeriodConfiguration(ctx context.Context, node *v1.Node) (time.Duration, bool) {
 	nodeStabilityPeriod, found, err := d.getStabilityPeriodConfigurationFromAnnotation(node)
-	if err != nil {
+	if err != nil && d.eventRecorder != nil {
 		d.eventRecorder.NodeEventf(ctx, node, v1.EventTypeWarning, StabilityPeriodMisconfigured, "the value for "+StabilityPeriodAnnotationKey+" cannot be parsed as a duration: %#v", err)
 	}
 	return nodeStabilityPeriod, found
@@ -193,7 +193,7 @@ func (d *stabilityPeriodChecker) getNodeStabilityPeriodConfiguration(ctx context
 
 func (d *stabilityPeriodChecker) getPodStabilityPeriodConfiguration(ctx context.Context, pod *v1.Pod) (time.Duration, bool) {
 	podStabilityPeriod, found, err := d.getStabilityPeriodConfigurationFromAnnotation(pod)
-	if err != nil {
+	if err != nil && d.eventRecorder != nil {
 		d.eventRecorder.PodEventf(ctx, pod, v1.EventTypeWarning, StabilityPeriodMisconfigured, "the value for "+StabilityPeriodAnnotationKey+" cannot be parsed as a duration: %#v", err)
 	}
 	return podStabilityPeriod, found

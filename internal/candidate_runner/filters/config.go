@@ -2,8 +2,10 @@ package filters
 
 import (
 	"errors"
+
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"k8s.io/utils/clock"
 )
@@ -14,12 +16,13 @@ type WithOption = func(conf *Config)
 // Config configuration passed to the drain runner
 type Config struct {
 	// Have to be set
-	logger              *logr.Logger
-	retryWall           drain.RetryWall
-	objectsStore        kubernetes.RuntimeObjectStore
-	cordonFilter        kubernetes.PodFilterFunc
-	nodeLabelFilterFunc kubernetes.NodeLabelFilterFunc
-	globalConfig        kubernetes.GlobalConfig
+	logger                 *logr.Logger
+	retryWall              drain.RetryWall
+	objectsStore           kubernetes.RuntimeObjectStore
+	cordonFilter           kubernetes.PodFilterFunc
+	nodeLabelFilterFunc    kubernetes.NodeLabelFilterFunc
+	globalConfig           kubernetes.GlobalConfig
+	stabilityPeriodChecker analyser.StabilityPeriodChecker
 
 	// With defaults
 	clock clock.Clock
@@ -42,6 +45,9 @@ func (conf *Config) Validate() error {
 	}
 	if conf.objectsStore == nil {
 		return errors.New("runtime object store should be set")
+	}
+	if conf.stabilityPeriodChecker == nil {
+		return errors.New("stability period checker should be set")
 	}
 	if conf.nodeLabelFilterFunc == nil {
 		return errors.New("node labels filtering function is not set")
@@ -100,5 +106,11 @@ func WithGlobalConfig(gc kubernetes.GlobalConfig) WithOption {
 func WithCordonPodFilter(f kubernetes.PodFilterFunc) WithOption {
 	return func(conf *Config) {
 		conf.cordonFilter = f
+	}
+}
+
+func WithStabilityPeriodChecker(checker analyser.StabilityPeriodChecker) WithOption {
+	return func(conf *Config) {
+		conf.stabilityPeriodChecker = checker
 	}
 }

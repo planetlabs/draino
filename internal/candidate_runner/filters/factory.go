@@ -30,6 +30,7 @@ func (factory *FilterFactory) BuildCandidateFilter() Filter {
 		NewPodFilter(*factory.conf.logger, factory.conf.cordonFilter, factory.conf.objectsStore),
 		NewRetryWallFilter(factory.conf.clock, factory.conf.retryWall),
 		NewNodeTerminatingFilter(),
+		NewStabilityPeriodFilter(factory.conf.stabilityPeriodChecker, factory.conf.clock),
 	}
 	return f
 }

@@ -403,7 +403,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			if err != nil {
 				t.Fatalf("can't create fakeIndexer: %#v", err)
 			}
-			d := NewStabilityPeriodChecker(context.Background(), testLogger, wrapper.GetManagerClient(), er, store, *fakeIndexer,
+			d := NewStabilityPeriodChecker(context.Background(), testLogger, wrapper.GetManagerClient(), er, store, fakeIndexer,
 				StabilityPeriodCheckerConfiguration{
 					DefaultStabilityPeriod: tt.defaultDrainBuffer,
 				})
