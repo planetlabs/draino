@@ -44,6 +44,7 @@ func (factory *CandidateRunnerFactory) build() *candidateRunner {
 		nodeIteratorFactory:       factory.conf.nodeIteratorFactory,
 		pvProtector:               factory.conf.pvProtector,
 		filter:                    factory.conf.filter,
+		retryWall:                 factory.conf.retryWall,
 	}
 }
 func (factory *CandidateRunnerFactory) BuildRunner() groups.Runner {

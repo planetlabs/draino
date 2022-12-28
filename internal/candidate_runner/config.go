@@ -2,11 +2,12 @@ package candidate_runner
 
 import (
 	"errors"
+	"time"
+
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"github.com/planetlabs/draino/internal/protector"
 	"github.com/planetlabs/draino/internal/scheduler"
 	corev1 "k8s.io/api/core/v1"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -29,6 +30,7 @@ type Config struct {
 	drainSimulator      drain.DrainSimulator
 	nodeSorters         NodeSorters
 	pvProtector         protector.PVProtector
+	retryWall           drain.RetryWall
 	filter              filters.Filter
 
 	// With defaults
@@ -47,7 +49,7 @@ func NewConfig() *Config {
 		dryRun:                    true,
 		maxSimultaneousCandidates: 1,
 		nodeIteratorFactory: func(nodes []*corev1.Node, sorters NodeSorters) scheduler.ItemProvider[*corev1.Node] {
-			return scheduler.NewSortingTreeWithInitialization[*corev1.Node](nodes, sorters)
+			return scheduler.NewSortingTreeWithInitialization(nodes, sorters)
 		},
 	}
 }
@@ -77,6 +79,9 @@ func (conf *Config) Validate() error {
 	}
 	if conf.filter == nil {
 		return errors.New("filter is not set")
+	}
+	if conf.retryWall == nil {
+		return errors.New("retry wall is not set")
 	}
 
 	return nil
@@ -157,5 +162,11 @@ func WithPVProtector(protector protector.PVProtector) WithOption {
 func WithFilter(filter filters.Filter) WithOption {
 	return func(conf *Config) {
 		conf.filter = filter
+	}
+}
+
+func WithRetryWall(retryWall drain.RetryWall) WithOption {
+	return func(conf *Config) {
+		conf.retryWall = retryWall
 	}
 }

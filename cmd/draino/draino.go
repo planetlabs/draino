@@ -19,6 +19,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
+	"os"
+	"sort"
+	"strings"
+	"time"
+
 	"github.com/DataDog/compute-go/kubeclient"
 	"github.com/DataDog/compute-go/service"
 	"github.com/DataDog/compute-go/version"
@@ -31,13 +38,7 @@ import (
 	protector "github.com/planetlabs/draino/internal/protector"
 	"github.com/spf13/cobra"
 	"k8s.io/utils/clock"
-	"net/http"
-	_ "net/http/pprof"
-	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/DataDog/compute-go/controllerruntime"
 	"github.com/DataDog/compute-go/infraparameters"
@@ -535,6 +536,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{}),
 		candidate_runner.WithPVProtector(pvProtector),
 		candidate_runner.WithDryRun(options.dryRun),
+		candidate_runner.WithRetryWall(retryWall),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the candidate_runner")

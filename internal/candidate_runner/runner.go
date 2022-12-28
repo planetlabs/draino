@@ -3,13 +3,15 @@ package candidate_runner
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"github.com/planetlabs/draino/internal/protector"
 	"github.com/planetlabs/draino/internal/scheduler"
-	"strings"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/groups"
@@ -20,6 +22,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	drainRetryFailedAnnotationKey    = "draino/drain-retry-failed"
+	drainRetryRestartAnnotationValue = "restart"
 )
 
 // Make sure that the drain runner is implementing the group runner interface
@@ -39,6 +46,7 @@ type candidateRunner struct {
 	runEvery            time.Duration
 	eventRecorder       kubernetes.EventRecorder
 	pvProtector         protector.PVProtector
+	retryWall           drain.RetryWall
 	filter              filters.Filter
 
 	maxSimultaneousCandidates int
@@ -82,6 +90,11 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 			runner.logger.Info("no nodes in group left, stopping.")
 			cancel()
 			return
+		}
+
+		// remove retry wall from nodes that have drain-retry-failed=restart annotation
+		if err := runner.handleRetryFlagOnNodes(ctx, nodes); err != nil {
+			runner.logger.Error(err, "failed to remove retry wall from nodes that have retry annotation")
 		}
 
 		// filter nodes that are already candidate
@@ -157,4 +170,17 @@ func (runner *candidateRunner) checkAlreadyCandidates(nodes []*corev1.Node) (rem
 
 func (runner *candidateRunner) GetNodeIterator(nodes []*corev1.Node) scheduler.ItemProvider[*corev1.Node] {
 	return runner.nodeIteratorFactory(nodes, runner.nodeSorters)
+}
+
+// handleRetryFlagOnNodes checks if a node has the drain-failed retry annotation and if so it will reset the retry wall
+func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes []*corev1.Node) error {
+	var errors []error
+	for _, node := range nodes {
+		if val, exist := node.Annotations[drainRetryFailedAnnotationKey]; exist && val == drainRetryRestartAnnotationValue {
+			if err := runner.retryWall.ResetRetryCount(ctx, node); err != nil {
+				errors = append(errors, fmt.Errorf("cannot reset retry wall on node '%s': %v", node.Name, err))
+			}
+		}
+	}
+	return utils.JoinErrors(errors, "|")
 }
