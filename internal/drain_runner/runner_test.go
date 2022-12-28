@@ -3,9 +3,11 @@ package drain_runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
@@ -41,12 +43,15 @@ func (p *testPreprocessor) IsDone(node *corev1.Node) (bool, error) {
 }
 
 func TestDrainRunner(t *testing.T) {
+	nodeLabelsFilterFunc, err := kubernetes.NewNodeLabelFilter(fmt.Sprintf("metadata.labels['%s'] matches 'true'", kubernetes.NodeNLAEnableLabelKey), zap.NewNop())
+	assert.NoError(t, err, "cannot create node labels filter")
 	tests := []struct {
 		Name          string
 		Key           groups.GroupKey
 		Node          *corev1.Node
 		Preprocessors []DrainPreProzessor
 		Drainer       kubernetes.Drainer
+		Filter        filters.Filter
 
 		ShoulHaveTaint  bool
 		ExpectedTaint   k8sclient.DrainTaintValue
@@ -106,6 +111,24 @@ func TestDrainRunner(t *testing.T) {
 			ExpectedTaint:   k8sclient.TaintDrained,
 			ExpectedRetries: 0,
 		},
+		{
+			Name: "Should remove taint if opted out",
+			Key:  "my-key",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "foo-node",
+					Labels:      map[string]string{"key": "my-key"},
+					Annotations: map[string]string{kubernetes.NodeNLAEnableLabelKey: "false"},
+				},
+				Spec: corev1.NodeSpec{
+					Taints: []corev1.Taint{*k8sclient.CreateNLATaint(k8sclient.TaintDrainCandidate, time.Now())},
+				},
+			},
+			Filter:         filters.NewNodeWithLabelFilter(nodeLabelsFilterFunc),
+			Drainer:        &kubernetes.NoopCordonDrainer{},
+			Preprocessors:  []DrainPreProzessor{&testPreprocessor{isDone: true}},
+			ShoulHaveTaint: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -133,7 +156,9 @@ func TestDrainRunner(t *testing.T) {
 				Preprocessors: tt.Preprocessors,
 				Drainer:       tt.Drainer,
 				PVProtector:   protector.NewPVCProtector(store, zap.NewNop(), false),
+				Filter:        tt.Filter,
 			})
+			assert.NoError(t, err, "failed to create fake drain runner")
 
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancel()

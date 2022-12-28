@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/protector"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 )
 
@@ -23,6 +25,7 @@ type FakeOptions struct {
 	Logger        *logr.Logger
 	RerunEvery    time.Duration
 	PVProtector   protector.PVProtector
+	Filter        filters.Filter
 	DrainBuffer   drainbuffer.DrainBuffer
 
 	Clock clock.Clock
@@ -61,6 +64,9 @@ func (opts *FakeOptions) ApplyDefaults() error {
 	if opts.RetryStrategy == nil {
 		opts.RetryStrategy = &drain.StaticRetryStrategy{Delay: time.Second, AlertThreashold: 5}
 	}
+	if opts.Filter == nil {
+		opts.Filter = filters.FilterFromFunction("always_true", func(n *v1.Node) bool { return true })
+	}
 	if opts.DrainBuffer == nil {
 		var err error
 		persistor := drainbuffer.NewConfigMapPersistor(opts.ClientWrapper.GetManagerClient(), "fake-buffer", "default")
@@ -95,7 +101,7 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 	return &drainRunner{
 		client:              opts.ClientWrapper.GetManagerClient(),
 		logger:              *opts.Logger,
-		clock:               clock.RealClock{},
+		clock:               opts.Clock,
 		retryWall:           retryWall,
 		sharedIndexInformer: fakeIndexer,
 		drainer:             opts.Drainer,
@@ -103,6 +109,7 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 		preprocessors:       opts.Preprocessors,
 		pvProtector:         opts.PVProtector,
 		eventRecorder:       &kubernetes.NoopEventRecorder{},
+		filter:              opts.Filter,
 		drainBuffer:         opts.DrainBuffer,
 	}, nil
 }

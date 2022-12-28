@@ -19,9 +19,9 @@ func NewFactory(withOptions ...WithOption) (*FilterFactory, error) {
 	return &FilterFactory{conf: conf}, nil
 }
 
-func (factory *FilterFactory) Build() Filter {
+func (factory *FilterFactory) BuildCandidateFilter() Filter {
 	f := &CompositeFilter{
-		logger: factory.conf.logger.WithName("CompositeFilter"),
+		logger: factory.conf.logger.WithName("CandidateFilter"),
 	}
 
 	f.filters = []Filter{
@@ -30,6 +30,18 @@ func (factory *FilterFactory) Build() Filter {
 		NewPodFilter(*factory.conf.logger, factory.conf.cordonFilter, factory.conf.objectsStore),
 		NewRetryWallFilter(factory.conf.clock, factory.conf.retryWall),
 		NewNodeTerminatingFilter(),
+	}
+	return f
+}
+
+func (factory *FilterFactory) BuildScopeFilter() Filter {
+	f := &CompositeFilter{
+		logger: factory.conf.logger.WithName("ScopeFilter"),
+	}
+
+	f.filters = []Filter{
+		NewNodeWithLabelFilter(factory.conf.nodeLabelFilterFunc),
+		NewPodFilter(*factory.conf.logger, factory.conf.cordonFilter, factory.conf.objectsStore),
 	}
 	return f
 }

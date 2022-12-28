@@ -492,23 +492,6 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 
 	pvProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
 
-	drainRunnerFactory, err := drain_runner.NewFactory(
-		drain_runner.WithKubeClient(mgr.GetClient()),
-		drain_runner.WithClock(&clock.RealClock{}),
-		drain_runner.WithDrainer(drainer),
-		drain_runner.WithPreprocessors(), // TODO when we will add the pre-provisioning pre-processor
-		drain_runner.WithRerun(options.groupRunnerPeriod),
-		drain_runner.WithRetryWall(retryWall),
-		drain_runner.WithLogger(mgr.GetLogger()),
-		drain_runner.WithSharedIndexInformer(indexer),
-		drain_runner.WithPVProtector(pvProtector),
-		drain_runner.WithEventRecorder(eventRecorder),
-	)
-	if err != nil {
-		logger.Error(err, "failed to configure the drain_runner")
-		return err
-	}
-
 	filterFactory, err := filters.NewFactory(
 		filters.WithLogger(mgr.GetLogger()),
 		filters.WithRetryWall(retryWall),
@@ -522,6 +505,24 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
+	drainRunnerFactory, err := drain_runner.NewFactory(
+		drain_runner.WithKubeClient(mgr.GetClient()),
+		drain_runner.WithClock(&clock.RealClock{}),
+		drain_runner.WithDrainer(drainer),
+		drain_runner.WithPreprocessors(), // TODO when we will add the pre-provisioning pre-processor
+		drain_runner.WithRerun(options.groupRunnerPeriod),
+		drain_runner.WithRetryWall(retryWall),
+		drain_runner.WithLogger(mgr.GetLogger()),
+		drain_runner.WithSharedIndexInformer(indexer),
+		drain_runner.WithPVProtector(pvProtector),
+		drain_runner.WithEventRecorder(eventRecorder),
+		drain_runner.WithFilter(filterFactory.BuildScopeFilter()),
+	)
+	if err != nil {
+		logger.Error(err, "failed to configure the drain_runner")
+		return err
+	}
+
 	drainCandidateRunnerFactory, err := candidate_runner.NewFactory(
 		candidate_runner.WithDryRun(true), // TODO of course we want to remove that when we are ready
 		candidate_runner.WithKubeClient(mgr.GetClient()),
@@ -531,7 +532,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithSharedIndexInformer(indexer),
 		candidate_runner.WithEventRecorder(eventRecorder),
 		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
-		candidate_runner.WithFilter(filterFactory.Build()),
+		candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter)),
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{}),
 		candidate_runner.WithPVProtector(pvProtector),

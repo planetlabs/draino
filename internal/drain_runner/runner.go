@@ -8,6 +8,7 @@ import (
 	"k8s.io/kubernetes/pkg/apis/core"
 
 	"github.com/go-logr/logr"
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -40,6 +41,7 @@ type drainRunner struct {
 	runEvery            time.Duration
 	pvProtector         protector.PVProtector
 	eventRecorder       kubernetes.EventRecorder
+	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
 
 	preprocessors []DrainPreProzessor
@@ -111,6 +113,13 @@ func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerI
 }
 
 func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.RunnerInfo, candidate *corev1.Node) error {
+	// In some cases a user might want to opt out a node even though it's a candidate already, so we have to remove the taint.
+	if keep, name, reason := runner.filter.FilterNode(candidate); !keep {
+		runner.logger.Info("Removing candidate status, because user opted out node.", "node", candidate.Name, "filter_name", name, "filter_reason", reason)
+		_, err := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
+		return err
+	}
+
 	podsAssociatedWithPV, err := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(candidate)
 	if err != nil {
 		return err

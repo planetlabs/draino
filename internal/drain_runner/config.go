@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
@@ -27,6 +28,7 @@ type Config struct {
 	sharedIndexInformer index.GetSharedIndexInformer
 	pvProtector         protector.PVProtector
 	eventRecorder       kubernetes.EventRecorder
+	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
 
 	// With defaults
@@ -66,6 +68,9 @@ func (conf *Config) Validate() error {
 	}
 	if conf.eventRecorder == nil {
 		return errors.New("event recorder should be set")
+	}
+	if conf.filter == nil {
+		return errors.New("filter should be set")
 	}
 	if conf.drainBuffer == nil {
 		return errors.New("drain buffer should be set")
@@ -131,6 +136,12 @@ func WithPVProtector(protector protector.PVProtector) WithOption {
 func WithEventRecorder(er kubernetes.EventRecorder) WithOption {
 	return func(conf *Config) {
 		conf.eventRecorder = er
+	}
+}
+
+func WithFilter(f filters.Filter) WithOption {
+	return func(conf *Config) {
+		conf.filter = f
 	}
 }
 
