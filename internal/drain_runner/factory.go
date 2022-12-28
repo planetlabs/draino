@@ -35,7 +35,9 @@ func (factory *DrainRunnerFactory) build() *drainRunner {
 		runEvery:            factory.conf.rerunEvery,
 		pvProtector:         factory.conf.pvProtector,
 		eventRecorder:       factory.conf.eventRecorder,
-		preprocessors:       factory.conf.preprocessors,
+		drainBuffer:         factory.conf.drainBuffer,
+
+		preprocessors: factory.conf.preprocessors,
 	}
 }
 

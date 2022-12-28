@@ -2,11 +2,13 @@ package drain_runner
 
 import (
 	"context"
-	"k8s.io/kubernetes/pkg/apis/core"
 	"strings"
 	"time"
 
+	"k8s.io/kubernetes/pkg/apis/core"
+
 	"github.com/go-logr/logr"
+	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
@@ -38,7 +40,9 @@ type drainRunner struct {
 	runEvery            time.Duration
 	pvProtector         protector.PVProtector
 	eventRecorder       kubernetes.EventRecorder
-	preprocessors       []DrainPreProzessor
+	drainBuffer         drainbuffer.DrainBuffer
+
+	preprocessors []DrainPreProzessor
 }
 
 func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
@@ -99,14 +103,14 @@ func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerI
 	}
 
 	for _, candidate := range candidates {
-		if err := runner.handleCandidate(info.Context, candidate); err != nil {
+		if err := runner.handleCandidate(ctx, info, candidate); err != nil {
 			runner.logger.Error(err, "error during candidate evaluation", "node_name", candidate.Name)
 		}
 	}
 	return
 }
 
-func (runner *drainRunner) handleCandidate(ctx context.Context, candidate *corev1.Node) error {
+func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.RunnerInfo, candidate *corev1.Node) error {
 	podsAssociatedWithPV, err := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(candidate)
 	if err != nil {
 		return err
@@ -132,7 +136,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, candidate *corev
 	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
 	// TODO add metric to show how many drains are successful / failed
 	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainStarting, "Draining node")
-	err = runner.drainCandidate(ctx, candidate)
+	err = runner.drainCandidate(ctx, info, candidate)
 	if err != nil {
 		runner.logger.Error(err, "failed to drain node", "node_name", candidate.Name)
 		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: %v", err)
@@ -161,7 +165,7 @@ func (runner *drainRunner) checkPreprocessors(candidate *corev1.Node) bool {
 	return allPreprocessorsDone
 }
 
-func (runner *drainRunner) drainCandidate(ctx context.Context, candidate *corev1.Node) error {
+func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.RunnerInfo, candidate *corev1.Node) error {
 	// TODO add metric about to track the runtime of this method
 	candidate, err := k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDraining)
 	if err != nil {
@@ -179,6 +183,7 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, candidate *corev1
 		return err
 	}
 
+	runner.drainBuffer.StoreSuccessfulDrain(info.Key, 0)
 	_, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDrained)
 	return err
 }

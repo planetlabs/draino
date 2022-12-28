@@ -1,10 +1,12 @@
 package drain_runner
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
+	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
@@ -21,6 +23,7 @@ type FakeOptions struct {
 	Logger        *logr.Logger
 	RerunEvery    time.Duration
 	PVProtector   protector.PVProtector
+	DrainBuffer   drainbuffer.DrainBuffer
 
 	Clock clock.Clock
 
@@ -58,6 +61,14 @@ func (opts *FakeOptions) ApplyDefaults() error {
 	if opts.RetryStrategy == nil {
 		opts.RetryStrategy = &drain.StaticRetryStrategy{Delay: time.Second, AlertThreashold: 5}
 	}
+	if opts.DrainBuffer == nil {
+		var err error
+		persistor := drainbuffer.NewConfigMapPersistor(opts.ClientWrapper.GetManagerClient(), "fake-buffer", "default")
+		opts.DrainBuffer, err = drainbuffer.NewDrainBuffer(context.Background(), persistor, opts.Clock, opts.Logger)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -92,5 +103,6 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 		preprocessors:       opts.Preprocessors,
 		pvProtector:         opts.PVProtector,
 		eventRecorder:       &kubernetes.NoopEventRecorder{},
+		drainBuffer:         opts.DrainBuffer,
 	}, nil
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
@@ -26,6 +27,7 @@ type Config struct {
 	sharedIndexInformer index.GetSharedIndexInformer
 	pvProtector         protector.PVProtector
 	eventRecorder       kubernetes.EventRecorder
+	drainBuffer         drainbuffer.DrainBuffer
 
 	// With defaults
 	clock         clock.Clock
@@ -64,6 +66,9 @@ func (conf *Config) Validate() error {
 	}
 	if conf.eventRecorder == nil {
 		return errors.New("event recorder should be set")
+	}
+	if conf.drainBuffer == nil {
+		return errors.New("drain buffer should be set")
 	}
 
 	return nil
@@ -126,5 +131,11 @@ func WithPVProtector(protector protector.PVProtector) WithOption {
 func WithEventRecorder(er kubernetes.EventRecorder) WithOption {
 	return func(conf *Config) {
 		conf.eventRecorder = er
+	}
+}
+
+func WithDrainBuffer(buffer drainbuffer.DrainBuffer) WithOption {
+	return func(conf *Config) {
+		conf.drainBuffer = buffer
 	}
 }
