@@ -29,9 +29,11 @@ import (
 	"github.com/DataDog/compute-go/kubeclient"
 	"github.com/DataDog/compute-go/service"
 	"github.com/DataDog/compute-go/version"
+	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/candidate_runner"
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"github.com/planetlabs/draino/internal/cli"
+	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
@@ -40,10 +42,12 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/DataDog/compute-go/controllerruntime"
 	"github.com/DataDog/compute-go/infraparameters"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -442,6 +446,36 @@ type filtersDefinitions struct {
 	nodeLabelFilter kubernetes.NodeLabelFilterFunc
 }
 
+// RunTillSuccess implement's the manager.Runnable interface and should be used to execute a specific task until it's done.
+// The main intention was to run initialization processes.
+type RunTillSuccess struct {
+	logger *logr.Logger
+	period time.Duration
+	fn     func(context.Context) error
+}
+
+func (r *RunTillSuccess) Start(parent context.Context) error {
+	ctx, cancel := context.WithCancel(parent)
+	wait.UntilWithContext(ctx, func(ctx context.Context) {
+		err := r.fn(ctx)
+		if err != nil {
+			r.logger.Error(err, "failed to run component")
+			return
+		}
+		cancel()
+	}, r.period)
+	return nil
+}
+
+// getInitDrainBufferRunner returns a Runnable that is responsible for initializing the drain buffer
+func getInitDrainBufferRunner(drainBuffer drainbuffer.DrainBuffer, logger *logr.Logger) manager.Runnable {
+	return &RunTillSuccess{
+		logger: logger,
+		period: time.Second,
+		fn:     func(ctx context.Context) error { return drainBuffer.Initialize(ctx) },
+	}
+}
+
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
 func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers) error {
 
@@ -494,6 +528,17 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	pvProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
 	stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{})
 
+	persistor := drainbuffer.NewConfigMapPersistor(mgr.GetClient(), options.drainBufferConfigMapName, options.namespace)
+	drainBuffer := drainbuffer.NewDrainBuffer(ctx, persistor, clock.RealClock{}, mgr.GetLogger())
+	// The drain buffer can only be initialized when the manager client cache was started.
+	// Adding a custom runnable to the controller manager will make sure, that the initialization will be started as soon as possible.
+	if err := mgr.Add(getInitDrainBufferRunner(drainBuffer, &logger)); err != nil {
+		logger.Error(err, "cannot setup drain buffer initialization runnable")
+		return err
+	}
+
+	keyGetter := groups.NewGroupKeyFromNodeMetadata(strings.Split(options.drainGroupLabelKey, ","), []string{kubernetes.DrainGroupAnnotation}, kubernetes.DrainGroupOverrideAnnotation)
+
 	filterFactory, err := filters.NewFactory(
 		filters.WithLogger(mgr.GetLogger()),
 		filters.WithRetryWall(retryWall),
@@ -502,6 +547,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		filters.WithNodeLabelsFilterFunction(filtersDef.nodeLabelFilter),
 		filters.WithGlobalConfig(globalConfig),
 		filters.WithStabilityPeriodChecker(stabilityPeriodChecker),
+		filters.WithDrainBuffer(drainBuffer),
+		filters.WithGroupKeyGetter(keyGetter),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the filters")
@@ -520,6 +567,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithPVProtector(pvProtector),
 		drain_runner.WithEventRecorder(eventRecorder),
 		drain_runner.WithFilter(filterFactory.BuildScopeFilter()),
+		drain_runner.WithDrainBuffer(drainBuffer),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the drain_runner")
@@ -546,8 +594,6 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		logger.Error(err, "failed to configure the candidate_runner")
 		return err
 	}
-
-	keyGetter := groups.NewGroupKeyFromNodeMetadata(strings.Split(options.drainGroupLabelKey, ","), []string{kubernetes.DrainGroupAnnotation}, kubernetes.DrainGroupOverrideAnnotation)
 
 	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.nodeLabelFilter, store.HasSynced)
 	if err = groupRegistry.SetupWithManager(mgr); err != nil {

@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/labels"
-	"time"
 )
 
 // Options collects the program options/parameters
@@ -20,6 +21,7 @@ type Options struct {
 	minEvictionTimeout          time.Duration
 	evictionHeadroom            time.Duration
 	drainBuffer                 time.Duration
+	drainBufferConfigMapName    string
 	schedulingRetryBackoffDelay time.Duration
 	nodeLabels                  []string
 	nodeLabelsExpr              string
@@ -112,6 +114,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.minEvictionTimeout, "min-eviction-timeout", kubernetes.DefaultMinEvictionTimeout, "Minimum time we wait to evict a pod. The pod terminationGracePeriod will be used if it is bigger.")
 	fs.DurationVar(&opt.evictionHeadroom, "eviction-headroom", kubernetes.DefaultEvictionOverhead, "Additional time to wait after a pod's termination grace period for it to have been deleted.")
 	fs.DurationVar(&opt.drainBuffer, "drain-buffer", kubernetes.DefaultDrainBuffer, "Minimum time between starting each drain. Nodes are always cordoned immediately.")
+	fs.StringVar(&opt.drainBufferConfigMapName, "drain-buffer-configmap-name", "", "The name of the configmap used to persist the drain-buffer values. Default will be draino-<config-name>-drain-buffer.")
 	fs.DurationVar(&opt.schedulingRetryBackoffDelay, "retry-backoff-delay", kubernetes.DefaultSchedulingRetryBackoffDelay, "Additional delay to add between retry schedules.")
 	fs.DurationVar(&opt.leaderElectionLeaseDuration, "leader-election-lease-duration", DefaultLeaderElectionLeaseDuration, "Lease duration for leader election.")
 	fs.DurationVar(&opt.leaderElectionRenewDeadline, "leader-election-renew-deadline", DefaultLeaderElectionRenewDeadline, "Leader election renew deadline.")
@@ -163,6 +166,11 @@ func (o *Options) Validate() error {
 		return fmt.Errorf("--config-name must be defined and not empty")
 	}
 	var err error
+
+	// If the drain buffer config name is not set, we'll reuse the configName
+	if o.drainBufferConfigMapName == "" {
+		o.drainBufferConfigMapName = fmt.Sprintf("draino-%s-drain-buffer", o.configName)
+	}
 
 	// Cordon limiter validation
 	o.skipCordonLimiterNodeAnnotationSelector, err = labels.Parse(o.skipCordonLimiterNodeAnnotation)

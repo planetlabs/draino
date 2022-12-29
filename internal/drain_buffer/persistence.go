@@ -16,9 +16,9 @@ const CMDataKey = "data"
 // Persistor is responsible for persist a given data structure of any kind
 type Persistor interface {
 	// Persist writes the given information to the persitent backend
-	Persist([]byte) error
+	Persist(context.Context, []byte) error
 	// Load tries to retrieve the information from the backend and returns it
-	Load() ([]byte, bool, error)
+	Load(context.Context) ([]byte, bool, error)
 }
 
 // ConfigMapPersistor is an implementation of the Persistor interface that uses configmap as backend
@@ -37,12 +37,12 @@ func NewConfigMapPersistor(client client.Client, name, namespace string) Persist
 	}
 }
 
-func (p *ConfigMapPersistor) Persist(data []byte) error {
+func (p *ConfigMapPersistor) Persist(ctx context.Context, data []byte) error {
 	if data == nil {
 		return errors.New("data is empty")
 	}
 
-	cm, exist, err := p.getConfigMap()
+	cm, exist, err := p.getConfigMap(ctx)
 	if err != nil {
 		return err
 	}
@@ -58,16 +58,16 @@ func (p *ConfigMapPersistor) Persist(data []byte) error {
 				CMDataKey: string(data),
 			},
 		}
-		return p.client.Create(context.Background(), cm)
+		return p.client.Create(ctx, cm)
 	}
 
 	// if there is a configmap already, we'll just override the existing entry
 	cm.Data[CMDataKey] = string(data)
-	return p.client.Update(context.Background(), cm)
+	return p.client.Update(ctx, cm)
 }
 
-func (p *ConfigMapPersistor) Load() ([]byte, bool, error) {
-	cm, exist, err := p.getConfigMap()
+func (p *ConfigMapPersistor) Load(ctx context.Context) ([]byte, bool, error) {
+	cm, exist, err := p.getConfigMap(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -83,9 +83,9 @@ func (p *ConfigMapPersistor) Load() ([]byte, bool, error) {
 	return []byte(entry), true, nil
 }
 
-func (p *ConfigMapPersistor) getConfigMap() (*corev1.ConfigMap, bool, error) {
+func (p *ConfigMapPersistor) getConfigMap(ctx context.Context) (*corev1.ConfigMap, bool, error) {
 	var cm corev1.ConfigMap
-	err := p.client.Get(context.Background(), types.NamespacedName{Name: p.name, Namespace: p.namespace}, &cm)
+	err := p.client.Get(ctx, types.NamespacedName{Name: p.name, Namespace: p.namespace}, &cm)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, false, nil

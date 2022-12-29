@@ -68,12 +68,8 @@ func (opts *FakeOptions) ApplyDefaults() error {
 		opts.Filter = filters.FilterFromFunction("always_true", func(n *v1.Node) bool { return true })
 	}
 	if opts.DrainBuffer == nil {
-		var err error
 		persistor := drainbuffer.NewConfigMapPersistor(opts.ClientWrapper.GetManagerClient(), "fake-buffer", "default")
-		opts.DrainBuffer, err = drainbuffer.NewDrainBuffer(context.Background(), persistor, opts.Clock, opts.Logger)
-		if err != nil {
-			return err
-		}
+		opts.DrainBuffer = drainbuffer.NewDrainBuffer(context.Background(), persistor, opts.Clock, *opts.Logger)
 	}
 	return nil
 }
@@ -94,6 +90,11 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 	opts.ClientWrapper.Start(opts.Chan)
 
 	retryWall, err := drain.NewRetryWall(opts.ClientWrapper.GetManagerClient(), *opts.Logger, opts.RetryStrategy)
+	if err != nil {
+		return nil, err
+	}
+
+	err = opts.DrainBuffer.Initialize(context.Background())
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,8 @@ import (
 	"errors"
 
 	"github.com/go-logr/logr"
+	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
+	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
@@ -23,6 +25,8 @@ type Config struct {
 	nodeLabelFilterFunc    kubernetes.NodeLabelFilterFunc
 	globalConfig           kubernetes.GlobalConfig
 	stabilityPeriodChecker analyser.StabilityPeriodChecker
+	groupKeyGetter         groups.GroupKeyGetter
+	drainBuffer            drainbuffer.DrainBuffer
 
 	// With defaults
 	clock clock.Clock
@@ -60,6 +64,12 @@ func (conf *Config) Validate() error {
 	}
 	if len(conf.globalConfig.SuppliedConditions) == 0 {
 		return errors.New("globalConfig.SuppliedConditions is empty")
+	}
+	if conf.groupKeyGetter == nil {
+		return errors.New("group key getter is not set")
+	}
+	if conf.drainBuffer == nil {
+		return errors.New("drain buffer is not set")
 	}
 
 	return nil
@@ -112,5 +122,17 @@ func WithCordonPodFilter(f kubernetes.PodFilterFunc) WithOption {
 func WithStabilityPeriodChecker(checker analyser.StabilityPeriodChecker) WithOption {
 	return func(conf *Config) {
 		conf.stabilityPeriodChecker = checker
+	}
+}
+
+func WithGroupKeyGetter(getter groups.GroupKeyGetter) WithOption {
+	return func(conf *Config) {
+		conf.groupKeyGetter = getter
+	}
+}
+
+func WithDrainBuffer(drainBuffer drainbuffer.DrainBuffer) WithOption {
+	return func(conf *Config) {
+		conf.drainBuffer = drainBuffer
 	}
 }

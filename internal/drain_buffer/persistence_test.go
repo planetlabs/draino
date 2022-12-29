@@ -1,6 +1,7 @@
 package drainbuffer
 
 import (
+	"context"
 	"testing"
 
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
@@ -43,11 +44,11 @@ func TestConfigMapPersistor(t *testing.T) {
 			assert.NoError(t, err, "cannot create client wrapper")
 
 			persistor := NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
-			err = persistor.Persist([]byte(tt.Entry))
+			err = persistor.Persist(context.Background(), []byte(tt.Entry))
 			assert.NoError(t, err)
 
 			persistor = NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
-			data, exist, err := persistor.Load()
+			data, exist, err := persistor.Load(context.Background())
 			assert.NoError(t, err)
 			assert.True(t, exist)
 			assert.Equal(t, tt.Entry, string(data))
@@ -89,7 +90,7 @@ func TestConfigMapPersistor_Load(t *testing.T) {
 			assert.NoError(t, err, "cannot create client wrapper")
 
 			persistor := NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
-			data, exist, err := persistor.Load()
+			data, exist, err := persistor.Load(context.Background())
 			assert.NoError(t, err)
 			assert.Equal(t, tt.Exist, exist)
 

@@ -182,5 +182,8 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 			}
 		}
 	}
+	if len(errors) == 0 {
+		return nil
+	}
 	return utils.JoinErrors(errors, "|")
 }

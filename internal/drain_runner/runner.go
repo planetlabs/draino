@@ -54,6 +54,10 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 
 	// run an endless loop until there are no drain candidates left
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
+		if !runner.drainBuffer.IsReady() {
+			runner.logger.Info("pausing drain runner until drain buffer is properly initialized")
+			return
+		}
 
 		runner.handleLeftOverDraining(ctx, info)
 
@@ -192,7 +196,9 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 		return err
 	}
 
-	runner.drainBuffer.StoreSuccessfulDrain(info.Key, 0)
+	// We can ignore the error as it's only fired when the drain buffer is not initialized.
+	// This cannot happen as the main loop of the drain runner will be blocked in that case.
+	_ = runner.drainBuffer.StoreSuccessfulDrain(info.Key, 0)
 	_, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDrained)
 	return err
 }
