@@ -25,7 +25,6 @@ type Options struct {
 	schedulingRetryBackoffDelay time.Duration
 	nodeLabels                  []string
 	nodeLabelsExpr              string
-	namespace                   string
 
 	leaderElectionLeaseDuration time.Duration
 	leaderElectionRenewDeadline time.Duration
@@ -143,7 +142,6 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.StringSliceVar(&opt.storageClassesAllowingVolumeDeletion, "storage-class-allows-pv-deletion", []string{}, "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.")
 
 	fs.StringVar(&opt.nodeLabelsExpr, "node-label-expr", "", "Nodes that match this expression will be eligible for cordoning and draining.")
-	fs.StringVar(&opt.namespace, "namespace", "kube-system", "Namespace used to create leader election lock object.")
 	fs.StringVar(&opt.listen, "listen", ":10002", "Address at which to expose /metrics and /healthz.")
 	fs.StringVar(&opt.kubecfg, "kubeconfig", "", "Path to kubeconfig file. Leave unset to use in-cluster config.")
 	fs.StringVar(&opt.apiserver, "master", "", "Address of Kubernetes API server. Leave unset to use in-cluster config.")

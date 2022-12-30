@@ -344,7 +344,7 @@ func main() {
 
 		lock, err := resourcelock.New(
 			resourcelock.EndpointsLeasesResourceLock,
-			options.namespace,
+			cfg.InfraParam.Namespace,
 			options.leaderElectionTokenName,
 			cs.CoreV1(),
 			cs.CoordinationV1(),
@@ -528,7 +528,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	pvProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
 	stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{})
 
-	persistor := drainbuffer.NewConfigMapPersistor(mgr.GetClient(), options.drainBufferConfigMapName, options.namespace)
+	persistor := drainbuffer.NewConfigMapPersistor(mgr.GetClient(), options.drainBufferConfigMapName, cfg.InfraParam.Namespace)
 	drainBuffer := drainbuffer.NewDrainBuffer(ctx, persistor, clock.RealClock{}, mgr.GetLogger())
 	// The drain buffer can only be initialized when the manager client cache was started.
 	// Adding a custom runnable to the controller manager will make sure, that the initialization will be started as soon as possible.
