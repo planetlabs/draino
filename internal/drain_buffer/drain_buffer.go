@@ -39,17 +39,21 @@ type drainCacheEntry struct {
 
 type drainBufferImpl struct {
 	sync.RWMutex
+
 	isInitialized bool
-	clock         clock.Clock
-	persistor     Persistor
-	cache         drainCache
-	logger        *logr.Logger
+	isDirty       bool
+
+	clock     clock.Clock
+	persistor Persistor
+	cache     drainCache
+	logger    *logr.Logger
 }
 
 // NewDrainBuffer returns a new instance of a drain buffer
 func NewDrainBuffer(ctx context.Context, persistor Persistor, clock clock.Clock, logger logr.Logger) DrainBuffer {
 	drainBuffer := &drainBufferImpl{
 		isInitialized: false,
+		isDirty:       false,
 		clock:         clock,
 		persistor:     persistor,
 		cache:         drainCache{},
@@ -77,6 +81,7 @@ func (buffer *drainBufferImpl) StoreSuccessfulDrain(key groups.GroupKey, drainBu
 		LastDrain:   buffer.clock.Now(),
 		DrainBuffer: drainBuffer,
 	}
+	buffer.isDirty = true
 
 	return nil
 }
@@ -130,6 +135,7 @@ func (buffer *drainBufferImpl) cleanupCache() {
 		until := entry.LastDrain.Add(entry.DrainBuffer)
 		if until.Before(buffer.clock.Now()) {
 			delete(buffer.cache, key)
+			buffer.isDirty = true
 		}
 	}
 }
@@ -152,6 +158,11 @@ func (buffer *drainBufferImpl) cleanupAndPersist(ctx context.Context) error {
 
 	buffer.cleanupCache()
 
+	// We don't have to persist the data if nothing changed
+	if !buffer.isDirty {
+		return nil
+	}
+
 	// The lock has to be acquired after the cleanup, because otherwise we'll create a deadlock
 	buffer.RLock()
 	defer buffer.RUnlock()
@@ -161,5 +172,11 @@ func (buffer *drainBufferImpl) cleanupAndPersist(ctx context.Context) error {
 		return err
 	}
 
-	return buffer.persistor.Persist(ctx, data)
+	err = buffer.persistor.Persist(ctx, data)
+	if err != nil {
+		return err
+	}
+
+	buffer.isDirty = false
+	return nil
 }
