@@ -43,6 +43,7 @@ type stabilityPeriodChecker struct {
 	store                 kubernetes.RuntimeObjectStore
 	indexer               *index.Indexer
 	stabilityPeriodConfig StabilityPeriodCheckerConfiguration
+	podFilterFunc         kubernetes.PodFilterFunc
 
 	// cacheRecoveryTime for a combination {Node+Pods} this cache store the estimated recoveryTime
 	// Note the if a pod is delete from the node the key can't be used anymore, so that cacheclean will remove this key when the TTL expire
@@ -91,7 +92,7 @@ func (c *StabilityPeriodCheckerConfiguration) applyDefault() {
 // NewStabilityPeriodChecker constructor for the StabilityPeriodChecker
 func NewStabilityPeriodChecker(ctx context.Context, logger logr.Logger, kclient client.Client,
 	eventRecorder kubernetes.EventRecorder, store kubernetes.RuntimeObjectStore, indexer *index.Indexer,
-	config StabilityPeriodCheckerConfiguration) StabilityPeriodChecker {
+	config StabilityPeriodCheckerConfiguration, podFilterFunc kubernetes.PodFilterFunc) StabilityPeriodChecker {
 	config.applyDefault()
 
 	s := &stabilityPeriodChecker{
@@ -102,6 +103,7 @@ func NewStabilityPeriodChecker(ctx context.Context, logger logr.Logger, kclient 
 		indexer:               indexer,
 		stabilityPeriodConfig: config,
 		cacheRecoveryTime:     cache.NewThreadSafeStore(nil, nil),
+		podFilterFunc:         podFilterFunc,
 	}
 
 	go s.runCacheCleanup(ctx)
@@ -223,6 +225,12 @@ func (d *stabilityPeriodChecker) StabilityPeriodAcceptsDrain(ctx context.Context
 		return false
 	}
 
+	pods, err = d.filterPods(pods)
+	if err != nil {
+		d.logger.Error(err, "Failed to filter pods", "node", node.Name)
+		return false
+	}
+
 	cacheKey, err := buildNodePodsCacheKey(node, pods, stabilityPeriods)
 	if err != nil {
 		d.logger.Error(err, "Failed to build cache key", "node", node.Name)
@@ -286,6 +294,21 @@ func (d *stabilityPeriodChecker) StabilityPeriodAcceptsDrain(ctx context.Context
 
 	return canDrain
 }
+
+func (d *stabilityPeriodChecker) filterPods(pods []*v1.Pod) ([]*v1.Pod, error) {
+	result := make([]*v1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		keep, _, err := d.podFilterFunc(*pod)
+		if err != nil {
+			return nil, err
+		}
+		if keep {
+			result = append(result, pod)
+		}
+	}
+	return result, nil
+}
+
 func buildNodePodsCacheKey(node *v1.Node, pods []*v1.Pod, periods map[string]stabilityPeriodInfo) (string, error) {
 	podsUIDs := make([]string, len(pods))
 	for i, p := range pods {

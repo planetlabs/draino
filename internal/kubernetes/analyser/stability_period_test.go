@@ -378,6 +378,62 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name:               "ignore filtered out pods",
+			defaultDrainBuffer: &drainBufferOneHour,
+			objects: []runtime.Object{
+				&corev1.Pod{
+					ObjectMeta: meta.ObjectMeta{
+						Name:      "pod1",
+						Namespace: "ns",
+						Labels:    map[string]string{"app": "test1"},
+					},
+					Spec: corev1.PodSpec{NodeName: "node1"},
+				},
+				&corev1.Pod{
+					ObjectMeta: meta.ObjectMeta{
+						Name:      "pod2",
+						Namespace: "ns",
+						Labels:    map[string]string{"filter-out": "yes", "app": "test2"},
+					},
+					Spec: corev1.PodSpec{NodeName: "node1"},
+				},
+				&policyv1.PodDisruptionBudget{
+					ObjectMeta: meta.ObjectMeta{Name: "pdb1", Namespace: "ns"},
+					Spec: policyv1.PodDisruptionBudgetSpec{
+						Selector: &meta.LabelSelector{MatchLabels: map[string]string{"app": "test1"}},
+					},
+					Status: policyv1.PodDisruptionBudgetStatus{
+						Conditions: []meta.Condition{
+							{
+								Type:               policyv1.DisruptionAllowedCondition,
+								Status:             meta.ConditionTrue,
+								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour)},
+							},
+						},
+					},
+				},
+				&policyv1.PodDisruptionBudget{
+					ObjectMeta: meta.ObjectMeta{Name: "pdb2", Namespace: "ns"},
+					Spec: policyv1.PodDisruptionBudgetSpec{
+						Selector: &meta.LabelSelector{MatchLabels: map[string]string{"app": "test2"}},
+					},
+					Status: policyv1.PodDisruptionBudgetStatus{
+						Conditions: []meta.Condition{
+							{
+								Type:               policyv1.DisruptionAllowedCondition,
+								Status:             meta.ConditionFalse,
+								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour).Add(10 * time.Minute)},
+							},
+						},
+					},
+				},
+			},
+			node: &corev1.Node{
+				ObjectMeta: meta.ObjectMeta{Name: "node1"},
+			},
+			want: true,
+		},
 	}
 
 	testLogger := zapr.NewLogger(zap.NewNop())
@@ -406,8 +462,15 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			d := NewStabilityPeriodChecker(context.Background(), testLogger, wrapper.GetManagerClient(), er, store, fakeIndexer,
 				StabilityPeriodCheckerConfiguration{
 					DefaultStabilityPeriod: tt.defaultDrainBuffer,
-				})
+				}, podFilter)
 			assert.Equalf(t, tt.want, d.StabilityPeriodAcceptsDrain(context.Background(), tt.node, now), "DrainBufferAcceptsDrain bad result")
 		})
 	}
+}
+
+func podFilter(pod corev1.Pod) (bool, string, error) {
+	if val, ok := pod.Labels["filter-out"]; ok {
+		return false, val, nil
+	}
+	return true, "", nil
 }
