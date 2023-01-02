@@ -3,14 +3,15 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/DataDog/compute-go/table"
-	"github.com/planetlabs/draino/internal/candidate_runner"
-	"github.com/planetlabs/draino/internal/groups"
-	"github.com/spf13/cobra"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/DataDog/compute-go/table"
+	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/groups"
+	"github.com/spf13/cobra"
 )
 
 type CLICommands struct {
@@ -32,7 +33,7 @@ func (h *CLICommands) Commands() []*cobra.Command {
 	groupCmd.PersistentFlags().BoolVarP(&h.tableOutputParams.NoHeader, "no-header", "", false, "do not display table header")
 	groupCmd.PersistentFlags().StringVarP(&h.tableOutputParams.Separator, "separator", "s", "\t|", "column Separator in table output")
 	groupCmd.PersistentFlags().IntVarP(&h.tableOutputParams.Padding, "padding", "", 3, "Padding in table output")
-	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.Sort, "dort", "", nil, "comma separated list of columns for sorting table output")
+	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.Sort, "dort", "", []string{"group"}, "comma separated list of columns for sorting table output")
 	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.ColumnsVisible, "visible", "", nil, "comma separated list of visible columns for table output")
 	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.ColumnsHide, "hidden", "", nil, "comma separated list of hidden columns for table output")
 	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.Filter, "filter", "", nil, "filtering expression for table output")
