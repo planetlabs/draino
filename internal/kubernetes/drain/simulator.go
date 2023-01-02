@@ -3,21 +3,28 @@ package drain
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
+	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/version"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 )
 
 const (
 	PositiveCacheResTTL = time.Minute
 	NegativeCacheResTTL = 3 * time.Minute
+
+	// Starting at v1.22, we should use policy/v1 instead of policy/v1beta1 for evictions
+	// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#calling-the-eviction-api
+	KubeMinVersionEvictionPolicyV1 = "v1.22.0"
 )
 
 type DrainSimulator interface {
@@ -34,8 +41,9 @@ type drainSimulatorImpl struct {
 	podIndexer index.PodIndexer
 	client     client.Client
 	// skipPodFilter will be used to evaluate if pods running on a node should go through the eviction simulation
-	skipPodFilter  kubernetes.PodFilterFunc
-	podResultCache utils.TTLCache[simulationResult]
+	skipPodFilter          kubernetes.PodFilterFunc
+	podResultCache         utils.TTLCache[simulationResult]
+	usePolicyV1ForEviction bool
 }
 
 type simulationResult struct {
@@ -50,12 +58,15 @@ func NewDrainSimulator(
 	client client.Client,
 	indexer *index.Indexer,
 	skipPodFilter kubernetes.PodFilterFunc,
+	kubeVersion *version.Info,
 ) DrainSimulator {
+	usePolicyV1 := semver.Compare(kubeVersion.String(), KubeMinVersionEvictionPolicyV1) >= 0
 	simulator := &drainSimulatorImpl{
-		podIndexer:    indexer,
-		pdbIndexer:    indexer,
-		client:        client,
-		skipPodFilter: skipPodFilter,
+		podIndexer:             indexer,
+		pdbIndexer:             indexer,
+		client:                 client,
+		skipPodFilter:          skipPodFilter,
+		usePolicyV1ForEviction: usePolicyV1,
 
 		// TODO think about using alternative solutions like a MRU cache
 		podResultCache: utils.NewTTLCache[simulationResult](3*time.Minute, 10*time.Second),
@@ -153,35 +164,35 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 }
 
 func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *corev1.Pod) (bool, error) {
+	var eviction client.Object
 	var gracePeriod int64 = 30
-	err := sim.client.SubResource("eviction").Create(ctx, pod, &policyv1.Eviction{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pod.GetName(),
-			Namespace: pod.GetNamespace(),
-		},
-		DeleteOptions: &metav1.DeleteOptions{
-			GracePeriodSeconds: &gracePeriod,
-			DryRun:             []string{"All"},
-		},
-	})
-	if err == nil {
-		return true, nil
-	}
-	err = sim.client.SubResource("eviction").Create(ctx, pod, &policyv1beta1.Eviction{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      pod.GetName(),
-			Namespace: pod.GetNamespace(),
-		},
-		DeleteOptions: &metav1.DeleteOptions{
-			GracePeriodSeconds: &gracePeriod,
-			DryRun:             []string{"All"},
-		},
-	})
-	if err == nil {
-		return true, nil
+
+	if sim.usePolicyV1ForEviction {
+		eviction = &policyv1.Eviction{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.GetName(),
+				Namespace: pod.GetNamespace(),
+			},
+			DeleteOptions: &metav1.DeleteOptions{
+				GracePeriodSeconds: &gracePeriod,
+				DryRun:             []string{"All"},
+			},
+		}
+	} else {
+		eviction = &policyv1beta1.Eviction{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.GetName(),
+				Namespace: pod.GetNamespace(),
+			},
+			DeleteOptions: &metav1.DeleteOptions{
+				GracePeriodSeconds: &gracePeriod,
+				DryRun:             []string{"All"},
+			},
+		}
 	}
 
-	return false, err
+	err := sim.client.SubResource("eviction").Create(ctx, pod, eviction)
+	return err == nil, err
 }
 
 func (sim *drainSimulatorImpl) writePodCache(pod *corev1.Pod, result bool, reason string) {

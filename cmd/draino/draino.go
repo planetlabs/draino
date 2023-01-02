@@ -490,6 +490,11 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
+	kubeVersion, err := cs.ServerVersion()
+	if err != nil {
+		return err
+	}
+
 	b := record.NewBroadcaster()
 	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")})
 	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: kubernetes.Component})
@@ -554,7 +559,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithEventRecorder(eventRecorder),
 		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
 		candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
-		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter)),
+		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion)),
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{}),
 		candidate_runner.WithPVProtector(pvProtector),
 		candidate_runner.WithDryRun(options.dryRun),
