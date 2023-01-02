@@ -274,7 +274,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True" + SuppliedConditionDurationSeparator + "0s", "hasSchedule": "true"},
+					Annotations: map[string]string{drainoConditionsAnnotationKey: `[{"type": "KernelPanic", "conditionStatus":"True", "delay":"0s"}]`, "hasSchedule": "true"},
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{
@@ -302,7 +302,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True" + SuppliedConditionDurationSeparator + "0s"},
+					Annotations: map[string]string{drainoConditionsAnnotationKey: `[{"type": "KernelPanic", "conditionStatus":"True", "delay":"0s"}]`},
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{
@@ -331,7 +331,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True" + SuppliedConditionDurationSeparator + "0s", drainRetryFailedAnnotationKey: drainRetryFailedAnnotationValue},
+					Annotations: map[string]string{drainoConditionsAnnotationKey: `[{"type": "KernelPanic", "conditionStatus":"True", "delay":"0s"}]`, drainRetryFailedAnnotationKey: drainRetryFailedAnnotationValue},
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{
@@ -359,7 +359,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 			obj: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name:        nodeName,
-					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True" + SuppliedConditionDurationSeparator + "0s", drainRetryFailedAnnotationKey: drainRetryRestartAnnotationValue},
+					Annotations: map[string]string{drainoConditionsAnnotationKey: `[{"type": "KernelPanic", "conditionStatus":"True", "delay":"0s"}]`, drainRetryFailedAnnotationKey: drainRetryRestartAnnotationValue},
 				},
 				Spec: core.NodeSpec{Unschedulable: true},
 				Status: core.NodeStatus{

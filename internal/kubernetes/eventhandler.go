@@ -18,6 +18,7 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -74,17 +75,10 @@ const (
 	drainRetryFailedAnnotationValue  = "failed"
 	drainRetryRestartAnnotationValue = "restart"
 
-	drainoConditionsAnnotationKey       = "draino.planet.com/conditions"
-	drainoConditionsAnnotationSeparator = "|" // Must be different than SuppliedConditionDurationSeparator else that would cause parsin problems
+	drainoConditionsAnnotationKey = "draino.planet.com/conditions"
 
 	NodeNLAEnableLabelKey = "node-lifecycle.datadoghq.com/enabled"
 )
-
-func init() {
-	if drainoConditionsAnnotationSeparator == SuppliedConditionDurationSeparator {
-		panic("drainoConditionsAnnotationSeparator and SuppliedConditionDurationSeparator must be different to avoid parsing issues")
-	}
-}
 
 // Opencensus measurements.
 var (
@@ -543,7 +537,7 @@ func (h *DrainingResourceEventHandler) shouldUncordon(ctx context.Context, n *co
 					for _, nodeCondition := range n.Status.Conditions {
 						if previousCondition.Type == nodeCondition.Type &&
 							previousCondition.Status != nodeCondition.Status &&
-							time.Since(nodeCondition.LastTransitionTime.Time) >= previousCondition.MinimumDuration {
+							time.Since(nodeCondition.LastTransitionTime.Time) >= previousCondition.parsedDelay {
 							return true, nil
 						}
 					}
@@ -570,17 +564,6 @@ func (h *DrainingResourceEventHandler) shouldUncordon(ctx context.Context, n *co
 	}
 
 	return false, nil
-}
-
-func parseConditionsFromAnnotation(n *core.Node) ([]SuppliedCondition, error) {
-	if n.Annotations == nil {
-		return nil, nil
-	}
-	if n.Annotations[drainoConditionsAnnotationKey] == "" {
-		return nil, nil
-	}
-	rawConditions := strings.Split(n.Annotations[drainoConditionsAnnotationKey], drainoConditionsAnnotationSeparator)
-	return ParseConditions(rawConditions)
 }
 
 func (h *DrainingResourceEventHandler) uncordon(ctx context.Context, n *core.Node) {
@@ -634,15 +617,12 @@ func (h *DrainingResourceEventHandler) cordon(ctx context.Context, n *core.Node,
 }
 
 func conditionAnnotationMutator(conditions []SuppliedCondition) func(*core.Node) {
-	var value []string
-	for _, c := range conditions {
-		value = append(value, fmt.Sprintf("%v=%v,%v", c.Type, c.Status, c.MinimumDuration))
-	}
+	b, _ := json.Marshal(conditions)
 	return func(n *core.Node) {
 		if n.Annotations == nil {
 			n.Annotations = make(map[string]string)
 		}
-		n.Annotations[drainoConditionsAnnotationKey] = strings.Join(value, drainoConditionsAnnotationSeparator)
+		n.Annotations[drainoConditionsAnnotationKey] = string(b)
 	}
 }
 

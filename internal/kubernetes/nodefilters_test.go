@@ -428,24 +428,30 @@ func TestParseConditions(t *testing.T) {
 		{
 			name:       "OldFormat",
 			conditions: []string{"Ready"},
-			expect:     []SuppliedCondition{SuppliedCondition{core.NodeConditionType("Ready"), core.ConditionStatus("True"), time.Duration(0) * time.Second}},
+			expect:     []SuppliedCondition{SuppliedCondition{Type: core.NodeConditionType("Ready"), Status: core.ConditionStatus("True"), parsedDelay: time.Duration(0) * time.Second}},
 		},
 		{
 			name:       "Mixed",
-			conditions: []string{"Ready", "OutOfDisk=True;10m"},
+			conditions: []string{"Ready", `OutOfDisk={ "delay":"10m"}`},
 			expect: []SuppliedCondition{
-				SuppliedCondition{core.NodeConditionType("Ready"), core.ConditionStatus("True"), time.Duration(0) * time.Second},
-				SuppliedCondition{core.NodeConditionType("OutOfDisk"), core.ConditionStatus("True"), time.Duration(10) * time.Minute},
+				{Type: core.NodeConditionType("Ready"), Status: core.ConditionStatus("True"), parsedDelay: time.Duration(0) * time.Second},
+				{Type: core.NodeConditionType("OutOfDisk"), Status: core.ConditionStatus("True"), parsedDelay: time.Duration(10) * time.Minute, Delay: "10m"},
 			},
 		},
 		{
 			name:       "NewFormat",
-			conditions: []string{"Ready=Unknown;30m"},
-			expect:     []SuppliedCondition{SuppliedCondition{core.NodeConditionType("Ready"), core.ConditionStatus("Unknown"), time.Duration(30) * time.Minute}},
+			conditions: []string{`Ready={"conditionStatus":"Unknown","delay":"30m"}`},
+			expect:     []SuppliedCondition{{Type: core.NodeConditionType("Ready"), Status: core.ConditionStatus("Unknown"), parsedDelay: time.Duration(30) * time.Minute, Delay: "30m"}},
 		},
 		{
 			name:       "FormatError",
 			conditions: []string{"Ready=Unknown;30err"},
+			expect:     nil,
+			expectErr:  true,
+		},
+		{
+			name:       "FormatErrorDuration",
+			conditions: []string{`Ready={"delay":"30err"}`},
 			expect:     nil,
 			expectErr:  true,
 		},

@@ -33,6 +33,7 @@ func (c *CLIHandlers) Initialize(logger logr.Logger,
 func (c *CLIHandlers) RegisterRoute(m *mux.Router) {
 	s := m.PathPrefix("/groups").Subrouter() //Handler(groupRouter)
 	s.HandleFunc("/list", c.handleGroupsList)
+	s.HandleFunc("/graph/last", c.handleGroupsGraphLast)
 }
 
 // handleGroupsList list all groups
@@ -46,6 +47,50 @@ func (h *CLIHandlers) handleGroupsList(writer http.ResponseWriter, request *http
 
 	writer.WriteHeader(http.StatusOK)
 	data, err := json.Marshal(groups)
+	if err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writer.Write(data)
+}
+
+// handleGroupsList list all groups
+func (h *CLIHandlers) handleGroupsGraphLast(writer http.ResponseWriter, request *http.Request) {
+	groupName := request.URL.Query().Get("group-name")
+	h.logger.Info("handleGroupsList", "path", request.URL.Path, "groupName", groupName)
+
+	var group groups.RunnerInfo
+
+	for k, v := range h.keysGetter.GetRunnerInfo() {
+		if string(k) == groupName {
+			group = v
+		}
+	}
+
+	if group.Key == "" {
+		writer.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	if group.Data == nil {
+		writer.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	di, ok := group.Data.Get(candidate_runner.CandidateRunnerInfoKey)
+	if !ok {
+		writer.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	candidateRunnerInfo, ok := (di).(candidate_runner.CandidateRunnerInfo)
+	if !ok {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	writer.WriteHeader(http.StatusOK)
+	data, err := json.Marshal(candidateRunnerInfo.GetLastNodeIteratorGraph(true))
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
 		return

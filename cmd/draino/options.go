@@ -150,7 +150,8 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.StringVar(&opt.skipCordonLimiterNodeAnnotation, "skip-cordon-limiter-node-annotation", "", "Skip all limiter logic if node has annotation. KEY[=VALUE]")
 	fs.StringVar(&opt.configName, "config-name", "", "Name of the draino configuration")
 
-	fs.StringSliceVar(&opt.conditions, "node-conditions", nil, "Nodes for which any of these conditions are true will be cordoned and drained.")
+	// We are using some values with json content, so don't use StringSlice: https://github.com/spf13/pflag/issues/370
+	fs.StringArrayVar(&opt.conditions, "node-conditions", nil, "Nodes for which any of these conditions are true will be cordoned and drained.")
 
 	fs.IntVar(&opt.maxDrainAttemptsBeforeFail, "max-drain-attempts-before-fail", 8, "Maximum number of failed drain attempts before giving-up on draining the node.")
 	fs.IntVar(&opt.maxNodeReplacementPerHour, "max-node-replacement-per-hour", 2, "Maximum number of nodes per hour for which draino can ask replacement.")

@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/planetlabs/draino/internal/candidate_runner/sorters"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -560,7 +561,10 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
 		candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion)),
-		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{}),
+		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{
+			sorters.CompareNodeAnnotationDrainASAP,
+			sorters.NewConditionComparator(globalConfig.SuppliedConditions),
+		}),
 		candidate_runner.WithPVProtector(pvProtector),
 		candidate_runner.WithDryRun(options.dryRun),
 		candidate_runner.WithRetryWall(retryWall),

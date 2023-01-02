@@ -102,67 +102,67 @@ func TestNewSortingTree2(t *testing.T) {
 		[]int{19, 55, 3, 13, 2, 21, 33, 15, 56, 21},
 		[]LessFunc[int]{By10, ReverseOnMod10})
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found := tree.Next()
 	assert.True(t, found, "3 should be found")
 	assert.Equal(t, 3, v, "Value should be 3")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "2 should be found")
 	assert.Equal(t, 2, v, "Value should be 2")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "19 should be found")
 	assert.Equal(t, 19, v, "Value should be 19")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "15 should be found")
 	assert.Equal(t, 15, v, "Value should be 15")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "13 should be found")
 	assert.Equal(t, 13, v, "Value should be 13")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "21 should be found")
 	assert.Equal(t, 21, v, "Value should be 21")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "21 should be found")
 	assert.Equal(t, 21, v, "Value should be 21")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "33 should be found")
 	assert.Equal(t, 33, v, "Value should be 33")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "56 should be found")
 	assert.Equal(t, 56, v, "Value should be 56")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.True(t, found, "55 should be found")
 	assert.Equal(t, 55, v, "Value should be 55")
 
-	fmt.Println(tree.AsDotGraph(true))
+	fmt.Println(tree.AsDotGraph(true, nil))
 
 	v, found = tree.Next()
 	assert.False(t, found, "Nothing should be left")

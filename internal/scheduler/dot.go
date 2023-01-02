@@ -41,7 +41,7 @@ func (e *edge) String() string {
 	return fmt.Sprintf("%v", e.node)
 }
 
-func (g *graph[T]) String() string {
+func (g *graph[T]) String(renderer ItemRenderer[T]) string {
 	out := `digraph tree {
 		rankdir=TB;
 		ordering="out";
@@ -55,7 +55,7 @@ func (g *graph[T]) String() string {
 		current [ fillcolor="#f4db68" color="#8e7c2c" ]
 `
 	for k, n := range g.nodes {
-		out += fmt.Sprintf("%s %s;\n", k, propertiesAsLabel(n))
+		out += fmt.Sprintf("%s %s;\n", k, propertiesAsLabel(n, renderer))
 	}
 	for k := range g.nodesEdges {
 		for _, v := range g.getEdges(k) {
@@ -66,7 +66,7 @@ func (g *graph[T]) String() string {
 	return out
 }
 
-type NodeNamer[T any] func(*node[T]) string
+type ItemRenderer[T any] func(T) string
 
 func (n *node[T]) buildDotGraph(g *graph[T], prefix string) {
 	g.addNode(prefix, n)
@@ -84,8 +84,8 @@ func valuesAsLabel[T any](n *node[T]) string {
 	return `[ ` + labelJoinedValues(n) + color(n) + ` ]`
 }
 
-func propertiesAsLabel[T any](n *node[T]) string {
-	return `[ ` + labelProperties(n) + color(n) + ` ]`
+func propertiesAsLabel[T any](n *node[T], renderer ItemRenderer[T]) string {
+	return `[ ` + labelProperties(n, renderer) + color(n) + ` ]`
 }
 
 func labelJoinedValues[T any](n *node[T]) string {
@@ -96,14 +96,18 @@ func labelJoinedValues[T any](n *node[T]) string {
 	return `label="` + strings.Join(name, "_") + `" `
 }
 
-func labelProperties[T any](n *node[T]) string {
+func labelProperties[T any](n *node[T], renderer ItemRenderer[T]) string {
 	count := fmt.Sprintf("count:%d\\n", len(n.rawCollection))
 	current := fmt.Sprintf("current:%d\\n", n.current)
 	leafValues := ""
 	if n.isLeaf() {
 		var values []string
 		for _, e := range n.rawCollection {
-			values = append(values, fmt.Sprintf("%v", e))
+			if renderer != nil {
+				values = append(values, fmt.Sprintf("%v", renderer(e)))
+			} else {
+				values = append(values, fmt.Sprintf("%v", e))
+			}
 		}
 		leafValues = "|" + strings.Join(values, "\\n")
 	}

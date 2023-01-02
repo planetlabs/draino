@@ -2,6 +2,7 @@ package filters
 
 import (
 	"fmt"
+	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"strings"
@@ -39,7 +40,7 @@ func (c *CompositeFilter) Filter(nodes []*v1.Node) (keep []*v1.Node) {
 			break
 		}
 	}
-	c.logger.Info("filtering", "result", strings.Join(filteringStr, CompositeFilterSeparator))
+	c.logger.V(logs.ZapDebug).Info("filtering", "result", strings.Join(filteringStr, CompositeFilterSeparator))
 	return nodes
 }
 

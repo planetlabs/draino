@@ -3,6 +3,7 @@ package candidate_runner
 import (
 	"context"
 	"fmt"
+	"github.com/DataDog/compute-go/logs"
 	"strings"
 	"time"
 
@@ -72,7 +73,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		defer func() {
 			dataInfo.LastTime = runner.clock.Now()
 			dataInfo.ProcessingDuration = runner.clock.Now().Sub(start).String()
-			info.Data.Set(CandidateRunnerInfo, dataInfo)
+			info.Data.Set(CandidateRunnerInfoKey, dataInfo)
 		}()
 
 		nodes, err := index.GetFromIndex[corev1.Node](ctx, runner.sharedIndexInformer, groups.SchedulingGroupIdx, string(info.Key))
@@ -111,7 +112,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		dataInfo.FilteredOutCount = evaluatedCount - len(nodes)
 
 		nodeProvider := runner.GetNodeIterator(nodes)
-		for node, ok := nodeProvider.Next(); ok && remainCandidateSlot > 0; node, ok = nodeProvider.Next() {
+		for node, ok := nodeProvider.Next(); ok; node, ok = nodeProvider.Next() {
 			logForNode := runner.logger.WithValues("node", node.Name)
 			// check that the node can be drained
 			canDrain, reasons, errDrainSimulation := runner.drainSimulator.SimulateDrain(ctx, node)
@@ -141,8 +142,12 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 				}
 			}
 			remainCandidateSlot--
+			if remainCandidateSlot <= 0 {
+				break
+			}
 		}
-		runner.logger.Info("Remain slot after drain candidate analysis", "count", remainCandidateSlot)
+		dataInfo.lastNodeIterator = nodeProvider
+		runner.logger.V(logs.ZapDebug).Info("Remain slot after drain candidate analysis", "count", remainCandidateSlot)
 		dataInfo.Slots = fmt.Sprintf("%d/%d", remainCandidateSlot, runner.maxSimultaneousCandidates)
 
 	}, runner.runEvery)

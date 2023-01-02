@@ -28,7 +28,7 @@ type SortingTree[T any] interface {
 
 	// AsDotGraph export the Tree as a digraph in dot format
 	// if url is set the output is a clickable URL to dreampuf.github.io/GraphvizOnline/
-	AsDotGraph(url bool) string
+	AsDotGraph(url bool, renderer ItemRenderer[T]) string
 }
 
 // bucketSlice helps to isolate items in buckets according to the sorting function.
@@ -106,16 +106,16 @@ func (s *sortingTreeImpl[T]) Next() (T, bool) {
 }
 
 // AsDotGraph implements the SortingTree interface for sortingTreeImpl
-func (s *sortingTreeImpl[T]) AsDotGraph(url bool) string {
+func (s *sortingTreeImpl[T]) AsDotGraph(url bool, renderer ItemRenderer[T]) string {
 	g := newGraph[T]()
 	if s.currentNode != nil {
 		g.setCurrent(s.currentNode)
 	}
 	s.root.buildDotGraph(g, "R")
 	if !url {
-		return g.String()
+		return g.String(renderer)
 	}
-	t := &url2.URL{Path: g.String()}
+	t := &url2.URL{Path: g.String(renderer)}
 	return "https://dreampuf.github.io/GraphvizOnline/#" + strings.TrimLeft(t.String(), "./")
 }
 

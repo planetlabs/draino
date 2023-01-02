@@ -106,9 +106,9 @@ func TestOffendingConditions(t *testing.T) {
 					{Type: "Cool", Status: core.ConditionUnknown},
 				}},
 			},
-			conditions: []string{"Cool=Unknown" + SuppliedConditionDurationSeparator + "10m"},
+			conditions: []string{`Cool={"conditionStatus":"Unknown", "delay":"10m"}`},
 			expected: []SuppliedCondition{
-				{Type: "Cool", Status: core.ConditionUnknown, MinimumDuration: 10 * time.Minute},
+				{Type: "Cool", Status: core.ConditionUnknown, parsedDelay: 10 * time.Minute, Delay: "10m"},
 			},
 		},
 		{
@@ -119,7 +119,7 @@ func TestOffendingConditions(t *testing.T) {
 					{Type: "Cool", Status: core.ConditionUnknown, LastTransitionTime: meta.NewTime(time.Now().Add(time.Duration(-9) * time.Minute))},
 				}},
 			},
-			conditions: []string{"Cool=Unknown" + SuppliedConditionDurationSeparator + "10m"},
+			conditions: []string{`Cool={"conditionStatus":"Unknown", "delay":"10m", "Priority":55}`},
 			expected:   nil,
 		},
 		{
@@ -130,16 +130,20 @@ func TestOffendingConditions(t *testing.T) {
 					{Type: "Cool", Status: core.ConditionUnknown, LastTransitionTime: meta.NewTime(time.Now().Add(time.Duration(-15) * time.Minute))},
 				}},
 			},
-			conditions: []string{"Cool=Unknown" + SuppliedConditionDurationSeparator + "14m"},
+			conditions: []string{`Cool={"conditionStatus":"Unknown", "delay":"14m","priority":99}`},
 			expected: []SuppliedCondition{
-				{Type: "Cool", Status: core.ConditionUnknown, MinimumDuration: 14 * time.Minute},
+				{Type: "Cool", Status: core.ConditionUnknown, parsedDelay: 14 * time.Minute, Delay: "14m", Priority: 99},
 			},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			suppliedConditions, _ := ParseConditions(tc.conditions)
+			suppliedConditions, err := ParseConditions(tc.conditions)
+			if err != nil {
+				t.Errorf(err.Error())
+				return
+			}
 			h := NewDrainingResourceEventHandler(fake.NewSimpleClientset(), &NoopCordonDrainer{}, nil, NewEventRecorder(&record.FakeRecorder{}), WithGlobalConfigHandler(GlobalConfig{SuppliedConditions: suppliedConditions}))
 			badConditions := GetNodeOffendingConditions(tc.obj, h.globalConfig.SuppliedConditions)
 			if !reflect.DeepEqual(badConditions, tc.expected) {
