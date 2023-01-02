@@ -222,7 +222,7 @@ func AtLeastOneConditionAcceptedByTheNode(conditions []string, n *core.Node) boo
 	return false
 }
 
-func hasAllowConditionList(n *core.Node) bool {
+func HasAllowConditionList(n *core.Node) bool {
 	_, ok := n.Annotations[allowedConditionAnnotationKey]
 	return ok
 }

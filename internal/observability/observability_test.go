@@ -1,4 +1,4 @@
-package kubernetes
+package observability
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -27,7 +28,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 		name              string
 		configName        string
 		nodeFilterFunc    func(obj interface{}) bool
-		podFilterFunc     PodFilterFunc
+		podFilterFunc     kubernetes.PodFilterFunc
 		objects           []runtime.Object
 		node              *v1.Node
 		expectedValue     string
@@ -38,7 +39,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "no label - not in-scope --> update to out of scope",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode(""),
 			expectedValue:     OutOfScopeLabelValue,
@@ -48,7 +49,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "out of scope label - not in-scope --> no update",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode(OutOfScopeLabelValue),
 			expectedValue:     OutOfScopeLabelValue,
@@ -81,7 +82,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "no label - in-scope --> update needed",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode(""),
 			expectedValue:     "draino1",
@@ -91,7 +92,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "out of scope label - in-scope --> update needed",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode(OutOfScopeLabelValue),
 			expectedValue:     "draino1",
@@ -111,7 +112,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "label present - in-scope --> no update needed",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode("draino1"),
 			expectedValue:     "draino1",
@@ -121,7 +122,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "other label present - in-scope --> update needed",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode("draino2"),
 			expectedValue:     "draino1.draino2",
@@ -131,7 +132,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "label present - not in-scope --> update needed",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode("draino1"),
 			expectedValue:     OutOfScopeLabelValue,
@@ -141,7 +142,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "label present with other - not in-scope --> update needed",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return false }, // not in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode("draino1.other-draino"),
 			expectedValue:     "other-draino",
@@ -151,7 +152,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 			name:              "sorts values",
 			configName:        "draino1",
 			nodeFilterFunc:    func(obj interface{}) bool { return true }, // in scope
-			podFilterFunc:     NewPodFilters(),
+			podFilterFunc:     kubernetes.NewPodFilters(),
 			objects:           []runtime.Object{},
 			node:              getNode("draino2.draino1"),
 			expectedValue:     "draino1.draino2",
@@ -161,12 +162,12 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			runtimeObjectStore, closeFunc := RunStoreForTest(context.Background(), kclient)
+			runtimeObjectStore, closeFunc := kubernetes.RunStoreForTest(context.Background(), kclient)
 			defer closeFunc()
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
-				globalConfig:       GlobalConfig{ConfigName: tt.configName},
+				globalConfig:       kubernetes.GlobalConfig{ConfigName: tt.configName},
 				nodeFilterFunc:     tt.nodeFilterFunc,
 				podFilterFunc:      tt.podFilterFunc,
 				logger:             zap.NewNop(),
@@ -193,10 +194,10 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 	tests := []struct {
 		name           string
 		nodeName       string
-		nodeStore      NodeStore
-		podStore       PodStore
+		nodeStore      kubernetes.NodeStore
+		podStore       kubernetes.PodStore
 		configName     string
-		conditions     []SuppliedCondition
+		conditions     []kubernetes.SuppliedCondition
 		nodeFilterFunc func(obj interface{}) bool
 		objects        []runtime.Object
 		validationFunc func(node *v1.Node) bool
@@ -242,17 +243,17 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
-			runtimeObjectStore, closeFunc := RunStoreForTest(context.Background(), kclient)
+			runtimeObjectStore, closeFunc := kubernetes.RunStoreForTest(context.Background(), kclient)
 			defer closeFunc()
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
-				globalConfig: GlobalConfig{
+				globalConfig: kubernetes.GlobalConfig{
 					ConfigName:         tt.configName,
 					SuppliedConditions: tt.conditions,
 				},
 				nodeFilterFunc: tt.nodeFilterFunc,
-				podFilterFunc:  NewPodFilters(),
+				podFilterFunc:  kubernetes.NewPodFilters(),
 				logger:         zap.NewNop(),
 			}
 			err := s.patchNodeLabels(tt.nodeName)
@@ -316,7 +317,7 @@ func TestPVCStorageClassCleanupEnabled(t *testing.T) {
 			name: "default true, explicit opt-out",
 			p: &v1.Pod{
 				ObjectMeta: meta.ObjectMeta{
-					Annotations: map[string]string{PVCStorageClassCleanupAnnotationKey: PVCStorageClassCleanupAnnotationFalseValue},
+					Annotations: map[string]string{kubernetes.PVCStorageClassCleanupAnnotationKey: kubernetes.PVCStorageClassCleanupAnnotationFalseValue},
 				},
 			},
 			defaultTrueIfNoEvictionUrl: true,
@@ -326,7 +327,7 @@ func TestPVCStorageClassCleanupEnabled(t *testing.T) {
 			name: "default false, but explicit opt-in",
 			p: &v1.Pod{
 				ObjectMeta: meta.ObjectMeta{
-					Annotations: map[string]string{PVCStorageClassCleanupAnnotationKey: PVCStorageClassCleanupAnnotationTrueValue},
+					Annotations: map[string]string{kubernetes.PVCStorageClassCleanupAnnotationKey: kubernetes.PVCStorageClassCleanupAnnotationTrueValue},
 				},
 			},
 			defaultTrueIfNoEvictionUrl: false,
@@ -336,7 +337,7 @@ func TestPVCStorageClassCleanupEnabled(t *testing.T) {
 			name: "default true, with evictionURL only",
 			p: &v1.Pod{
 				ObjectMeta: meta.ObjectMeta{
-					Annotations: map[string]string{EvictionAPIURLAnnotationKey: "url"},
+					Annotations: map[string]string{kubernetes.EvictionAPIURLAnnotationKey: "url"},
 				},
 			},
 			defaultTrueIfNoEvictionUrl: true,
@@ -346,7 +347,7 @@ func TestPVCStorageClassCleanupEnabled(t *testing.T) {
 			name: "default true, with evictionURL and explicit opt-in",
 			p: &v1.Pod{
 				ObjectMeta: meta.ObjectMeta{
-					Annotations: map[string]string{PVCStorageClassCleanupAnnotationKey: PVCStorageClassCleanupAnnotationTrueValue, EvictionAPIURLAnnotationKey: "url"},
+					Annotations: map[string]string{kubernetes.PVCStorageClassCleanupAnnotationKey: kubernetes.PVCStorageClassCleanupAnnotationTrueValue, kubernetes.EvictionAPIURLAnnotationKey: "url"},
 				},
 			},
 			defaultTrueIfNoEvictionUrl: true,
@@ -356,10 +357,10 @@ func TestPVCStorageClassCleanupEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.p)
-			store, closingFunc := RunStoreForTest(context.Background(), kclient)
+			store, closingFunc := kubernetes.RunStoreForTest(context.Background(), kclient)
 			defer closingFunc()
 
-			assert.Equalf(t, tt.want, PVCStorageClassCleanupEnabled(tt.p, store, tt.defaultTrueIfNoEvictionUrl), "PVCStorageClassCleanupEnabled test=%s", tt.name)
+			assert.Equalf(t, tt.want, kubernetes.PVCStorageClassCleanupEnabled(tt.p, store, tt.defaultTrueIfNoEvictionUrl), "PVCStorageClassCleanupEnabled test=%s", tt.name)
 		})
 	}
 }

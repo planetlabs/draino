@@ -1,15 +1,17 @@
 package main
 
 import (
+	"net/http"
+
 	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/observability"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	"gopkg.in/alecthomas/kingpin.v2"
-	"net/http"
 )
 
 func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
@@ -87,6 +89,7 @@ func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
 	}}
 
 	groups.RegisterMetrics(promOptions.Registry)
+	observability.RegisterNewMetrics(promOptions.Registry, options.scopeAnalysisPeriod)
 
 	go func() {
 		logger.Info("web server is running", zap.String("listen", options.listen))

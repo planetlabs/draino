@@ -22,7 +22,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"io/ioutil"
 	"net/http"
 	url2 "net/url"
@@ -30,12 +29,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+
 	"github.com/DataDog/go-service-authn/pkg/serviceauthentication/authnclient"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	core "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1103,6 +1105,23 @@ func (d *APICordonDrainer) awaitPVDeletion(ctx context.Context, pv *core.Persist
 		}
 		return false, nil
 	})
+}
+
+func PVCStorageClassCleanupEnabled(p *v1.Pod, store RuntimeObjectStore, defaultTrueIfNoEvictionUrl bool) bool {
+	valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, p, store)
+	if valAnnotation == PVCStorageClassCleanupAnnotationTrueValue {
+		return true
+	}
+	if valAnnotation == PVCStorageClassCleanupAnnotationFalseValue {
+		return false
+	}
+
+	if defaultTrueIfNoEvictionUrl {
+		_, evictionUrlFound := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, p, store)
+		return !evictionUrlFound
+	}
+
+	return false
 }
 
 // deletePVCAssociatedWithStorageClass takes care of deleting the PVCs associated with the annotated classes

@@ -1,4 +1,4 @@
-package kubernetes
+package observability
 
 import (
 	"context"
@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/planetlabs/draino/internal/groups"
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
@@ -18,6 +21,7 @@ import (
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/workqueue"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const (
@@ -28,7 +32,8 @@ const (
 )
 
 type DrainoConfigurationObserver interface {
-	Runner
+	kubernetes.Runner
+	manager.Runnable
 	IsInScope(node *v1.Node) (bool, string, error)
 	Reset()
 }
@@ -99,7 +104,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureNodesWithNodeOptions,
 		Description: "Number of nodes for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamePrefix, TagNodegroupNamespace, TagTeam, TagDrainStatus, TagConditions, TagUserOptInViaPodAnnotation, TagUserOptOutViaPodAnnotation, TagUserAllowedConditionsAnnotation, TagDrainRetry, TagDrainRetryFailed, TagDrainRetryCustomMaxAttempt, TagPVCManagement, TagPreprovisioning, TagInScope, TagUserEvictionURL},
+		TagKeys:     []tag.Key{kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam, kubernetes.TagDrainStatus, kubernetes.TagConditions, kubernetes.TagUserOptInViaPodAnnotation, kubernetes.TagUserOptOutViaPodAnnotation, kubernetes.TagUserAllowedConditionsAnnotation, kubernetes.TagDrainRetry, kubernetes.TagDrainRetryFailed, kubernetes.TagDrainRetryCustomMaxAttempt, kubernetes.TagPVCManagement, kubernetes.TagPreprovisioning, kubernetes.TagInScope, kubernetes.TagUserEvictionURL},
 	}
 
 	g.previousMeasureCPUsWithNodeOptions = &view.View{
@@ -107,7 +112,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureCPUsWithNodeOptions,
 		Description: "Number of cpu for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{TagNodegroupName, TagNodegroupNamePrefix, TagNodegroupNamespace, TagTeam, TagInScope, TagConditions},
+		TagKeys:     []tag.Key{kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam, kubernetes.TagInScope, kubernetes.TagConditions},
 	}
 
 	view.Register(g.previousMeasureNodesWithNodeOptions)
@@ -119,7 +124,7 @@ func (g *metricsObjectsForObserver) reset() error {
 // It also exposes a metrics 'draino_in_scope_nodes_total' that count the nodes of a nodegroup that are in scope of a given configuration. The metric is available per condition. A condition named 'any' is virtually defined to groups all the nodes (with or without conditions).
 type DrainoConfigurationObserverImpl struct {
 	kclient            client.Interface
-	runtimeObjectStore RuntimeObjectStore
+	runtimeObjectStore kubernetes.RuntimeObjectStore
 	analysisPeriod     time.Duration
 
 	// queueNodeToBeUpdated: To avoid burst in node updates the work to be done is queued. This way we can pace the node updates.
@@ -127,19 +132,21 @@ type DrainoConfigurationObserverImpl struct {
 	queueNodeToBeUpdated workqueue.RateLimitingInterface
 	nodePatchLimiter     flowcontrol.RateLimiter // client side protection for APIServer
 
-	globalConfig        GlobalConfig
+	globalConfig        kubernetes.GlobalConfig
 	nodeFilterFunc      func(obj interface{}) bool
-	podFilterFunc       PodFilterFunc
-	userOptOutPodFilter PodFilterFunc
-	userOptInPodFilter  PodFilterFunc
+	podFilterFunc       kubernetes.PodFilterFunc
+	userOptOutPodFilter kubernetes.PodFilterFunc
+	userOptInPodFilter  kubernetes.PodFilterFunc
 	logger              *zap.Logger
+	retryWall           drain.RetryWall
+	groupKeyGetter      groups.GroupKeyGetter
 
 	metricsObjects metricsObjectsForObserver
 }
 
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
-func NewScopeObserver(client client.Interface, globalConfig GlobalConfig, runtimeObjectStore RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger) DrainoConfigurationObserver {
+func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalConfig, runtimeObjectStore kubernetes.RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter kubernetes.PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger, retryWall drain.RetryWall, groupKeyGetter groups.GroupKeyGetter) DrainoConfigurationObserver {
 
 	// We are not adding a BucketRateLimiter to that list because the same nodes are going to be appended periodically if the update fails
 	// Failing nodes will already be in the queue with a retry. Added a BucketRL proved to be a problem here is the client side is not able to dequeue
@@ -164,6 +171,8 @@ func NewScopeObserver(client client.Interface, globalConfig GlobalConfig, runtim
 		globalConfig:         globalConfig,
 		queueNodeToBeUpdated: workqueue.NewNamedRateLimitingQueue(workqueue.NewMaxOfRateLimiter(rateLimiters...), "nodeUpdater"),
 		nodePatchLimiter:     flowcontrol.NewTokenBucketRateLimiter(50, 10), // client side protection
+		retryWall:            retryWall,
+		groupKeyGetter:       groupKeyGetter,
 	}
 	scopeObserver.metricsObjects.initializeQueueMetrics()
 
@@ -171,7 +180,7 @@ func NewScopeObserver(client client.Interface, globalConfig GlobalConfig, runtim
 }
 
 type inScopeTags struct {
-	NodeTagsValues
+	kubernetes.NodeTagsValues
 	DrainStatus                     string
 	InScope                         bool
 	PreprovisioningEnabled          bool
@@ -187,13 +196,18 @@ type inScopeTags struct {
 }
 
 type inScopeCPUTags struct {
-	NodeTagsValues
+	kubernetes.NodeTagsValues
 	InScope   bool
 	Condition string
 }
 
 type inScopeMetrics map[inScopeTags]int64
 type inScopeCPUMetrics map[inScopeCPUTags]int64
+
+func (s *DrainoConfigurationObserverImpl) Start(ctx context.Context) error {
+	s.Run(ctx.Done())
+	return nil
+}
 
 func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 	ticker := time.NewTicker(s.analysisPeriod)
@@ -231,26 +245,28 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					continue
 				}
 
-				nodeTags := GetNodeTagsValues(node)
-				conditions := GetNodeOffendingConditions(node, s.globalConfig.SuppliedConditions)
+				s.ProduceNodeMetrics(node)
+
+				nodeTags := kubernetes.GetNodeTagsValues(node)
+				conditions := kubernetes.GetNodeOffendingConditions(node, s.globalConfig.SuppliedConditions)
 				if node.Annotations == nil {
 					node.Annotations = map[string]string{}
 				}
 
-				_, useDefaultRetryMaxAttempt, _ := GetNodeRetryMaxAttempt(node)
+				_, useDefaultRetryMaxAttempt, _ := kubernetes.GetNodeRetryMaxAttempt(node)
 
 				t := inScopeTags{
 					NodeTagsValues:                  nodeTags,
 					DrainStatus:                     getDrainStatusStr(node),
 					InScope:                         NodeInScopeWithConditionCheck(conditions, node),
-					PreprovisioningEnabled:          node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue,
+					PreprovisioningEnabled:          node.Annotations[kubernetes.PreprovisioningAnnotationKey] == kubernetes.PreprovisioningAnnotationValue,
 					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
-					DrainRetry:                      DrainRetryEnabled(node),
-					DrainRetryFailed:                HasDrainRetryFailedAnnotation(node),
+					DrainRetry:                      kubernetes.DrainRetryEnabled(node),
+					DrainRetryFailed:                kubernetes.HasDrainRetryFailedAnnotation(node),
 					DrainRetryCustomMaxAttempts:     !useDefaultRetryMaxAttempt,
 					UserOptOutViaPodAnnotation:      s.HasPodWithUserOptOutAnnotation(node),
 					UserOptInViaPodAnnotation:       s.HasPodWithUserOptInAnnotation(node),
-					UserAllowedConditionsAnnotation: hasAllowConditionList(node),
+					UserAllowedConditionsAnnotation: kubernetes.HasAllowConditionList(node),
 					TagUserEvictionURLViaAnnotation: s.HasEvictionUrlViaAnnotation(node),
 				}
 
@@ -259,7 +275,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					InScope:        NodeInScopeWithConditionCheck(conditions, node),
 				}
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
-				conditionsWithAll := append(GetConditionsTypes(conditions), "any")
+				conditionsWithAll := append(kubernetes.GetConditionsTypes(conditions), "any")
 				for _, c := range conditionsWithAll {
 					t.Condition = c
 					newMetricsValue[t] = newMetricsValue[t] + 1
@@ -274,9 +290,16 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 	}
 }
 
-func NodeInScopeWithConditionCheck(conditions []SuppliedCondition, node *v1.Node) bool {
-	conditionsStr := GetConditionsTypes(conditions)
-	return (len(node.Labels[ConfigurationLabelKey]) > 0 && node.Labels[ConfigurationLabelKey] != OutOfScopeLabelValue) && AtLeastOneConditionAcceptedByTheNode(conditionsStr, node)
+func (s *DrainoConfigurationObserverImpl) ProduceNodeMetrics(node *v1.Node) {
+	nodeLabelValues := []string{node.Name, string(s.groupKeyGetter.GetGroupKey(node))}
+	if retries := s.retryWall.GetDrainRetryAttemptsCount(node); retries != 0 {
+		nodeRetries.WithLabelValues(nodeLabelValues...).Set(float64(retries))
+	}
+}
+
+func NodeInScopeWithConditionCheck(conditions []kubernetes.SuppliedCondition, node *v1.Node) bool {
+	conditionsStr := kubernetes.GetConditionsTypes(conditions)
+	return (len(node.Labels[ConfigurationLabelKey]) > 0 && node.Labels[ConfigurationLabelKey] != OutOfScopeLabelValue) && kubernetes.AtLeastOneConditionAcceptedByTheNode(conditionsStr, node)
 }
 
 // updateGauges is in charge of updating the gauges values and purging the series that do not exist anymore
@@ -294,30 +317,30 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 	for tagsValues, count := range metrics {
 		// This list of tags must be in sync with the list of tags in the function metricsObjectsForObserver::reset()
 		allTags, _ := tag.New(context.Background(),
-			tag.Upsert(TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(TagNodegroupName, tagsValues.NgName), tag.Upsert(TagNodegroupNamePrefix, GetNodeGroupNamePrefix(tagsValues.NgName)),
-			tag.Upsert(TagTeam, tagsValues.Team),
-			tag.Upsert(TagDrainStatus, tagsValues.DrainStatus),
-			tag.Upsert(TagConditions, tagsValues.Condition),
-			tag.Upsert(TagInScope, strconv.FormatBool(tagsValues.InScope)),
-			tag.Upsert(TagPreprovisioning, strconv.FormatBool(tagsValues.PreprovisioningEnabled)),
-			tag.Upsert(TagPVCManagement, strconv.FormatBool(tagsValues.PVCManagementEnabled)),
-			tag.Upsert(TagDrainRetry, strconv.FormatBool(tagsValues.DrainRetry)),
-			tag.Upsert(TagDrainRetryFailed, strconv.FormatBool(tagsValues.DrainRetryFailed)),
-			tag.Upsert(TagDrainRetryCustomMaxAttempt, strconv.FormatBool(tagsValues.DrainRetryCustomMaxAttempts)),
-			tag.Upsert(TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
-			tag.Upsert(TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
-			tag.Upsert(TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)),
-			tag.Upsert(TagUserAllowedConditionsAnnotation, strconv.FormatBool(tagsValues.UserAllowedConditionsAnnotation)))
+			tag.Upsert(kubernetes.TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(kubernetes.TagNodegroupName, tagsValues.NgName), tag.Upsert(kubernetes.TagNodegroupNamePrefix, kubernetes.GetNodeGroupNamePrefix(tagsValues.NgName)),
+			tag.Upsert(kubernetes.TagTeam, tagsValues.Team),
+			tag.Upsert(kubernetes.TagDrainStatus, tagsValues.DrainStatus),
+			tag.Upsert(kubernetes.TagConditions, tagsValues.Condition),
+			tag.Upsert(kubernetes.TagInScope, strconv.FormatBool(tagsValues.InScope)),
+			tag.Upsert(kubernetes.TagPreprovisioning, strconv.FormatBool(tagsValues.PreprovisioningEnabled)),
+			tag.Upsert(kubernetes.TagPVCManagement, strconv.FormatBool(tagsValues.PVCManagementEnabled)),
+			tag.Upsert(kubernetes.TagDrainRetry, strconv.FormatBool(tagsValues.DrainRetry)),
+			tag.Upsert(kubernetes.TagDrainRetryFailed, strconv.FormatBool(tagsValues.DrainRetryFailed)),
+			tag.Upsert(kubernetes.TagDrainRetryCustomMaxAttempt, strconv.FormatBool(tagsValues.DrainRetryCustomMaxAttempts)),
+			tag.Upsert(kubernetes.TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
+			tag.Upsert(kubernetes.TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
+			tag.Upsert(kubernetes.TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)),
+			tag.Upsert(kubernetes.TagUserAllowedConditionsAnnotation, strconv.FormatBool(tagsValues.UserAllowedConditionsAnnotation)))
 		stats.Record(allTags, s.metricsObjects.MeasureNodesWithNodeOptions.M(count))
 	}
 
 	for tagsValues, count := range metricsCPU {
 		// This list of tags must be in sync with the list of tags in the function metricsObjectsForObserver::reset()
 		allTags, _ := tag.New(context.Background(),
-			tag.Upsert(TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(TagNodegroupName, tagsValues.NgName), tag.Upsert(TagNodegroupNamePrefix, GetNodeGroupNamePrefix(tagsValues.NgName)),
-			tag.Upsert(TagTeam, tagsValues.Team),
-			tag.Upsert(TagConditions, tagsValues.Condition),
-			tag.Upsert(TagInScope, strconv.FormatBool(tagsValues.InScope)))
+			tag.Upsert(kubernetes.TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(kubernetes.TagNodegroupName, tagsValues.NgName), tag.Upsert(kubernetes.TagNodegroupNamePrefix, kubernetes.GetNodeGroupNamePrefix(tagsValues.NgName)),
+			tag.Upsert(kubernetes.TagTeam, tagsValues.Team),
+			tag.Upsert(kubernetes.TagConditions, tagsValues.Condition),
+			tag.Upsert(kubernetes.TagInScope, strconv.FormatBool(tagsValues.InScope)))
 		stats.Record(allTags, s.metricsObjects.MeasureCPUsWithNodeOptions.M(count))
 	}
 }
@@ -344,7 +367,7 @@ func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string,
 	if err != nil {
 		return "", false, err
 	}
-	LogForVerboseNode(s.logger, node, "InScope information", zap.Bool("inScope", inScope), zap.String("reason", reason))
+	kubernetes.LogForVerboseNode(s.logger, node, "InScope information", zap.Bool("inScope", inScope), zap.String("reason", reason))
 	if inScope {
 		configs = append(configs, s.globalConfig.ConfigName)
 	}
@@ -363,7 +386,7 @@ func (s *DrainoConfigurationObserverImpl) IsInScope(node *v1.Node) (inScope bool
 		return false, "labelSelection", nil
 	}
 
-	if hasLabel, enabled := IsNodeNLAEnableByLabel(node); hasLabel {
+	if hasLabel, enabled := kubernetes.IsNodeNLAEnableByLabel(node); hasLabel {
 		if !enabled {
 			return false, "Node label explicit opt-out", nil
 		}
@@ -441,7 +464,7 @@ func (s *DrainoConfigurationObserverImpl) patchNodeLabels(nodeName string) error
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
 		}
-		err := PatchNodeLabelKey(s.globalConfig.Context, s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
+		err := kubernetes.PatchNodeLabelKey(s.globalConfig.Context, s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil
@@ -468,9 +491,9 @@ func (s *DrainoConfigurationObserverImpl) Reset() {
 	for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 		s.logger.Info("Resetting labels for node", zap.String("node", node.Name))
 		if node.Labels[ConfigurationLabelKey] != "" {
-			if err := RetryWithTimeout(func() error {
+			if err := kubernetes.RetryWithTimeout(func() error {
 				time.Sleep(2 * time.Second)
-				err := PatchDeleteNodeLabelKey(s.globalConfig.Context, s.kclient, node.Name, ConfigurationLabelKey)
+				err := kubernetes.PatchDeleteNodeLabelKey(s.globalConfig.Context, s.kclient, node.Name, ConfigurationLabelKey)
 				if err != nil {
 					s.logger.Info("Failed attempt to reset labels", zap.String("node", node.Name),
 						zap.Error(err))
@@ -497,27 +520,10 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithPVCManagementEnabled(node *v
 		return false
 	}
 	for _, p := range pods {
-		if PVCStorageClassCleanupEnabled(p, s.runtimeObjectStore, s.globalConfig.PVCManagementEnableIfNoEvictionUrl) {
+		if kubernetes.PVCStorageClassCleanupEnabled(p, s.runtimeObjectStore, s.globalConfig.PVCManagementEnableIfNoEvictionUrl) {
 			return true
 		}
 	}
-	return false
-}
-
-func PVCStorageClassCleanupEnabled(p *v1.Pod, store RuntimeObjectStore, defaultTrueIfNoEvictionUrl bool) bool {
-	valAnnotation, _ := GetAnnotationFromPodOrController(PVCStorageClassCleanupAnnotationKey, p, store)
-	if valAnnotation == PVCStorageClassCleanupAnnotationTrueValue {
-		return true
-	}
-	if valAnnotation == PVCStorageClassCleanupAnnotationFalseValue {
-		return false
-	}
-
-	if defaultTrueIfNoEvictionUrl {
-		_, evictionUrlFound := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, p, store)
-		return !evictionUrlFound
-	}
-
 	return false
 }
 
@@ -531,7 +537,7 @@ func (s *DrainoConfigurationObserverImpl) HasEvictionUrlViaAnnotation(node *v1.N
 		return false
 	}
 	for _, p := range pods {
-		if _, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, p, s.runtimeObjectStore); ok {
+		if _, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIURLAnnotationKey, p, s.runtimeObjectStore); ok {
 			return true
 		}
 	}
@@ -546,7 +552,7 @@ func (s *DrainoConfigurationObserverImpl) HasPodWithUserOptInAnnotation(node *v1
 	return s.hasPodThatMatchFilter(node, s.userOptInPodFilter)
 }
 
-func (s *DrainoConfigurationObserverImpl) hasPodThatMatchFilter(node *v1.Node, filter PodFilterFunc) bool {
+func (s *DrainoConfigurationObserverImpl) hasPodThatMatchFilter(node *v1.Node, filter kubernetes.PodFilterFunc) bool {
 	if node == nil {
 		return false
 	}
@@ -569,17 +575,17 @@ func (s *DrainoConfigurationObserverImpl) hasPodThatMatchFilter(node *v1.Node, f
 }
 
 func getDrainStatusStr(node *v1.Node) string {
-	drainStatus, err := GetDrainConditionStatus(node)
+	drainStatus, err := kubernetes.GetDrainConditionStatus(node)
 	if err != nil {
 		return "Error"
 	}
 	switch {
 	case drainStatus.Completed:
-		return CompletedStr
+		return kubernetes.CompletedStr
 	case drainStatus.Failed:
-		return FailedStr
+		return kubernetes.FailedStr
 	case drainStatus.Marked:
-		return ScheduledStr
+		return kubernetes.ScheduledStr
 	}
 	return "None"
 }

@@ -34,9 +34,9 @@ const (
 	DrainGroupAnnotation              = "draino/drain-group"          // this one adds subgroup to the default group (subgroup creation)
 	DrainGroupOverrideAnnotation      = "draino/drain-group-override" // this one completely overrides the default group
 
-	preprovisioningAnnotationKey        = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
-	preprovisioningAnnotationValue      = "true"
-	preprovisioningFalseAnnotationValue = "false"
+	PreprovisioningAnnotationKey        = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
+	PreprovisioningAnnotationValue      = "true"
+	PreprovisioningFalseAnnotationValue = "false"
 )
 
 type DrainScheduler interface {
@@ -422,7 +422,7 @@ func (d *DrainSchedules) handleDrainFailure(ctx context.Context, sched *schedule
 }
 
 func (d *DrainSchedules) hasPreprovisioningAnnotation(node *v1.Node) bool {
-	return node.Annotations[preprovisioningAnnotationKey] == preprovisioningAnnotationValue || (d.preprovisioningConfiguration.AllNodesByDefault && !(node.Annotations[preprovisioningAnnotationKey] == preprovisioningFalseAnnotationValue))
+	return node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningAnnotationValue || (d.preprovisioningConfiguration.AllNodesByDefault && !(node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningFalseAnnotationValue))
 }
 
 type AlreadyScheduledError struct {

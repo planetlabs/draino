@@ -38,6 +38,7 @@ import (
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"github.com/planetlabs/draino/internal/observability"
 	protector "github.com/planetlabs/draino/internal/protector"
 	"github.com/spf13/cobra"
 	"k8s.io/utils/clock"
@@ -47,7 +48,6 @@ import (
 	"github.com/DataDog/compute-go/controllerruntime"
 	"github.com/DataDog/compute-go/infraparameters"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -333,15 +333,6 @@ func main() {
 			return fmt.Errorf("failed to get hostname: %v", err)
 		}
 
-		scopeObserver := kubernetes.NewScopeObserver(cs, globalConfig, runtimeObjectStoreImpl, options.scopeAnalysisPeriod, cordonPodFilteringFunc,
-			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, options.optInPodAnnotations...),
-			kubernetes.PodOrControllerHasAnyOfTheAnnotations(runtimeObjectStoreImpl, options.cordonProtectedPodAnnotations...),
-			nodeLabelFilterFunc, log)
-		go scopeObserver.Run(ctx.Done())
-		if options.resetScopeLabel == true {
-			go scopeObserver.Reset()
-		}
-
 		lock, err := resourcelock.New(
 			resourcelock.EndpointsLeasesResourceLock,
 			cfg.InfraParam.Namespace,
@@ -444,27 +435,6 @@ type filtersDefinitions struct {
 	drainPodFilter  kubernetes.PodFilterFunc
 
 	nodeLabelFilter kubernetes.NodeLabelFilterFunc
-}
-
-// RunTillSuccess implement's the manager.Runnable interface and should be used to execute a specific task until it's done.
-// The main intention was to run initialization processes.
-type RunTillSuccess struct {
-	logger *logr.Logger
-	period time.Duration
-	fn     func(context.Context) error
-}
-
-func (r *RunTillSuccess) Start(parent context.Context) error {
-	ctx, cancel := context.WithCancel(parent)
-	wait.UntilWithContext(ctx, func(ctx context.Context) {
-		err := r.fn(ctx)
-		if err != nil {
-			r.logger.Error(err, "failed to run component")
-			return
-		}
-		cancel()
-	}, r.period)
-	return nil
 }
 
 // getInitDrainBufferRunner returns a Runnable that is responsible for initializing the drain buffer
@@ -604,6 +574,24 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	if errCli := cliHandlers.Initialize(logger, groupRegistry, drainCandidateRunnerFactory.BuildCandidateInfo(), drainRunnerFactory.BuildRunner()); errCli != nil {
 		logger.Error(errCli, "Failed to initialize CLIHandlers")
 		return errCli
+	}
+
+	scopeObserver := observability.NewScopeObserver(cs, globalConfig, store, options.scopeAnalysisPeriod, filtersDef.cordonPodFilter,
+		kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.optInPodAnnotations...),
+		kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.cordonProtectedPodAnnotations...),
+		filtersDef.nodeLabelFilter, zlog, retryWall, keyGetter)
+
+	if options.resetScopeLabel == true {
+		err = mgr.Add(&RunOnce{fn: func(context.Context) error { scopeObserver.Reset(); return nil }})
+		if err != nil {
+			logger.Error(err, "failed to attach scope observer cleanup")
+			return err
+		}
+	}
+
+	if err := mgr.Add(scopeObserver); err != nil {
+		logger.Error(err, "failed to setup scope observer with controller runtime")
+		return err
 	}
 
 	logger.Info("ControllerRuntime bootstrap done, running the manager")
