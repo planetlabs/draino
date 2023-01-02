@@ -204,13 +204,16 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 }
 
 func (runner *drainRunner) removeFailedCandidate(ctx context.Context, candidate *corev1.Node, reason string) error {
-	err := runner.retryWall.SetNewRetryWallTimestamp(ctx, candidate, reason, runner.clock.Now())
+	newNode, err := runner.retryWall.SetNewRetryWallTimestamp(ctx, candidate, reason, runner.clock.Now())
 	if err != nil {
 		return err
 	}
-	rw := runner.retryWall.GetRetryWallTimestamp(candidate)
-	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: next attempt after %v", rw)
-	_, err = k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
+	rw := runner.retryWall.GetRetryWallTimestamp(newNode)
+	runner.eventRecorder.NodeEventf(ctx, newNode, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: next attempt after %v", rw)
+	// We saw the following error here "the object has been modified; please apply your changes to the latest version and try again"
+	// In order to fix it, SetNewRetryWallTimestamp is returning the new version of the node.
+	// This will not remove the error completely, but the amount of occurrences should be very low.
+	_, err = k8sclient.RemoveNLATaint(ctx, runner.client, newNode)
 	return err
 }
 

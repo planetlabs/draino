@@ -29,14 +29,14 @@ var TimeZero = time.Time{}
 type RetryWall interface {
 	// SetNewRetryWallTimestamp increases the retry count on the given node with the given string
 	// now is used for last heartbeat timestamp and should usually be time.Now()
-	SetNewRetryWallTimestamp(ctx context.Context, node *corev1.Node, reason string, now time.Time) error
+	SetNewRetryWallTimestamp(ctx context.Context, node *corev1.Node, reason string, now time.Time) (*corev1.Node, error)
 	// GetRetryWallTimestamp returns the next time the given node should be retried
 	// If there was no drain failure yet, it will return a zero timestamp
 	GetRetryWallTimestamp(*corev1.Node) time.Time
 	// GetDrainRetryAttemptsCount returns the amount of drain failures recorded for the given node
 	GetDrainRetryAttemptsCount(*corev1.Node) int
 	// ResetRetryCount will reset the retry count of the given node to zero
-	ResetRetryCount(context.Context, *corev1.Node) error
+	ResetRetryCount(context.Context, *corev1.Node) (*corev1.Node, error)
 	// IsAboveAlertingThreshold returns true if the node is above alerting threshold of the corresponding retry strategy
 	IsAboveAlertingThreshold(*corev1.Node) bool
 }
@@ -81,7 +81,7 @@ func (wall *retryWallImpl) registerRetryStrategies(strategies ...RetryStrategy) 
 	}
 }
 
-func (wall *retryWallImpl) SetNewRetryWallTimestamp(ctx context.Context, node *corev1.Node, reason string, now time.Time) error {
+func (wall *retryWallImpl) SetNewRetryWallTimestamp(ctx context.Context, node *corev1.Node, reason string, now time.Time) (*corev1.Node, error) {
 	retryCount, _, err := wall.getRetry(node)
 	if err != nil {
 		wall.logger.Error(err, "unable to get retry wall count from node", "node", node.GetName(), "conditions", node.Status.Conditions)
@@ -151,7 +151,7 @@ func (wall *retryWallImpl) getStrategyFromNode(node *corev1.Node) RetryStrategy 
 	return nodeAnnotationStrategy
 }
 
-func (wall *retryWallImpl) ResetRetryCount(ctx context.Context, node *corev1.Node) error {
+func (wall *retryWallImpl) ResetRetryCount(ctx context.Context, node *corev1.Node) (*corev1.Node, error) {
 	return wall.patchRetryCountOnNode(ctx, node, 0, "Retry count was reset to zero", time.Now())
 }
 
@@ -169,12 +169,13 @@ func (wall *retryWallImpl) getRetry(node *corev1.Node) (int, time.Time, error) {
 	return retryCount, condition.LastHeartbeatTime.Time, nil
 }
 
-func (wall *retryWallImpl) patchRetryCountOnNode(ctx context.Context, node *corev1.Node, retryCount int, reason string, now time.Time) error {
-	pos, _, found := utils.FindNodeCondition(RetryWallConditionType, node)
+func (wall *retryWallImpl) patchRetryCountOnNode(ctx context.Context, node *corev1.Node, retryCount int, reason string, now time.Time) (*corev1.Node, error) {
+	newNode := node.DeepCopy()
+	pos, _, found := utils.FindNodeCondition(RetryWallConditionType, newNode)
 	if !found {
 		// we can use the length as the index as the append is done afterwards
-		pos = len(node.Status.Conditions)
-		node.Status.Conditions = append(node.Status.Conditions, corev1.NodeCondition{
+		pos = len(newNode.Status.Conditions)
+		newNode.Status.Conditions = append(newNode.Status.Conditions, corev1.NodeCondition{
 			Type:               RetryWallConditionType,
 			Status:             corev1.ConditionTrue,
 			LastTransitionTime: metav1.NewTime(now),
@@ -182,13 +183,15 @@ func (wall *retryWallImpl) patchRetryCountOnNode(ctx context.Context, node *core
 		})
 	}
 
-	node.Status.Conditions[pos].LastHeartbeatTime = metav1.NewTime(now)
-	node.Status.Conditions[pos].Message = serializeConditionMessage(retryCount, reason)
+	newNode.Status.Conditions[pos].LastHeartbeatTime = metav1.NewTime(now)
+	newNode.Status.Conditions[pos].Message = serializeConditionMessage(retryCount, reason)
 
-	return wall.
+	err := wall.
 		client.
 		Status().
-		Patch(ctx, node, &NodeConditionPatch{ConditionType: RetryWallConditionType})
+		Patch(ctx, newNode, &NodeConditionPatch{ConditionType: RetryWallConditionType})
+
+	return newNode, err
 }
 
 func serializeConditionMessage(retryCount int, reason string) string {

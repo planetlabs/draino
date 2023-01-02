@@ -2,11 +2,12 @@ package filters
 
 import (
 	"context"
-	"github.com/planetlabs/draino/internal/kubernetes/drain"
-	corev1 "k8s.io/api/core/v1"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/planetlabs/draino/internal/kubernetes/drain"
+	corev1 "k8s.io/api/core/v1"
 )
 
 type fakeRetryWallWithDefinedTimeStamp struct {
@@ -19,13 +20,13 @@ func (f *fakeRetryWallWithDefinedTimeStamp) GetRetryWallTimestamp(node *corev1.N
 	return f.timestamp[node]
 }
 
-func (f *fakeRetryWallWithDefinedTimeStamp) SetNewRetryWallTimestamp(context.Context, *corev1.Node, string, time.Time) error {
+func (f *fakeRetryWallWithDefinedTimeStamp) SetNewRetryWallTimestamp(context.Context, *corev1.Node, string, time.Time) (*corev1.Node, error) {
 	panic("implement me")
 }
 func (f *fakeRetryWallWithDefinedTimeStamp) GetDrainRetryAttemptsCount(*corev1.Node) int {
 	panic("implement me")
 }
-func (f *fakeRetryWallWithDefinedTimeStamp) ResetRetryCount(context.Context, *corev1.Node) error {
+func (f *fakeRetryWallWithDefinedTimeStamp) ResetRetryCount(context.Context, *corev1.Node) (*corev1.Node, error) {
 	panic("implement me")
 }
 func (f *fakeRetryWallWithDefinedTimeStamp) IsAboveAlertingThreshold(*corev1.Node) bool {

@@ -177,7 +177,7 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 	var errors []error
 	for _, node := range nodes {
 		if val, exist := node.Annotations[drainRetryFailedAnnotationKey]; exist && val == drainRetryRestartAnnotationValue {
-			if err := runner.retryWall.ResetRetryCount(ctx, node); err != nil {
+			if _, err := runner.retryWall.ResetRetryCount(ctx, node); err != nil {
 				errors = append(errors, fmt.Errorf("cannot reset retry wall on node '%s': %v", node.Name, err))
 			}
 		}
