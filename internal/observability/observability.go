@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
@@ -140,13 +142,14 @@ type DrainoConfigurationObserverImpl struct {
 	logger              *zap.Logger
 	retryWall           drain.RetryWall
 	groupKeyGetter      groups.GroupKeyGetter
+	runnerInfoGetter    groups.RunnerInfoGetter
 
 	metricsObjects metricsObjectsForObserver
 }
 
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
-func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalConfig, runtimeObjectStore kubernetes.RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter kubernetes.PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger, retryWall drain.RetryWall, groupKeyGetter groups.GroupKeyGetter) DrainoConfigurationObserver {
+func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalConfig, runtimeObjectStore kubernetes.RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter kubernetes.PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger, retryWall drain.RetryWall, groupKeyGetter groups.GroupKeyGetter, runnerInfoGetter groups.RunnerInfoGetter) DrainoConfigurationObserver {
 
 	// We are not adding a BucketRateLimiter to that list because the same nodes are going to be appended periodically if the update fails
 	// Failing nodes will already be in the queue with a retry. Added a BucketRL proved to be a problem here is the client side is not able to dequeue
@@ -173,6 +176,7 @@ func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalCon
 		nodePatchLimiter:     flowcontrol.NewTokenBucketRateLimiter(50, 10), // client side protection
 		retryWall:            retryWall,
 		groupKeyGetter:       groupKeyGetter,
+		runnerInfoGetter:     runnerInfoGetter,
 	}
 	scopeObserver.metricsObjects.initializeQueueMetrics()
 
@@ -226,6 +230,8 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 		case <-ticker.C:
 			// Let's print the queue size
 			s.logger.Info("queueNodeToBeUpdated", zap.Int("len", s.queueNodeToBeUpdated.Len()))
+
+			s.ProduceGroupRunnerMetrics()
 
 			// Let's update the nodes metadata
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
@@ -287,6 +293,20 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			}
 			s.updateGauges(newMetricsValue, newMetricsCPUValue)
 		}
+	}
+}
+
+func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
+	infos := s.runnerInfoGetter.GetRunnerInfo()
+	for group, info := range infos {
+		rawCandidateRunnerInfo, _ := info.Data.Get(candidate_runner.CandidateRunnerInfoKey)
+		candidateDataInfo := rawCandidateRunnerInfo.(candidate_runner.DataInfo)
+
+		rawDrainRunnerInfo, _ := info.Data.Get(drain_runner.DrainRunnerInfo)
+		drainDataInfo := rawDrainRunnerInfo.(drain_runner.DataInfo)
+
+		groupRunnerLoopDuration.WithLabelValues(string(group), groups.DrainCandidateRunnerName).Set(float64(candidateDataInfo.ProcessingDuration.Microseconds()))
+		groupRunnerLoopDuration.WithLabelValues(string(group), groups.DrainRunnerName).Set(float64(drainDataInfo.ProcessingDuration.Microseconds()))
 	}
 }
 

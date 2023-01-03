@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataDog/compute-go/table"
 	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/spf13/cobra"
 )
@@ -117,7 +118,7 @@ func (h *CLICommands) cmdGroupList() error {
 	}
 
 	table := table.NewTable([]string{
-		"Group", "Nodes", "Slot", "Filtered", "Warn", "last run", "duration",
+		"Group", "Nodes", "Slot", "Filtered", "Warn", "last candidate run", "candidate duration", "drain duration",
 	},
 		func(obj interface{}) []string {
 			item := obj.(groups.RunnerInfo)
@@ -125,6 +126,10 @@ func (h *CLICommands) cmdGroupList() error {
 			raw, _ := item.Data.Get(candidate_runner.CandidateRunnerInfoKey)
 			var candidateDataInfo candidate_runner.DataInfo
 			candidateDataInfo.Import(raw)
+
+			raw, _ = item.Data.Get(drain_runner.DrainRunnerInfo)
+			var drainDataInfo drain_runner.DataInfo
+			drainDataInfo.Import(raw)
 
 			warn := ""
 			if candidateDataInfo.NodeCount > 0 {
@@ -140,7 +145,8 @@ func (h *CLICommands) cmdGroupList() error {
 				fmt.Sprintf("%v", candidateDataInfo.FilteredOutCount),
 				fmt.Sprintf("%s", warn),
 				fmt.Sprintf("%v", candidateDataInfo.LastTime),
-				fmt.Sprintf("%v", candidateDataInfo.ProcessingDuration),
+				fmt.Sprintf("%v", candidateDataInfo.ProcessingDuration.String()),
+				fmt.Sprintf("%v", drainDataInfo.ProcessingDuration.String()),
 			}
 		})
 

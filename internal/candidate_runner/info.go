@@ -2,9 +2,10 @@ package candidate_runner
 
 import (
 	"encoding/json"
+	"time"
+
 	"github.com/planetlabs/draino/internal/scheduler"
 	v1 "k8s.io/api/core/v1"
-	"time"
 )
 
 const (
@@ -15,7 +16,7 @@ type DataInfo struct {
 	NodeCount          int
 	FilteredOutCount   int
 	Slots              string
-	ProcessingDuration string
+	ProcessingDuration time.Duration
 	LastTime           time.Time
 
 	// private filed that should not go through the serialization

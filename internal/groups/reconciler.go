@@ -3,8 +3,9 @@ package groups
 import (
 	"context"
 	"fmt"
-	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"time"
+
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
 
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -24,6 +25,9 @@ const (
 
 	// if the groupKey validation fails, and event will be added on the node with the reason
 	eventGroupOverrideMisconfiguration = "GroupOverrideBadConfiguration"
+
+	DrainCandidateRunnerName = "drain_candidate"
+	DrainRunnerName          = "drain"
 )
 
 type GroupRegistry struct {
@@ -86,8 +90,8 @@ func NewGroupRegistry(
 		logger:                    logger,
 		nodeWarmUpDelay:           nodeWarmUpDelay,
 		keyGetter:                 keyGetter,
-		groupDrainRunner:          NewGroupsRunner(ctx, drainFactory, logger, "drain"),
-		groupDrainCandidateRunner: NewGroupsRunner(ctx, drainCandidateFactory, logger, "drain_candidate"),
+		groupDrainRunner:          NewGroupsRunner(ctx, drainFactory, logger, DrainRunnerName),
+		groupDrainCandidateRunner: NewGroupsRunner(ctx, drainCandidateFactory, logger, DrainCandidateRunnerName),
 		eventRecorder:             eventRecorder,
 		nodeFilteringFunc:         nodeFilteringFunc,
 		hasSyncedFunc:             hasSyncedFunc,

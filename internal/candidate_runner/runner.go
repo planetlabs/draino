@@ -3,9 +3,10 @@ package candidate_runner
 import (
 	"context"
 	"fmt"
-	"github.com/DataDog/compute-go/logs"
 	"strings"
 	"time"
+
+	"github.com/DataDog/compute-go/logs"
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 
@@ -72,7 +73,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 		defer func() {
 			dataInfo.LastTime = runner.clock.Now()
-			dataInfo.ProcessingDuration = runner.clock.Now().Sub(start).String()
+			dataInfo.ProcessingDuration = runner.clock.Now().Sub(start)
 			info.Data.Set(CandidateRunnerInfoKey, dataInfo)
 		}()
 

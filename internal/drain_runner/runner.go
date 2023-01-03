@@ -59,6 +59,13 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 			return
 		}
 
+		var drainInfo DataInfo
+		start := runner.clock.Now()
+		defer func() {
+			drainInfo.ProcessingDuration = runner.clock.Now().Sub(start)
+			info.Data.Set(DrainRunnerInfo, drainInfo)
+		}()
+
 		runner.handleLeftOverDraining(ctx, info)
 
 		if emptyGroup := runner.handleGroup(ctx, info); emptyGroup {
