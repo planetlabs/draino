@@ -1,6 +1,8 @@
 package filters
 
 import (
+	"context"
+
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/groups"
 	v1 "k8s.io/api/core/v1"
@@ -10,7 +12,7 @@ import (
 func NewDrainBufferFilter(drainBuffer drainbuffer.DrainBuffer, clock clock.Clock, groupKeyGetter groups.GroupKeyGetter) Filter {
 	return FilterFromFunctionWithReason(
 		"drain_buffer",
-		func(n *v1.Node) (bool, string) {
+		func(ctx context.Context, n *v1.Node) (bool, string) {
 			nextDrain, err := drainBuffer.NextDrain(groupKeyGetter.GetGroupKey(n))
 
 			if err != nil {

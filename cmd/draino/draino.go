@@ -19,13 +19,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/planetlabs/draino/internal/candidate_runner/sorters"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/planetlabs/draino/internal/candidate_runner/sorters"
 
 	"github.com/DataDog/compute-go/kubeclient"
 	"github.com/DataDog/compute-go/service"

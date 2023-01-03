@@ -38,7 +38,7 @@ func (_ *testPreprocessor) GetName() string {
 	return "testPreprocessor"
 }
 
-func (p *testPreprocessor) IsDone(node *corev1.Node) (bool, error) {
+func (p *testPreprocessor) IsDone(ctx context.Context, node *corev1.Node) (bool, error) {
 	return p.isDone, nil
 }
 

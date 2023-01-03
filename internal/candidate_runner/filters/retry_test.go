@@ -73,7 +73,7 @@ func TestNewRetryWallFilter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := NewRetryWallFilter(setClockForTest(), tt.retryWall)
 
-			gotKeep := f.Filter(tt.nodes)
+			gotKeep := f.Filter(context.Background(), tt.nodes)
 			if !reflect.DeepEqual(gotKeep, tt.wantKeep) {
 				t.Errorf("checkNodesRetryWall() gotKeep = %v, want %v", gotKeep, tt.wantKeep)
 			}

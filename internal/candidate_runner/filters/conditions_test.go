@@ -1,14 +1,16 @@
 package filters
 
 import (
+	"context"
+	"reflect"
+	"testing"
+	"time"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/clock"
 	testing2 "k8s.io/utils/clock/testing"
-	"reflect"
-	"testing"
-	"time"
 )
 
 var clockInTest clock.Clock
@@ -119,7 +121,7 @@ func Test_NewNodeWithConditionFilter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := NewNodeWithConditionFilter(tt.conditions)
 
-			if got := f.Filter(tt.nodes); !reflect.DeepEqual(got, tt.want) {
+			if got := f.Filter(context.Background(), tt.nodes); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("NewNodeWithConditionFilter.Filter = %v, want %v", got, tt.want)
 			}
 		})

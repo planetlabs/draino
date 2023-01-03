@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataDog/compute-go/logs"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 
@@ -66,6 +67,8 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 	runner.logger = runner.logger.WithValues("groupKey", info.Key)
 	// run an endless loop until there are no drain candidates left
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
+		span, ctx := tracer.StartSpanFromContext(ctx, "EvaluateCandidate")
+		defer span.Finish()
 
 		start := runner.clock.Now()
 
@@ -109,9 +112,10 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		remainCandidateSlot := runner.maxSimultaneousCandidates - len(alreadyCandidateNodes)
 
 		evaluatedCount := len(nodes)
-		nodes = runner.filter.Filter(nodes)
+		nodes = runner.filter.Filter(ctx, nodes)
 		dataInfo.FilteredOutCount = evaluatedCount - len(nodes)
 
+		// TODO think about adding tracing to the tree iterator/expander
 		nodeProvider := runner.GetNodeIterator(nodes)
 		for node, ok := nodeProvider.Next(); ok; node, ok = nodeProvider.Next() {
 			logForNode := runner.logger.WithValues("node", node.Name)
@@ -180,6 +184,9 @@ func (runner *candidateRunner) GetNodeIterator(nodes []*corev1.Node) scheduler.I
 
 // handleRetryFlagOnNodes checks if a node has the drain-failed retry annotation and if so it will reset the retry wall
 func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes []*corev1.Node) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ResetRetries")
+	defer span.Finish()
+
 	var errors []error
 	for _, node := range nodes {
 		if val, exist := node.Annotations[drainRetryFailedAnnotationKey]; exist && val == drainRetryRestartAnnotationValue {

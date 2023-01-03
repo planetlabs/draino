@@ -1,10 +1,12 @@
 package filters
 
 import (
-	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"context"
 	"reflect"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestNewNodeTerminatingFilter(t *testing.T) {
@@ -30,7 +32,7 @@ func TestNewNodeTerminatingFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := NewNodeTerminatingFilter()
-			gotKeep := f.Filter(tt.nodes)
+			gotKeep := f.Filter(context.Background(), tt.nodes)
 			if !reflect.DeepEqual(gotKeep, tt.wantKeep) {
 				t.Errorf("checkNodesTerminating() gotKeep = %v, want %v", gotKeep, tt.wantKeep)
 			}

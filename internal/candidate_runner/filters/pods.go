@@ -1,6 +1,8 @@
 package filters
 
 import (
+	"context"
+
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	v1 "k8s.io/api/core/v1"
@@ -8,7 +10,7 @@ import (
 
 func NewPodFilter(logger logr.Logger, podFilter kubernetes.PodFilterFunc, objectsStore kubernetes.RuntimeObjectStore) Filter {
 	return FilterFromFunctionWithReason("pods",
-		func(n *v1.Node) (bool, string) {
+		func(ctx context.Context, n *v1.Node) (bool, string) {
 			if podFilter == nil || objectsStore == nil || objectsStore.Pods() == nil {
 				return false, "bad_filter_initialization"
 			}

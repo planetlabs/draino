@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"k8s.io/kubernetes/pkg/apis/core"
 
 	"github.com/go-logr/logr"
@@ -59,6 +60,9 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 			return
 		}
 
+		span, ctx := tracer.StartSpanFromContext(ctx, "DrainCandidate")
+		defer span.Finish()
+
 		var drainInfo DataInfo
 		start := runner.clock.Now()
 		defer func() {
@@ -82,6 +86,9 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 // Here we are searching for such cases and we are sending them back to the pool by removing the taint.
 // These nodes might become candidate again in a near future.
 func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *groups.RunnerInfo) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ResetStuckDrainAttempts")
+	defer span.Finish()
+
 	draining, _, err := runner.getNodesForNLATaint(ctx, info.Key, k8sclient.TaintDraining)
 	if err != nil {
 		runner.logger.Error(err, "cannot get draining nodes for group")
@@ -124,8 +131,11 @@ func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerI
 }
 
 func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.RunnerInfo, candidate *corev1.Node) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "HandleDrainCandidate")
+	defer span.Finish()
+
 	// In some cases a user might want to opt out a node even though it's a candidate already, so we have to remove the taint.
-	if keep, name, reason := runner.filter.FilterNode(candidate); !keep {
+	if keep, name, reason := runner.filter.FilterNode(ctx, candidate); !keep {
 		runner.logger.Info("Removing candidate status, because user opted out node.", "node", candidate.Name, "filter_name", name, "filter_reason", reason)
 		_, err := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
 		return err
@@ -145,7 +155,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	}
 
 	kubernetes.LogrForVerboseNode(runner.logger, candidate, "Node is candidate for drain, checking pre-activities")
-	allPreprocessorsDone := runner.checkPreprocessors(candidate)
+	allPreprocessorsDone := runner.checkPreprocessors(ctx, candidate)
 	if !allPreprocessorsDone {
 		runner.logger.Info("waiting for preprocessors to be done before draining", "node_name", candidate.Name)
 		return nil
@@ -168,10 +178,13 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	return nil
 }
 
-func (runner *drainRunner) checkPreprocessors(candidate *corev1.Node) bool {
+func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *corev1.Node) bool {
+	span, ctx := tracer.StartSpanFromContext(ctx, "RunDrainPreprocessors")
+	defer span.Finish()
+
 	allPreprocessorsDone := true
 	for _, pre := range runner.preprocessors {
-		done, err := pre.IsDone(candidate)
+		done, err := pre.IsDone(ctx, candidate)
 		if err != nil {
 			allPreprocessorsDone = false
 			runner.logger.Error(err, "failed during preprocessor evaluation", "preprocessor", pre.GetName(), "node_name", candidate.Name)
@@ -211,6 +224,9 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 }
 
 func (runner *drainRunner) removeFailedCandidate(ctx context.Context, candidate *corev1.Node, reason string) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ResetFailedCandidate")
+	defer span.Finish()
+
 	newNode, err := runner.retryWall.SetNewRetryWallTimestamp(ctx, candidate, reason, runner.clock.Now())
 	if err != nil {
 		return err

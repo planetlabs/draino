@@ -65,7 +65,7 @@ func (opts *FakeOptions) ApplyDefaults() error {
 		opts.RetryStrategy = &drain.StaticRetryStrategy{Delay: time.Second, AlertThreashold: 5}
 	}
 	if opts.Filter == nil {
-		opts.Filter = filters.FilterFromFunction("always_true", func(n *v1.Node) bool { return true })
+		opts.Filter = filters.FilterFromFunction("always_true", func(ctx context.Context, n *v1.Node) bool { return true })
 	}
 	if opts.DrainBuffer == nil {
 		persistor := drainbuffer.NewConfigMapPersistor(opts.ClientWrapper.GetManagerClient(), "fake-buffer", "default")

@@ -10,6 +10,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"golang.org/x/mod/semver"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
@@ -78,6 +79,9 @@ func NewDrainSimulator(
 }
 
 func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.Node) (bool, []string, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "SimulateNodeDrain")
+	defer span.Finish()
+
 	pods, err := sim.podIndexer.GetPodsByNode(ctx, node.GetName())
 	if err != nil {
 		return false, nil, err
@@ -115,6 +119,9 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 }
 
 func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod) (bool, string, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodDrain")
+	defer span.Finish()
+
 	if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist {
 		return res.result, res.reason, nil
 	}
@@ -164,6 +171,9 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 }
 
 func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *corev1.Pod) (bool, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodEviction")
+	defer span.Finish()
+
 	var eviction client.Object
 	var gracePeriod int64 = 30
 

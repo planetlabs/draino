@@ -1,10 +1,12 @@
 package filters
 
 import (
-	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"context"
 	"reflect"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestNewNodeWithLabelFilter(t *testing.T) {
@@ -39,7 +41,7 @@ func TestNewNodeWithLabelFilter(t *testing.T) {
 				}
 				return n.Labels["in"] == "ok"
 			})
-			if got := f.Filter(tt.nodes); !reflect.DeepEqual(got, tt.want) {
+			if got := f.Filter(context.Background(), tt.nodes); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("checkNodesLabels() = %v, want %v", got, tt.want)
 			}
 		})

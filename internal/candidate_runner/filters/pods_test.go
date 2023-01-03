@@ -2,6 +2,10 @@ package filters
 
 import (
 	"context"
+	"reflect"
+	"strings"
+	"testing"
+
 	"github.com/go-logr/zapr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"go.uber.org/zap"
@@ -9,9 +13,6 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	"reflect"
-	"strings"
-	"testing"
 )
 
 func TestNewPodFilter(t *testing.T) {
@@ -68,7 +69,7 @@ func TestNewPodFilter(t *testing.T) {
 			store, closingFunc := kubernetes.RunStoreForTest(context.Background(), fake.NewSimpleClientset(tt.objects...))
 			defer closingFunc()
 			f := NewPodFilter(zapr.NewLogger(zap.NewNop()), tt.podFilterFunc, store)
-			if got := f.Filter(tt.nodes); !reflect.DeepEqual(got, tt.want) {
+			if got := f.Filter(context.Background(), tt.nodes); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("checkCordonFilters() = %v, want %v", got, tt.want)
 			}
 		})

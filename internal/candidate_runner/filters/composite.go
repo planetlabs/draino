@@ -1,11 +1,14 @@
 package filters
 
 import (
+	"context"
 	"fmt"
+	"strings"
+
 	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	v1 "k8s.io/api/core/v1"
-	"strings"
 )
 
 type CompositeFilter struct {
@@ -31,10 +34,13 @@ func (c *CompositeFilter) Name() string {
 	return c.name
 }
 
-func (c *CompositeFilter) Filter(nodes []*v1.Node) (keep []*v1.Node) {
+func (c *CompositeFilter) Filter(ctx context.Context, nodes []*v1.Node) (keep []*v1.Node) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "FilterDrainCandidates")
+	defer span.Finish()
+
 	var filteringStr []string
 	for _, f := range c.filters {
-		nodes = f.Filter(nodes)
+		nodes = f.Filter(ctx, nodes)
 		filteringStr = append(filteringStr, fmt.Sprintf("%s:%d", f.Name(), len(nodes)))
 		if len(nodes) == 0 {
 			break
@@ -44,11 +50,11 @@ func (c *CompositeFilter) Filter(nodes []*v1.Node) (keep []*v1.Node) {
 	return nodes
 }
 
-func (c *CompositeFilter) FilterNode(n *v1.Node) (keep bool, name, reason string) {
+func (c *CompositeFilter) FilterNode(ctx context.Context, n *v1.Node) (keep bool, name, reason string) {
 	var filteringStr []string
 	keep = true
 	for _, f := range c.filters {
-		k, _, r := f.FilterNode(n)
+		k, _, r := f.FilterNode(ctx, n)
 		keep = keep && k
 		filteringStr = append(filteringStr, fmt.Sprintf("%v:%s", keep, r))
 	}

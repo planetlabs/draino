@@ -1,6 +1,7 @@
 package drain_runner
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -13,7 +14,7 @@ type DrainPreProzessor interface {
 	// GetName returns the unique name of the preprocessor
 	GetName() string
 	// IsDone will process the given node and returns true if the activity is done
-	IsDone(*corev1.Node) (bool, error)
+	IsDone(context.Context, *corev1.Node) (bool, error)
 }
 
 // WaitTimePreprocessor is a preprocessor used to wait for a certain amount of time before draining a node.
@@ -29,7 +30,7 @@ func (_ *WaitTimePreprocessor) GetName() string {
 	return "WaitTimePreprocessor"
 }
 
-func (pre *WaitTimePreprocessor) IsDone(node *corev1.Node) (bool, error) {
+func (pre *WaitTimePreprocessor) IsDone(ctx context.Context, node *corev1.Node) (bool, error) {
 	taint, exist := k8sclient.GetNLATaint(node)
 	if !exist {
 		return false, fmt.Errorf("'%s' doesn't have a NLA taint", node.Name)
