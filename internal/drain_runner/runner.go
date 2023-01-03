@@ -2,6 +2,7 @@ package drain_runner
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -83,7 +84,7 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 // handleLeftOverDraining perform cleanup of nodes blocked in `draining` phase.
 // If the controller was restarted, it is possible that some nodes were left
 // with a taint `draining`. They would be blocked with that taint if we do nothing.
-// Here we are searching for such cases and we are sending them back to the pool by removing the taint.
+// Here we are searching for such cases, and we are sending them back to the pool by removing the taint.
 // These nodes might become candidate again in a near future.
 func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *groups.RunnerInfo) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "ResetStuckDrainAttempts")
@@ -100,9 +101,14 @@ func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *gro
 	}
 	// TODO add metric to track amount of nodes blocked in draining
 	for _, n := range draining {
-		if errRmTaint := runner.removeFailedCandidate(ctx, n, "Node stuck in draining (controller restart?)"); errRmTaint != nil {
+		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, n, "Node stuck in draining (controller restart?)")
+		if errRetryWall != nil {
 			// we just log the error, it will come back at next iteration
-			runner.logger.Error(err, "Failed to remove 'draining' taint", "node", n.Name)
+			runner.logger.Error(errRetryWall, "Failed to update retry wall", "node", n.Name)
+		}
+		if _, err = k8sclient.RemoveNLATaint(ctx, runner.client, updatedNode); err != nil {
+			runner.logger.Error(err, "Failed to remove taint on node left over in 'draining'", "node", n.Name)
+			return
 		}
 	}
 }
@@ -130,52 +136,89 @@ func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerI
 	return
 }
 
+// handleCandidate look at the candidate and attempt a drain
+// while being under processing the node gets the `draining` taint
+// at the end of the function, the node should be left with either `drained` taint or no taint and a retryWall set.
+// In that last case (no taint and retry wall), the node will be picked up again later by the candidate_runner
+// This function concentrates the taint management on the node for the drain_runner.
+// During the pre-activities resolution phase the node keeps its `drain_candidate` taint.
 func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.RunnerInfo, candidate *corev1.Node) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "HandleDrainCandidate")
 	defer span.Finish()
 
-	// In some cases a user might want to opt out a node even though it's a candidate already, so we have to remove the taint.
-	if keep, name, reason := runner.filter.FilterNode(ctx, candidate); !keep {
-		runner.logger.Info("Removing candidate status, because user opted out node.", "node", candidate.Name, "filter_name", name, "filter_reason", reason)
+	loggerForNode := runner.logger.WithValues("node", candidate.Name)
+
+	// Check if the node is still candidate before processing
+	keep, reason, err := runner.isStillCandidate(ctx, candidate)
+	if err != nil {
+		loggerForNode.Error(err, "Failed to check if the node is still candidate")
+	}
+	if !keep {
+		loggerForNode.Info("Removing candidate status", "reason", reason)
 		_, err := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
 		return err
+	}
+
+	// Checking pre-activities
+	kubernetes.LogrForVerboseNode(runner.logger, candidate, "Node is candidate for drain, checking pre-activities")
+	allPreprocessorsDone := runner.checkPreprocessors(ctx, candidate)
+	if !allPreprocessorsDone {
+		loggerForNode.Info("waiting for preprocessors to be done before draining", "node_name", candidate.Name)
+		return nil
+	}
+
+	loggerForNode.Info("start draining")
+	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
+	candidate, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDraining)
+	if err != nil {
+		return err
+	}
+	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainStarting, "Draining node")
+	// TODO add metric to show how many drains are successful / failed
+	if err = runner.drainCandidate(ctx, info, candidate); err != nil {
+		loggerForNode.Error(err, "failed to drain node")
+		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: %v", err)
+		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, candidate, err.Error())
+		if errRetryWall != nil {
+			loggerForNode.Error(errRetryWall, "Failed to remove taint following drain failure")
+			return errRetryWall
+		}
+		if _, errTaint := k8sclient.RemoveNLATaint(ctx, runner.client, updatedNode); errTaint != nil {
+			loggerForNode.Error(errTaint, "Failed to remove taint following drain failure")
+			return errTaint
+		}
+		return err
+	}
+	if candidate, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDrained); err != nil {
+		loggerForNode.Error(err, "Failed to add 'drained' taint")
+		return err
+
+	}
+	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainSucceeded, "Drained node")
+	runner.logger.Info("successfully drained node", "node_name", candidate.Name)
+	return nil
+}
+
+func (runner *drainRunner) isStillCandidate(ctx context.Context, candidate *corev1.Node) (isCandidate bool, reason string, err error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "isStillCandidate")
+	defer span.Finish()
+
+	// In some cases a user might want to opt out a node even though it's a candidate already, so we have to remove the taint.
+	if keep, name, reasonFilter := runner.filter.FilterNode(ctx, candidate); !keep {
+		return false, fmt.Sprintf("filter[%s]: %s", name, reasonFilter), nil
 	}
 
 	podsAssociatedWithPV, err := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(candidate)
 	if err != nil {
-		return err
+		return false, "pvcProtection", err
 	}
-
 	// TODO add metric to track how often this happens
 	if len(podsAssociatedWithPV) > 0 {
-		runner.logger.Info("Removing candidate status, because node is hosting PV for pods", "node", candidate.Name, "pods", strings.Join(utils.GetPodNames(podsAssociatedWithPV), "; "))
-		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonPendingPodWithLocalPV, "Pod(s) "+strings.Join(utils.GetPodNames(podsAssociatedWithPV), ", ")+" associated with local PV on that node")
-		_, err := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
-		return err
+		pods := strings.Join(utils.GetPodNames(podsAssociatedWithPV), "; ")
+		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonPendingPodWithLocalPV, "Pod(s) "+pods+" associated with local PV on that node")
+		return false, "pvcProtection triggered for pods: " + pods, nil
 	}
-
-	kubernetes.LogrForVerboseNode(runner.logger, candidate, "Node is candidate for drain, checking pre-activities")
-	allPreprocessorsDone := runner.checkPreprocessors(ctx, candidate)
-	if !allPreprocessorsDone {
-		runner.logger.Info("waiting for preprocessors to be done before draining", "node_name", candidate.Name)
-		return nil
-	}
-
-	runner.logger.Info("start draining", "node_name", candidate.Name)
-
-	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
-	// TODO add metric to show how many drains are successful / failed
-	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainStarting, "Draining node")
-	err = runner.drainCandidate(ctx, info, candidate)
-	if err != nil {
-		runner.logger.Error(err, "failed to drain node", "node_name", candidate.Name)
-		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: %v", err)
-		return runner.removeFailedCandidate(ctx, candidate, err.Error())
-	}
-	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainSucceeded, "Drained node")
-	runner.logger.Info("successfully drained node", "node_name", candidate.Name)
-
-	return nil
+	return true, "", nil
 }
 
 func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *corev1.Node) bool {
@@ -199,11 +242,6 @@ func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *co
 }
 
 func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.RunnerInfo, candidate *corev1.Node) error {
-	// TODO add metric about to track the runtime of this method
-	candidate, err := k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDraining)
-	if err != nil {
-		return err
-	}
 
 	// This will make sure that the individual drain, will not block the loop forever
 	// TODO maybe we should deal with that timeout issue INSIDE the `drain` function because the timeout depends
@@ -211,7 +249,7 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 	drainContext, cancel := context.WithTimeout(ctx, DrainTimeout)
 	defer cancel()
 
-	err = runner.drainer.Drain(drainContext, candidate)
+	err := runner.drainer.Drain(drainContext, candidate)
 	if err != nil {
 		return err
 	}
@@ -219,25 +257,23 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 	// We can ignore the error as it's only fired when the drain buffer is not initialized.
 	// This cannot happen as the main loop of the drain runner will be blocked in that case.
 	_ = runner.drainBuffer.StoreSuccessfulDrain(info.Key, 0)
-	_, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDrained)
 	return err
 }
 
-func (runner *drainRunner) removeFailedCandidate(ctx context.Context, candidate *corev1.Node, reason string) error {
+func (runner *drainRunner) updateRetryWallOnCandidate(ctx context.Context, candidate *corev1.Node, reason string) (*corev1.Node, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "ResetFailedCandidate")
 	defer span.Finish()
 
 	newNode, err := runner.retryWall.SetNewRetryWallTimestamp(ctx, candidate, reason, runner.clock.Now())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rw := runner.retryWall.GetRetryWallTimestamp(newNode)
 	runner.eventRecorder.NodeEventf(ctx, newNode, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: next attempt after %v", rw)
 	// We saw the following error here "the object has been modified; please apply your changes to the latest version and try again"
 	// In order to fix it, SetNewRetryWallTimestamp is returning the new version of the node.
 	// This will not remove the error completely, but the amount of occurrences should be very low.
-	_, err = k8sclient.RemoveNLATaint(ctx, runner.client, newNode)
-	return err
+	return newNode, err
 }
 
 // getNodesForNLATaint return nodes that match the taint. The boolean is set to true if some nodes are still present in the group, regardless of the taint.
