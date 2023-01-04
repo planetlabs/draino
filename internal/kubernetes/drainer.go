@@ -979,7 +979,16 @@ func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node
 }
 
 func (d *APICordonDrainer) awaitDeletion(ctx context.Context, pod *core.Pod, timeout time.Duration) error {
-	err := wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
+	// We need to optimise the pollPeriod to maximize the chance to capture the deletion and not falling into rate limiting issue on the client side
+	pollPeriod := timeout / 10 // let's make 10 tentatives to check deletion
+	if pollPeriod < 6*time.Second {
+		pollPeriod = 6 * time.Second
+	}
+	if pollPeriod > 2*time.Minute {
+		pollPeriod = 2 * time.Minute
+	}
+
+	err := wait.PollImmediate(pollPeriod, timeout, func() (bool, error) {
 		got, err := d.c.CoreV1().Pods(pod.GetNamespace()).Get(ctx, pod.GetName(), meta.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
@@ -1092,7 +1101,16 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context,
 }
 
 func (d *APICordonDrainer) awaitPVDeletion(ctx context.Context, pv *core.PersistentVolume, timeout time.Duration) error {
-	return wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
+	// We need to optimise the pollPeriod to maximize the chance to capture the deletion and not falling into rate limiting issue on the client side
+	pollPeriod := timeout / 10 // let's make 10 tentatives to check deletion
+	if pollPeriod < 6*time.Second {
+		pollPeriod = 6 * time.Second
+	}
+	if pollPeriod > 2*time.Minute {
+		pollPeriod = 2 * time.Minute
+	}
+
+	return wait.PollImmediate(pollPeriod, timeout, func() (bool, error) {
 		got, err := d.c.CoreV1().PersistentVolumes().Get(ctx, pv.GetName(), meta.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
