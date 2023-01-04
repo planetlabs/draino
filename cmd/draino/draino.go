@@ -450,8 +450,6 @@ func getInitDrainBufferRunner(drainBuffer drainbuffer.DrainBuffer, logger *logr.
 
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
 func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers) error {
-
-	cfg.InfraParam.UpdateWithKubeContext(cfg.KubeClientConfig.ConfigFile, "")
 	validationOptions := infraparameters.GetValidateAll()
 	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject = false, false, false
 	if err := cfg.InfraParam.Validate(validationOptions); err != nil {
