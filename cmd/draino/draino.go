@@ -26,52 +26,46 @@ import (
 	"strings"
 	"time"
 
-	"github.com/planetlabs/draino/internal/candidate_runner/sorters"
-
+	"github.com/DataDog/compute-go/controllerruntime"
+	"github.com/DataDog/compute-go/infraparameters"
 	"github.com/DataDog/compute-go/kubeclient"
 	"github.com/DataDog/compute-go/service"
 	"github.com/DataDog/compute-go/version"
-	"github.com/go-logr/logr"
+	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+
+	"github.com/julienschmidt/httprouter"
 	"github.com/planetlabs/draino/internal/candidate_runner"
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	"github.com/planetlabs/draino/internal/candidate_runner/sorters"
 	"github.com/planetlabs/draino/internal/cli"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
+	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
+	"github.com/planetlabs/draino/internal/kubernetes/drain"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
 	"github.com/planetlabs/draino/internal/observability"
 	protector "github.com/planetlabs/draino/internal/protector"
-	"github.com/spf13/cobra"
+
+	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	client "k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/DataDog/compute-go/controllerruntime"
-	"github.com/DataDog/compute-go/infraparameters"
-	"k8s.io/apimachinery/pkg/runtime"
-
-	"k8s.io/client-go/kubernetes/scheme"
-	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/tools/record"
-
-	"github.com/julienschmidt/httprouter"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
+	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	core "k8s.io/api/core/v1"
-	client "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
-
-	httptrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
-
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/drain"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
-	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
 )
 
 // Default leader election settings.
@@ -225,10 +219,7 @@ func main() {
 
 		nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(options.maxNodeReplacementPerHour, time.Now())
 
-		b := record.NewBroadcaster()
-		b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")})
-		k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: kubernetes.Component})
-		eventRecorder := kubernetes.NewEventRecorder(k8sEventRecorder)
+		eventRecorder, k8sEventRecorder := kubernetes.BuildEventRecorder(zapr.NewLogger(log), cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
 
 		consolidatedOptInAnnotations := append(options.optInPodAnnotations, options.shortLivedPodAnnotations...)
 
@@ -495,10 +486,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
-	b := record.NewBroadcaster()
-	b.StartRecordingToSink(&typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")})
-	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: kubernetes.Component})
-	eventRecorder := kubernetes.NewEventRecorder(k8sEventRecorder)
+	eventRecorder, _ := kubernetes.BuildEventRecorder(logger, cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
 
 	pvProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
 	stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{}, filtersDef.drainPodFilter)

@@ -13,3 +13,4 @@
 
 # Go vendor directory
 vendor/
+/cmd/test/

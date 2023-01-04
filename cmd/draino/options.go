@@ -83,6 +83,11 @@ type Options struct {
 	storageClassesAllowingVolumeDeletion []string
 	pvcManagementByDefault               bool
 
+	// events generation
+	eventAggregationPeriod        time.Duration
+	excludedPodsPerNodeEstimation int
+	logEvents                     bool
+
 	configName          string
 	resetScopeLabel     bool
 	scopeAnalysisPeriod time.Duration
@@ -109,6 +114,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.BoolVar(&opt.pvcManagementByDefault, "pvc-management-by-default", false, "PVC management is automatically activated for a workload that do not use eviction++")
 	fs.BoolVar(&opt.resetScopeLabel, "reset-config-labels", false, "Reset the scope label on the nodes")
 	fs.BoolVar(&opt.noLegacyNodeHandler, "no-legacy-node-handler", false, "Deactivate draino legacy node handler")
+	fs.BoolVar(&opt.logEvents, "log-events", true, "Indicate if events sent to kubernetes should also be logged")
 
 	fs.DurationVar(&opt.minEvictionTimeout, "min-eviction-timeout", kubernetes.DefaultMinEvictionTimeout, "Minimum time we wait to evict a pod. The pod terminationGracePeriod will be used if it is bigger.")
 	fs.DurationVar(&opt.evictionHeadroom, "eviction-headroom", kubernetes.DefaultEvictionOverhead, "Additional time to wait after a pod's termination grace period for it to have been deleted.")
@@ -125,6 +131,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.preprovisioningCheckPeriod, "preprovisioning-check-period", kubernetes.DefaultPreprovisioningCheckPeriod, "Period to check if a node has been preprovisioned")
 	fs.DurationVar(&opt.scopeAnalysisPeriod, "scope-analysis-period", 5*time.Minute, "Period to run the scope analysis and generate metric")
 	fs.DurationVar(&opt.groupRunnerPeriod, "group-runner-period", 10*time.Second, "Period for running the group runner")
+	fs.DurationVar(&opt.eventAggregationPeriod, "event-aggregation-period", 15*time.Minute, "Period for event generation on kubernetes object.")
 
 	fs.StringSliceVar(&opt.nodeLabels, "node-label", []string{}, "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times")
 	fs.StringSliceVar(&opt.doNotEvictPodControlledBy, "do-not-evict-pod-controlled-by", []string{"", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet},
@@ -155,6 +162,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 
 	fs.IntVar(&opt.maxDrainAttemptsBeforeFail, "max-drain-attempts-before-fail", 8, "Maximum number of failed drain attempts before giving-up on draining the node.")
 	fs.IntVar(&opt.maxNodeReplacementPerHour, "max-node-replacement-per-hour", 2, "Maximum number of nodes per hour for which draino can ask replacement.")
+	fs.IntVar(&opt.excludedPodsPerNodeEstimation, "excluded-pod-per-node-estimation", 5, "Estimation of the number of pods that should be excluded from nodes. Used to compute some event cache size.")
 	fs.Int32Var(&opt.klogVerbosity, "klog-verbosity", 4, "Verbosity to run klog at")
 
 	return &opt, &fs
