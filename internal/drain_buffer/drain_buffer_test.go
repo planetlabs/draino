@@ -5,10 +5,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/context"
-	"k8s.io/apimachinery/pkg/runtime"
+	fakeclient "k8s.io/client-go/kubernetes/fake"
 	fake "k8s.io/utils/clock/testing"
 )
 
@@ -49,18 +48,20 @@ func TestDrainBuffer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: []runtime.Object{}})
-			assert.NoError(t, err, "cannot create kube client wrapper")
+			fakeClient := fakeclient.NewSimpleClientset()
+
+			// Récupère un pointeur sur l'interface de gestion des ConfigMaps
+			configMapClient := fakeClient.CoreV1().ConfigMaps(cmNS)
 
 			// initial setup
 			ctx, cancel := context.WithCancel(context.Background())
-			persistor := NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
+			persistor := NewConfigMapPersistor(configMapClient, cmName, cmNS)
 			interf := NewDrainBuffer(ctx, persistor, tt.Clock, logger)
 			drainBuffer := interf.(*drainBufferImpl)
 			drainBuffer.Initialize(ctx)
 
 			// create new entry
-			err = drainBuffer.StoreSuccessfulDrain("foobar", tt.DrainBuffer)
+			err := drainBuffer.StoreSuccessfulDrain("foobar", tt.DrainBuffer)
 			assert.NoError(t, err, "failed to store successful drain")
 			err = drainBuffer.cleanupAndPersist(ctx)
 			assert.NoError(t, err, "cannot persist drain buffer")
@@ -70,7 +71,7 @@ func TestDrainBuffer(t *testing.T) {
 			// Create new buffer to test load mechanism
 			ctx, cancel = context.WithCancel(context.Background())
 			defer cancel()
-			persistor = NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
+			persistor = NewConfigMapPersistor(configMapClient, cmName, cmNS)
 			interf = NewDrainBuffer(ctx, persistor, tt.Clock, logger)
 			drainBuffer = interf.(*drainBufferImpl)
 

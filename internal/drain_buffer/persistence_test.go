@@ -4,11 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestConfigMapPersistor(t *testing.T) {
@@ -40,14 +39,16 @@ func TestConfigMapPersistor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: []runtime.Object{&tt.ConfigMap}})
-			assert.NoError(t, err, "cannot create client wrapper")
+			fakeClient := fake.NewSimpleClientset(&tt.ConfigMap)
 
-			persistor := NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
-			err = persistor.Persist(context.Background(), []byte(tt.Entry))
+			// Récupère un pointeur sur l'interface de gestion des ConfigMaps
+			configMapClient := fakeClient.CoreV1().ConfigMaps(cmNS)
+
+			persistor := NewConfigMapPersistor(configMapClient, cmName, cmNS)
+			err := persistor.Persist(context.Background(), []byte(tt.Entry))
 			assert.NoError(t, err)
 
-			persistor = NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
+			persistor = NewConfigMapPersistor(configMapClient, cmName, cmNS)
 			data, exist, err := persistor.Load(context.Background())
 			assert.NoError(t, err)
 			assert.True(t, exist)
@@ -86,10 +87,12 @@ func TestConfigMapPersistor_Load(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
-			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: []runtime.Object{&tt.ConfigMap}})
-			assert.NoError(t, err, "cannot create client wrapper")
+			fakeClient := fake.NewSimpleClientset(&tt.ConfigMap)
 
-			persistor := NewConfigMapPersistor(wrapper.GetManagerClient(), cmName, cmNS)
+			// Récupère un pointeur sur l'interface de gestion des ConfigMaps
+			configMapClient := fakeClient.CoreV1().ConfigMaps(cmNS)
+
+			persistor := NewConfigMapPersistor(configMapClient, cmName, cmNS)
 			data, exist, err := persistor.Load(context.Background())
 			assert.NoError(t, err)
 			assert.Equal(t, tt.Exist, exist)

@@ -3,12 +3,11 @@ package drainbuffer
 import (
 	"context"
 	"errors"
+	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const CMDataKey = "data"
@@ -25,15 +24,15 @@ type Persistor interface {
 type ConfigMapPersistor struct {
 	name      string
 	namespace string
-	client    client.Client
+	clientCM  v1.ConfigMapInterface
 }
 
 // NewConfigMapPersistor creates a new config map persistor instance
-func NewConfigMapPersistor(client client.Client, name, namespace string) Persistor {
+func NewConfigMapPersistor(clientCM v1.ConfigMapInterface, name, namespace string) Persistor {
 	return &ConfigMapPersistor{
 		name:      name,
 		namespace: namespace,
-		client:    client,
+		clientCM:  clientCM,
 	}
 }
 
@@ -58,12 +57,14 @@ func (p *ConfigMapPersistor) Persist(ctx context.Context, data []byte) error {
 				CMDataKey: string(data),
 			},
 		}
-		return p.client.Create(ctx, cm)
+		_, err = p.clientCM.Create(ctx, cm, metav1.CreateOptions{})
+		return err
 	}
 
 	// if there is a configmap already, we'll just override the existing entry
 	cm.Data[CMDataKey] = string(data)
-	return p.client.Update(ctx, cm)
+	_, err = p.clientCM.Update(ctx, cm, metav1.UpdateOptions{})
+	return err
 }
 
 func (p *ConfigMapPersistor) Load(ctx context.Context) ([]byte, bool, error) {
@@ -84,8 +85,8 @@ func (p *ConfigMapPersistor) Load(ctx context.Context) ([]byte, bool, error) {
 }
 
 func (p *ConfigMapPersistor) getConfigMap(ctx context.Context) (*corev1.ConfigMap, bool, error) {
-	var cm corev1.ConfigMap
-	err := p.client.Get(ctx, types.NamespacedName{Name: p.name, Namespace: p.namespace}, &cm)
+
+	cm, err := p.clientCM.Get(ctx, p.name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, false, nil
@@ -93,5 +94,5 @@ func (p *ConfigMapPersistor) getConfigMap(ctx context.Context) (*corev1.ConfigMa
 		return nil, false, err
 	}
 
-	return &cm, true, nil
+	return cm, true, nil
 }
