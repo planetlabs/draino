@@ -553,7 +553,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion)),
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{
-			sorters.CompareNodeAnnotationDrainASAP,
+			sorters.CompareNodeAnnotationDrainPriority,
 			sorters.NewConditionComparator(globalConfig.SuppliedConditions),
 		}),
 		candidate_runner.WithDryRun(options.dryRun),

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestCompareNoAnnotationDrainASAP(t *testing.T) {
+func TestCompareNoAnnotationDrainPriority(t *testing.T) {
 	tests := []struct {
 		name string
 		n1   *v1.Node
@@ -23,83 +23,83 @@ func TestCompareNoAnnotationDrainASAP(t *testing.T) {
 			n1: &v1.Node{},
 			n2: &v1.Node{
 				ObjectMeta: meta.ObjectMeta{
-					Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+					Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 				}},
 		},
 		{
 			name: "no labels on 2", want: true,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 			n2: &v1.Node{},
 		},
 		{
 			name: "labels on both with empty value", want: false,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 		},
 		{
 			name: "labels on both with empty value and numeric on 1", want: true,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "10"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "10"},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 		},
 		{
 			name: "default value is 1, so no difference with an annotation with value 1", want: false,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "1"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "1"},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 		},
 		{
 			name: "default value is 1, so no difference with an annotation with value 1 (on second)", want: false,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "1"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "1"},
 			}},
 		},
 		{
 			name: "labels on both with empty value and numeric on 2", want: false,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "1"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "1"},
 			}},
 		},
 		{
 			name: "labels on both with values 1 bigger", want: true,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "10"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "10"},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "9"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "9"},
 			}},
 		},
 		{
 			name: "labels on both with values 1 smaller", want: false,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "8"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "8"},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: "9"},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: "9"},
 			}},
 		},
 		{
 			name: "key only on 1", want: true,
 			n1: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
 				Annotations: map[string]string{"other": ""},
@@ -111,14 +111,14 @@ func TestCompareNoAnnotationDrainASAP(t *testing.T) {
 				Annotations: map[string]string{"other": ""},
 			}},
 			n2: &v1.Node{ObjectMeta: meta.ObjectMeta{
-				Annotations: map[string]string{NodeAnnotationDrainASAPKey: ""},
+				Annotations: map[string]string{NodeAnnotationDrainPriorityPKey: ""},
 			}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := CompareNodeAnnotationDrainASAP(tt.n1, tt.n2); got != tt.want {
-				t.Errorf("CompareNodeAnnotationDrainASAP() = %v, want %v", got, tt.want)
+			if got := CompareNodeAnnotationDrainPriority(tt.n1, tt.n2); got != tt.want {
+				t.Errorf("CompareNodeAnnotationDrainPriority() = %v, want %v", got, tt.want)
 			}
 		})
 	}
