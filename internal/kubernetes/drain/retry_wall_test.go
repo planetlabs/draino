@@ -178,3 +178,49 @@ func TestRetryWall(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryWall_Serialization(t *testing.T) {
+	expectedCount := 2
+	serialized := serializeConditionMessage(expectedCount, time.Now(), "for no reason :)")
+	count, err := unserializeConditionMessage(serialized)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedCount, count)
+}
+
+func TestRetryWall_Unserialization(t *testing.T) {
+	tests := []struct {
+		Name        string
+		Message     string
+		ExpectedCnt int
+		ExpectErr   bool
+	}{
+		{
+			Name:        "should properly parse message",
+			Message:     serializeConditionMessage(5, time.Now(), "bar"),
+			ExpectedCnt: 5,
+			ExpectErr:   false,
+		},
+		{
+			Name:      "should fail to parse message because of wrong format",
+			Message:   "this is an invalid message",
+			ExpectErr: true,
+		},
+		{
+			Name:      "should fail to parse count in message",
+			Message:   "invalid" + serializeConditionMessage(2, time.Now(), "bar"),
+			ExpectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			count, err := unserializeConditionMessage(tt.Message)
+			if tt.ExpectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.ExpectedCnt, count)
+			}
+		})
+	}
+}

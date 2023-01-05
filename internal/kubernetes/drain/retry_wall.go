@@ -104,13 +104,17 @@ func (wall *retryWallImpl) GetRetryWallTimestamp(node *corev1.Node) time.Time {
 		return TimeZero
 	}
 
+	delay := wall.getRetryDelay(node, retries)
+	return lastHeartbeatTime.Add(delay)
+}
+
+func (wall *retryWallImpl) getRetryDelay(node *corev1.Node, retries int) time.Duration {
 	strategy := wall.getStrategyFromNode(node)
 	if retries >= strategy.GetAlertThreashold() {
 		wall.logger.Info("retry wall is hitting limit for node", "node_name", node.GetName(), "retry_strategy", strategy.GetName(), "retries", retries, "max_retries", strategy.GetAlertThreashold())
 	}
 
-	delay := strategy.GetDelay(retries)
-	return lastHeartbeatTime.Add(delay)
+	return strategy.GetDelay(retries)
 }
 
 func (wall *retryWallImpl) GetDrainRetryAttemptsCount(node *corev1.Node) int {
@@ -161,7 +165,7 @@ func (wall *retryWallImpl) getRetry(node *corev1.Node) (int, time.Time, error) {
 		return 0, TimeZero, nil
 	}
 
-	retryCount, _, err := unserializeConditionMessage(condition.Message)
+	retryCount, err := unserializeConditionMessage(condition.Message)
 	if err != nil {
 		return 0, TimeZero, err
 	}
@@ -183,8 +187,11 @@ func (wall *retryWallImpl) patchRetryCountOnNode(ctx context.Context, node *core
 		})
 	}
 
+	delay := wall.getRetryDelay(node, retryCount)
+	blockedUntil := now.Add(delay)
+
 	newNode.Status.Conditions[pos].LastHeartbeatTime = metav1.NewTime(now)
-	newNode.Status.Conditions[pos].Message = serializeConditionMessage(retryCount, reason)
+	newNode.Status.Conditions[pos].Message = serializeConditionMessage(retryCount, blockedUntil, reason)
 
 	err := wall.
 		client.
@@ -194,13 +201,14 @@ func (wall *retryWallImpl) patchRetryCountOnNode(ctx context.Context, node *core
 	return newNode, err
 }
 
-func serializeConditionMessage(retryCount int, reason string) string {
-	return fmt.Sprintf("%d%s%s", retryCount, retryConditionMsgSeparator, reason)
+func serializeConditionMessage(retryCount int, blockedUntil time.Time, reason string) string {
+	blockedUntilStr := blockedUntil.Format(time.RFC822)
+	return fmt.Sprintf("%d%s%s%s%s", retryCount, retryConditionMsgSeparator, blockedUntilStr, retryConditionMsgSeparator, reason)
 }
 
-func unserializeConditionMessage(message string) (retryCount int, reason string, returnErr error) {
+func unserializeConditionMessage(message string) (retryCount int, returnErr error) {
 	split := strings.Split(message, retryConditionMsgSeparator)
-	if len(split) != 2 {
+	if len(split) != 3 {
 		returnErr = fmt.Errorf("invalid formatted node drain retry condition message: %s", message)
 		return
 	}
@@ -211,5 +219,5 @@ func unserializeConditionMessage(message string) (retryCount int, reason string,
 		return
 	}
 
-	return int(val), split[1], nil
+	return int(val), nil
 }
