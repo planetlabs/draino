@@ -2,6 +2,7 @@ package analyser
 
 import (
 	"context"
+	v1 "k8s.io/api/apps/v1"
 	"testing"
 	"time"
 
@@ -473,4 +474,144 @@ func podFilter(pod corev1.Pod) (bool, string, error) {
 		return false, val, nil
 	}
 	return true, "", nil
+}
+
+func Test_stabilityPeriodChecker_getPodStabilityPeriodConfiguration(t *testing.T) {
+
+	podWithAnnotation := &corev1.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:        "p-with-annotation",
+			Namespace:   "ns1",
+			Annotations: map[string]string{StabilityPeriodAnnotationKey: "10m"},
+		},
+	}
+	podWithoutAnnotation := &corev1.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "p-without-annotation",
+			Namespace: "ns1",
+		},
+	}
+
+	podWithoutAnnotationFromSts := &corev1.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "p-without-annotation-sts-0",
+			Namespace: "ns1",
+			OwnerReferences: []meta.OwnerReference{
+				{
+					Kind: "StatefulSet",
+					Name: "p-without-annotation-sts",
+				},
+			},
+		},
+	}
+
+	podWithoutAnnotationFromDeployment := &corev1.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      "p-without-deployment-abc-123",
+			Namespace: "ns1",
+			OwnerReferences: []meta.OwnerReference{
+				{
+					Kind: "ReplicaSet",
+					Name: "p-without-annotation-deployment-abc",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+
+		objects []runtime.Object
+		want    stabilityPeriodInfo
+		found   bool
+	}{
+		{
+			name:    "not Found, pod only",
+			pod:     podWithoutAnnotation,
+			objects: nil,
+			want:    stabilityPeriodInfo{},
+			found:   false,
+		},
+		{
+			name:    "found on pod",
+			pod:     podWithAnnotation,
+			objects: nil,
+			want:    stabilityPeriodInfo{length: 10 * time.Minute, sourceType: "user/pod", sourceName: "ns1/p-with-annotation"},
+			found:   true,
+		},
+		{
+			name: "search on sts",
+			pod:  podWithoutAnnotationFromSts,
+			objects: []runtime.Object{
+				&v1.StatefulSet{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace:   podWithoutAnnotationFromSts.Namespace,
+						Name:        podWithoutAnnotationFromSts.OwnerReferences[0].Name,
+						Annotations: map[string]string{StabilityPeriodAnnotationKey: "9m"},
+					},
+				},
+			},
+			want:  stabilityPeriodInfo{length: 9 * time.Minute, sourceType: "user/controller", sourceName: podWithoutAnnotationFromSts.Namespace + "/" + podWithoutAnnotationFromSts.OwnerReferences[0].Name},
+			found: true,
+		},
+		{
+			name: "search on sts, nothing found",
+			pod:  podWithoutAnnotationFromSts,
+			objects: []runtime.Object{
+				&v1.StatefulSet{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: podWithoutAnnotationFromSts.Namespace,
+						Name:      podWithoutAnnotationFromSts.OwnerReferences[0].Name,
+					},
+				},
+			},
+			want:  stabilityPeriodInfo{},
+			found: false,
+		},
+		{
+			name: "search on deployment",
+			pod:  podWithoutAnnotationFromDeployment,
+			objects: []runtime.Object{
+				&v1.Deployment{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace:   podWithoutAnnotationFromDeployment.Namespace,
+						Name:        "p-without-annotation-deployment",
+						Annotations: map[string]string{StabilityPeriodAnnotationKey: "8m"},
+					},
+				},
+			},
+			want:  stabilityPeriodInfo{length: 8 * time.Minute, sourceType: "user/controller", sourceName: podWithoutAnnotationFromSts.Namespace + "/p-without-annotation-deployment"},
+			found: true,
+		},
+		{
+			name: "search on deployment",
+			pod:  podWithoutAnnotationFromDeployment,
+			objects: []runtime.Object{
+				&v1.Deployment{
+					ObjectMeta: meta.ObjectMeta{
+						Namespace: podWithoutAnnotationFromDeployment.Namespace,
+						Name:      "p-without-annotation-deployment",
+					},
+				},
+			},
+			want:  stabilityPeriodInfo{},
+			found: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeKubeClient := fakeclient.NewSimpleClientset(tt.objects...)
+
+			store, closeFunc := kubernetes.RunStoreForTest(context.Background(), fakeKubeClient)
+			defer closeFunc()
+
+			d := &stabilityPeriodChecker{
+				store: store,
+			}
+			got, got1 := d.getPodStabilityPeriodConfiguration(context.Background(), tt.pod)
+			assert.Equalf(t, tt.want, got, "getPodStabilityPeriodConfiguration()")
+			assert.Equalf(t, tt.found, got1, "getPodStabilityPeriodConfiguration()")
+		})
+	}
 }

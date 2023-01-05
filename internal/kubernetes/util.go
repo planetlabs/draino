@@ -355,7 +355,7 @@ func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store
 	return "", false
 }
 
-// GetControllerForPod for the moment it handles only statefulSets controller
+// GetControllerForPod for the moment it handles only statefulSets and deployments controller
 func GetControllerForPod(pod *core.Pod, store RuntimeObjectStore) (ctrl metav1.Object, found bool) {
 	for _, r := range pod.OwnerReferences {
 		if r.Kind == "StatefulSet" {
@@ -364,6 +364,14 @@ func GetControllerForPod(pod *core.Pod, store RuntimeObjectStore) (ctrl metav1.O
 				return nil, false
 			}
 			return sts, true
+		}
+		if r.Kind == "ReplicaSet" {
+			deploymentName := r.Name[:strings.LastIndex(r.Name, "-")]
+			deployment, err := store.Deployments().Get(pod.Namespace, deploymentName)
+			if err != nil {
+				return nil, false
+			}
+			return deployment, true
 		}
 	}
 	return nil, false

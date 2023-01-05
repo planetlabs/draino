@@ -133,9 +133,11 @@ func main() {
 
 		pods := kubernetes.NewPodWatch(ctx, cs)
 		statefulSets := kubernetes.NewStatefulsetWatch(ctx, cs)
+		deployments := kubernetes.NewDeploymentWatch(ctx, cs)
 		persistentVolumes := kubernetes.NewPersistentVolumeWatch(ctx, cs)
 		persistentVolumeClaims := kubernetes.NewPersistentVolumeClaimWatch(ctx, cs)
 		runtimeObjectStoreImpl := &kubernetes.RuntimeObjectStoreImpl{
+			DeploymentStore:            deployments,
 			StatefulSetsStore:          statefulSets,
 			PodsStore:                  pods,
 			PersistentVolumeStore:      persistentVolumes,
@@ -358,7 +360,7 @@ func main() {
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
 					log.Info("watchers are running")
-					if errLE := kubernetes.Await(nodes, pods, statefulSets, persistentVolumes, persistentVolumeClaims); errLE != nil {
+					if errLE := kubernetes.Await(nodes, pods, statefulSets, deployments, persistentVolumes, persistentVolumeClaims); errLE != nil {
 						panic("leader election, error watching: " + errLE.Error())
 					}
 
@@ -442,7 +444,7 @@ func getInitDrainBufferRunner(drainBuffer drainbuffer.DrainBuffer, logger *logr.
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
 func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers, globalBlocker kubernetes.GlobalBlocker) error {
 	validationOptions := infraparameters.GetValidateAll()
-	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject = false, false, false
+	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject, validationOptions.KubeClusterName = false, false, false, false
 	if err := cfg.InfraParam.Validate(validationOptions); err != nil {
 		return fmt.Errorf("infra param validation error: %v\n", err)
 	}

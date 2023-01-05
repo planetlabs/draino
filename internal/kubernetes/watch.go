@@ -44,6 +44,7 @@ type RuntimeObjectStore interface {
 	Nodes() NodeStore
 	Pods() PodStore
 	StatefulSets() StatefulSetStore
+	Deployments() DeploymentStore
 	PersistentVolumes() PersistentVolumeStore
 	PersistentVolumeClaims() PersistentVolumeClaimStore
 }
@@ -51,6 +52,7 @@ type RuntimeObjectStore interface {
 type RuntimeObjectStoreImpl struct {
 	NodesStore                 *NodeWatch
 	PodsStore                  *PodWatch
+	DeploymentStore            *DeploymentWatch
 	StatefulSetsStore          *StatefulSetWatch
 	PersistentVolumeStore      *PersistentVolumeWatch
 	PersistentVolumeClaimStore *PersistentVolumeClaimWatch
@@ -69,6 +71,10 @@ func (r *RuntimeObjectStoreImpl) StatefulSets() StatefulSetStore {
 	return r.StatefulSetsStore
 }
 
+func (r *RuntimeObjectStoreImpl) Deployments() DeploymentStore {
+	return r.DeploymentStore
+}
+
 func (r *RuntimeObjectStoreImpl) PersistentVolumes() PersistentVolumeStore {
 	return r.PersistentVolumeStore
 }
@@ -83,6 +89,7 @@ func (r *RuntimeObjectStoreImpl) HasSynced() bool {
 	}
 	r.hasSynced = r.NodesStore.HasSynced() &&
 		r.StatefulSetsStore.HasSynced() &&
+		r.DeploymentStore.HasSynced() &&
 		r.PodsStore.HasSynced() &&
 		r.PersistentVolumeStore.HasSynced() &&
 		r.PersistentVolumeClaimStore.HasSynced()
@@ -321,6 +328,50 @@ func (s StatefulSetWatch) Get(namespace, name string) (*v1.StatefulSet, error) {
 	return nil, apierrors.NewNotFound(v1.Resource("statefulset"), name)
 }
 
+type DeploymentStore interface {
+	SyncedStore
+	// Get deployment by name
+	Get(namespace, name string) (*v1.Deployment, error)
+}
+
+// A DeploymentWatch is a cache of sts resources that notifies registered
+// handlers when its contents change.
+type DeploymentWatch struct {
+	cache.SharedInformer
+}
+
+var _ DeploymentStore = &DeploymentWatch{}
+
+// NewDeploymentWatch creates a watch on sts resources.
+func NewDeploymentWatch(ctx context.Context, c kubernetes.Interface) *DeploymentWatch {
+	lw := &cache.ListWatch{
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.AppsV1().Deployments("").List(ctx, o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.AppsV1().Deployments("").Watch(ctx, o) },
+	}
+
+	i := cache.NewSharedInformer(lw, &v1.Deployment{}, 30*time.Minute)
+	return &DeploymentWatch{i}
+}
+
+func (s DeploymentWatch) Get(namespace, name string) (*v1.Deployment, error) {
+	obj, exists, err := s.GetStore().GetByKey(namespace + "/" + name)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, apierrors.NewNotFound(v1.Resource("deployment"), name)
+	}
+	if obj != nil {
+		deploy, ok := obj.(*v1.Deployment)
+		if ok {
+			return deploy, nil
+		}
+		return nil, errors.New("Failed to cast object from store to Deployment.")
+
+	}
+	return nil, apierrors.NewNotFound(v1.Resource("deployment"), name)
+}
+
 type PersistentVolumeStore interface {
 	SyncedStore
 	// Get the PV associated with a node
@@ -428,11 +479,13 @@ func (p *PersistentVolumeClaimWatch) Get(namespace, name string) (*core.Persiste
 func RunStoreForTest(ctx context.Context, kclient kubernetes.Interface) (store RuntimeObjectStore, closingFunc func()) {
 	stopCh := make(chan struct{})
 	stsWatch := NewStatefulsetWatch(ctx, kclient)
+	deploymentWatch := NewDeploymentWatch(ctx, kclient)
 	podWatch := NewPodWatch(ctx, kclient)
 	nodeWatch := NewNodeWatch(ctx, kclient)
 	pvWatch := NewPersistentVolumeWatch(ctx, kclient)
 	pvcWatch := NewPersistentVolumeClaimWatch(ctx, kclient)
 
+	go deploymentWatch.Run(stopCh)
 	go stsWatch.Run(stopCh)
 	go podWatch.Run(stopCh)
 	go nodeWatch.Run(stopCh)
@@ -440,6 +493,7 @@ func RunStoreForTest(ctx context.Context, kclient kubernetes.Interface) (store R
 	go pvcWatch.Run(stopCh)
 
 	store = &RuntimeObjectStoreImpl{
+		DeploymentStore:            deploymentWatch,
 		StatefulSetsStore:          stsWatch,
 		PodsStore:                  podWatch,
 		NodesStore:                 nodeWatch,

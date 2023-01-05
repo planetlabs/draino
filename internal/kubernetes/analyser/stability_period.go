@@ -167,18 +167,8 @@ func (d *stabilityPeriodChecker) getStabilityPeriodsConfigurations(ctx context.C
 	for _, p := range pods {
 		stabilityPeriodPod := stabilityPeriodNode // inherit from the node
 		podStabilityPeriodConfig, found := d.getPodStabilityPeriodConfiguration(ctx, p)
-		if found && podStabilityPeriodConfig > stabilityPeriodPod.length {
-			stabilityPeriodPod.length = podStabilityPeriodConfig
-			stabilityPeriodPod.sourceType = "user/pod"
-			stabilityPeriodPod.sourceName = p.Namespace + "/" + p.Name
-
-		} else if ctrl, ok := kubernetes.GetControllerForPod(p, d.store); ok && ctrl != nil {
-			ctrlStabilityPeriodConfig, found, _ := d.getStabilityPeriodConfigurationFromAnnotation(ctrl) // Not doing any event on the controller in case of error: we are missing a good method for generic object in the eventRecorder
-			if found && ctrlStabilityPeriodConfig > stabilityPeriodPod.length {
-				stabilityPeriodPod.length = ctrlStabilityPeriodConfig
-				stabilityPeriodPod.sourceType = "user/controller"
-				stabilityPeriodPod.sourceName = p.Namespace + "/" + ctrl.GetName()
-			}
+		if found && podStabilityPeriodConfig.length > stabilityPeriodPod.length {
+			stabilityPeriodPod = podStabilityPeriodConfig
 		}
 		periods[index.GeneratePodIndexKey(p.Name, p.Namespace)] = stabilityPeriodPod
 	}
@@ -186,22 +176,43 @@ func (d *stabilityPeriodChecker) getStabilityPeriodsConfigurations(ctx context.C
 }
 
 func (d *stabilityPeriodChecker) getNodeStabilityPeriodConfiguration(ctx context.Context, node *v1.Node) (time.Duration, bool) {
-	nodeStabilityPeriod, found, err := d.getStabilityPeriodConfigurationFromAnnotation(node)
+	nodeStabilityPeriod, found, err := getStabilityPeriodConfigurationFromAnnotation(node)
 	if err != nil && d.eventRecorder != nil {
 		d.eventRecorder.NodeEventf(ctx, node, v1.EventTypeWarning, StabilityPeriodMisconfigured, "the value for "+StabilityPeriodAnnotationKey+" cannot be parsed as a duration: %#v", err)
 	}
 	return nodeStabilityPeriod, found
 }
 
-func (d *stabilityPeriodChecker) getPodStabilityPeriodConfiguration(ctx context.Context, pod *v1.Pod) (time.Duration, bool) {
-	podStabilityPeriod, found, err := d.getStabilityPeriodConfigurationFromAnnotation(pod)
+func (d *stabilityPeriodChecker) getPodStabilityPeriodConfiguration(ctx context.Context, pod *v1.Pod) (sp stabilityPeriodInfo, found bool) {
+	var err error
+	sp.length, found, err = getStabilityPeriodConfigurationFromAnnotation(pod)
+	if !found {
+		if obj, foundCtrl := kubernetes.GetControllerForPod(pod, d.store); foundCtrl {
+			sp.length, found, err = getStabilityPeriodConfigurationFromAnnotation(obj)
+			if err != nil && d.eventRecorder != nil {
+				// TODO fix the event recorder to be able to put an event on any type of object
+			}
+			if found {
+				sp.sourceType = "user/controller"
+				sp.sourceName = obj.GetNamespace() + "/" + obj.GetName()
+			}
+			return sp, found
+		}
+	}
+
 	if err != nil && d.eventRecorder != nil {
 		d.eventRecorder.PodEventf(ctx, pod, v1.EventTypeWarning, StabilityPeriodMisconfigured, "the value for "+StabilityPeriodAnnotationKey+" cannot be parsed as a duration: %#v", err)
 	}
-	return podStabilityPeriod, found
+
+	if found {
+		sp.sourceType = "user/pod"
+		sp.sourceName = pod.Namespace + "/" + pod.Name
+	}
+
+	return sp, found
 }
 
-func (d *stabilityPeriodChecker) getStabilityPeriodConfigurationFromAnnotation(obj metav1.Object) (time.Duration, bool, error) {
+func getStabilityPeriodConfigurationFromAnnotation(obj metav1.Object) (time.Duration, bool, error) {
 	annotations := obj.GetAnnotations()
 	if customStabilityPeriod, ok := annotations[StabilityPeriodAnnotationKey]; ok {
 		durationValue, err := time.ParseDuration(customStabilityPeriod)
