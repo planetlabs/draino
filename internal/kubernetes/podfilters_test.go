@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"testing"
 
 	"github.com/pkg/errors"
@@ -27,6 +28,7 @@ import (
 )
 
 func TestPodFilters(t *testing.T) {
+	ctx := context.Background()
 	cases := []struct {
 		name         string
 		filter       PodFilterFunc
@@ -127,7 +129,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter:       NewDaemonSetPodFilter(newFakeClientSet(reactor{verb: "get", resource: "daemonsets"})),
+			filter:       NewDaemonSetPodFilter(ctx, newFakeClientSet(reactor{verb: "get", resource: "daemonsets"})),
 			passesFilter: false,
 		},
 		{
@@ -142,7 +144,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter: NewDaemonSetPodFilter(newFakeClientSet(reactor{
+			filter: NewDaemonSetPodFilter(ctx, newFakeClientSet(reactor{
 				verb:     "get",
 				resource: "daemonsets",
 				err:      errExploded,
@@ -161,7 +163,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter: NewDaemonSetPodFilter(newFakeClientSet(reactor{
+			filter: NewDaemonSetPodFilter(ctx, newFakeClientSet(reactor{
 				verb:     "get",
 				resource: "daemonsets",
 				err:      apierrors.NewNotFound(schema.GroupResource{Resource: "daemonsets"}, daemonsetName),
@@ -180,7 +182,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter:       NewDaemonSetPodFilter(newFakeClientSet()),
+			filter:       NewDaemonSetPodFilter(ctx, newFakeClientSet()),
 			passesFilter: true,
 		},
 		{
@@ -195,7 +197,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter:       NewStatefulSetPodFilter(newFakeClientSet(reactor{verb: "get", resource: "statefulsets"})),
+			filter:       NewStatefulSetPodFilter(ctx, newFakeClientSet(reactor{verb: "get", resource: "statefulsets"})),
 			passesFilter: false,
 		},
 		{
@@ -210,7 +212,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter: NewStatefulSetPodFilter(newFakeClientSet(reactor{
+			filter: NewStatefulSetPodFilter(ctx, newFakeClientSet(reactor{
 				verb:     "get",
 				resource: "statefulsets",
 				err:      errExploded,
@@ -229,7 +231,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter: NewStatefulSetPodFilter(newFakeClientSet(reactor{
+			filter: NewStatefulSetPodFilter(ctx, newFakeClientSet(reactor{
 				verb:     "get",
 				resource: "statefulsets",
 				err:      apierrors.NewNotFound(schema.GroupResource{Resource: "statefulsets"}, statefulsetName),
@@ -248,7 +250,7 @@ func TestPodFilters(t *testing.T) {
 					}},
 				},
 			},
-			filter:       NewStatefulSetPodFilter(newFakeClientSet()),
+			filter:       NewStatefulSetPodFilter(ctx, newFakeClientSet()),
 			passesFilter: true,
 		},
 		{

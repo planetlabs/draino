@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -62,7 +63,7 @@ func UnreplicatedPodFilter(p core.Pod) (bool, error) {
 
 // NewDaemonSetPodFilter returns a FilterFunc that returns true if the supplied
 // pod is not managed by an extant DaemonSet.
-func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
+func NewDaemonSetPodFilter(ctx context.Context, client kubernetes.Interface) PodFilterFunc {
 	return func(p core.Pod) (bool, error) {
 		c := meta.GetControllerOf(&p)
 		if c == nil || c.Kind != kindDaemonSet {
@@ -71,7 +72,7 @@ func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 
 		// Pods pass the filter if they were created by a DaemonSet that no
 		// longer exists.
-		if _, err := client.AppsV1().DaemonSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
+		if _, err := client.AppsV1().DaemonSets(p.GetNamespace()).Get(ctx, c.Name, meta.GetOptions{}); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
@@ -83,7 +84,7 @@ func NewDaemonSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 
 // NewStatefulSetPodFilter returns a FilterFunc that returns true if the supplied
 // pod is not managed by an extant StatefulSet.
-func NewStatefulSetPodFilter(client kubernetes.Interface) PodFilterFunc {
+func NewStatefulSetPodFilter(ctx context.Context, client kubernetes.Interface) PodFilterFunc {
 	return func(p core.Pod) (bool, error) {
 		c := meta.GetControllerOf(&p)
 		if c == nil || c.Kind != kindStatefulSet {
@@ -92,7 +93,7 @@ func NewStatefulSetPodFilter(client kubernetes.Interface) PodFilterFunc {
 
 		// Pods pass the filter if they were created by a StatefulSet that no
 		// longer exists.
-		if _, err := client.AppsV1().StatefulSets(p.GetNamespace()).Get(c.Name, meta.GetOptions{}); err != nil {
+		if _, err := client.AppsV1().StatefulSets(p.GetNamespace()).Get(ctx, c.Name, meta.GetOptions{}); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}

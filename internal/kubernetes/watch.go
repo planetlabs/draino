@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"time"
 
 	"github.com/pkg/errors"
@@ -42,10 +43,10 @@ type NodeWatch struct {
 
 // NewNodeWatch creates a watch on node resources. Nodes are cached and the
 // provided ResourceEventHandlers are called when the cache changes.
-func NewNodeWatch(c kubernetes.Interface, rs ...cache.ResourceEventHandler) *NodeWatch {
+func NewNodeWatch(ctx context.Context, c kubernetes.Interface, rs ...cache.ResourceEventHandler) *NodeWatch {
 	lw := &cache.ListWatch{
-		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().Nodes().List(o) },
-		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Nodes().Watch(o) },
+		ListFunc:  func(o meta.ListOptions) (runtime.Object, error) { return c.CoreV1().Nodes().List(ctx, o) },
+		WatchFunc: func(o meta.ListOptions) (watch.Interface, error) { return c.CoreV1().Nodes().Watch(ctx, o) },
 	}
 	i := cache.NewSharedInformer(lw, &core.Node{}, 30*time.Minute)
 	for _, r := range rs {

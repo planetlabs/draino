@@ -135,6 +135,11 @@ func main() {
 		kingpin.FatalIfError(await(web), "error serving")
 	}()
 
+	// use a Go context so we can tell the leaderelection code when we
+	// want to step down or stop watching kubernetes resources
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	c, err := kubernetes.BuildConfigFromFlags(*apiserver, *kubecfg)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client configuration")
 
@@ -149,10 +154,10 @@ func main() {
 		pf = append(pf, kubernetes.UnreplicatedPodFilter)
 	}
 	if !*evictDaemonSetPods {
-		pf = append(pf, kubernetes.NewDaemonSetPodFilter(cs))
+		pf = append(pf, kubernetes.NewDaemonSetPodFilter(ctx, cs))
 	}
 	if !*evictStatefulSetPods {
-		pf = append(pf, kubernetes.NewStatefulSetPodFilter(cs))
+		pf = append(pf, kubernetes.NewStatefulSetPodFilter(ctx, cs))
 	}
 	systemKnownAnnotations := []string{
 		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
@@ -203,15 +208,10 @@ func main() {
 
 	nodeLabelFilter = cache.FilteringResourceEventHandler{FilterFunc: nodeLabelFilterFunc, Handler: h}
 
-	nodes := kubernetes.NewNodeWatch(cs, nodeLabelFilter)
+	nodes := kubernetes.NewNodeWatch(ctx, cs, nodeLabelFilter)
 
 	id, err := os.Hostname()
 	kingpin.FatalIfError(err, "cannot get hostname")
-
-	// use a Go context so we can tell the leaderelection code when we
-	// want to step down
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	lock, err := resourcelock.New(
 		resourcelock.EndpointsResourceLock,
