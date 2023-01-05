@@ -32,6 +32,7 @@ func (factory *FilterFactory) BuildCandidateFilter() Filter {
 		NewNodeTerminatingFilter(),
 		NewStabilityPeriodFilter(factory.conf.stabilityPeriodChecker, factory.conf.clock),
 		NewDrainBufferFilter(factory.conf.drainBuffer, factory.conf.clock, factory.conf.groupKeyGetter),
+		NewGlobalBlockerFilter(factory.conf.globalBlocker),
 	}
 	return f
 }

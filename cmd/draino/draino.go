@@ -346,7 +346,7 @@ func main() {
 			drainPodFilter:  drainerSkipPodFilter,
 			nodeLabelFilter: nodeLabelFilterFunc,
 		}
-		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log, cliHandlers); err != nil {
+		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log, cliHandlers, globalLocker); err != nil {
 			return fmt.Errorf("failed to bootstrap the controller runtime section: %v", err)
 		}
 
@@ -358,7 +358,7 @@ func main() {
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
 					log.Info("watchers are running")
-					if errLE := kubernetes.Await(nodes, pods, statefulSets, persistentVolumes, persistentVolumeClaims, globalLocker); errLE != nil {
+					if errLE := kubernetes.Await(nodes, pods, statefulSets, persistentVolumes, persistentVolumeClaims); errLE != nil {
 						panic("leader election, error watching: " + errLE.Error())
 					}
 
@@ -440,7 +440,7 @@ func getInitDrainBufferRunner(drainBuffer drainbuffer.DrainBuffer, logger *logr.
 }
 
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
-func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers) error {
+func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers, globalBlocker kubernetes.GlobalBlocker) error {
 	validationOptions := infraparameters.GetValidateAll()
 	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject = false, false, false
 	if err := cfg.InfraParam.Validate(validationOptions); err != nil {
@@ -512,6 +512,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		filters.WithStabilityPeriodChecker(stabilityPeriodChecker),
 		filters.WithDrainBuffer(drainBuffer),
 		filters.WithGroupKeyGetter(keyGetter),
+		filters.WithGlobalBlocker(globalBlocker),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the filters")
@@ -583,6 +584,11 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 			logger.Error(err, "failed to attach scope observer cleanup")
 			return err
 		}
+	}
+
+	if err := mgr.Add(globalBlocker); err != nil {
+		logger.Error(err, "failed to setup global blocker with controller runtime")
+		return err
 	}
 
 	if err := mgr.Add(scopeObserver); err != nil {

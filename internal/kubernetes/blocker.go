@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
@@ -21,6 +21,7 @@ type GlobalBlocker interface {
 	AddBlocker(name string, checkFunc ComputeBlockStateFunction, period time.Duration) error
 	GetBlockStateCacheAccessor() map[string]GetBlockStateFunction
 	Run(stopCh <-chan struct{})
+	Start(context.Context) error
 }
 
 // ComputeBlockStateFunction a function that would analyse the system state and return true if we should lock draino to prevent any cordon/drain activity
@@ -59,6 +60,11 @@ func NewGlobalBlocker(logger *zap.Logger) *GlobalBlocksRunner {
 var (
 	MeasureBlocker = stats.Int64("draino/global_block", "GlobalBlock indicator.", stats.UnitDimensionless)
 )
+
+func (g *GlobalBlocksRunner) Start(ctx context.Context) error {
+	g.Run(ctx.Done())
+	return nil
+}
 
 func (g *GlobalBlocksRunner) Run(stopCh <-chan struct{}) {
 	if g.started {

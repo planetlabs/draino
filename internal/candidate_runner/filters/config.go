@@ -27,6 +27,7 @@ type Config struct {
 	stabilityPeriodChecker analyser.StabilityPeriodChecker
 	groupKeyGetter         groups.GroupKeyGetter
 	drainBuffer            drainbuffer.DrainBuffer
+	globalBlocker          kubernetes.GlobalBlocker
 
 	// With defaults
 	clock clock.Clock
@@ -70,6 +71,9 @@ func (conf *Config) Validate() error {
 	}
 	if conf.drainBuffer == nil {
 		return errors.New("drain buffer is not set")
+	}
+	if conf.globalBlocker == nil {
+		return errors.New("global blocker is not set")
 	}
 
 	return nil
@@ -134,5 +138,11 @@ func WithGroupKeyGetter(getter groups.GroupKeyGetter) WithOption {
 func WithDrainBuffer(drainBuffer drainbuffer.DrainBuffer) WithOption {
 	return func(conf *Config) {
 		conf.drainBuffer = drainBuffer
+	}
+}
+
+func WithGlobalBlocker(globalBlocker kubernetes.GlobalBlocker) WithOption {
+	return func(conf *Config) {
+		conf.globalBlocker = globalBlocker
 	}
 }
