@@ -4,12 +4,14 @@ import (
 	"errors"
 
 	"github.com/go-logr/logr"
+	"k8s.io/utils/clock"
+
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
-	"k8s.io/utils/clock"
+	"github.com/planetlabs/draino/internal/protector"
 )
 
 // WithOption is used to pass an option to the factory
@@ -28,6 +30,8 @@ type Config struct {
 	groupKeyGetter         groups.GroupKeyGetter
 	drainBuffer            drainbuffer.DrainBuffer
 	globalBlocker          kubernetes.GlobalBlocker
+	pvcProtector           protector.PVCProtector
+	eventRecorder          kubernetes.EventRecorder
 
 	// With defaults
 	clock clock.Clock
@@ -74,6 +78,12 @@ func (conf *Config) Validate() error {
 	}
 	if conf.globalBlocker == nil {
 		return errors.New("global blocker is not set")
+	}
+	if conf.eventRecorder == nil {
+		return errors.New("eventRecorder is not set")
+	}
+	if conf.pvcProtector == nil {
+		return errors.New("pvc protector is not set")
 	}
 
 	return nil
@@ -144,5 +154,18 @@ func WithDrainBuffer(drainBuffer drainbuffer.DrainBuffer) WithOption {
 func WithGlobalBlocker(globalBlocker kubernetes.GlobalBlocker) WithOption {
 	return func(conf *Config) {
 		conf.globalBlocker = globalBlocker
+	}
+}
+
+func WithEventRecorder(recorder kubernetes.EventRecorder) WithOption {
+	return func(conf *Config) {
+		conf.eventRecorder = recorder
+	}
+}
+
+func WithPVCProtector(pvcProtector protector.PVCProtector) WithOption {
+	return func(conf *Config) {
+		conf.pvcProtector = pvcProtector
+
 	}
 }

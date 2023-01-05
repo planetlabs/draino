@@ -33,18 +33,7 @@ func (factory *FilterFactory) BuildCandidateFilter() Filter {
 		NewStabilityPeriodFilter(factory.conf.stabilityPeriodChecker, factory.conf.clock),
 		NewDrainBufferFilter(factory.conf.drainBuffer, factory.conf.clock, factory.conf.groupKeyGetter),
 		NewGlobalBlockerFilter(factory.conf.globalBlocker),
-	}
-	return f
-}
-
-func (factory *FilterFactory) BuildScopeFilter() Filter {
-	f := &CompositeFilter{
-		logger: factory.conf.logger.WithName("ScopeFilter"),
-	}
-
-	f.filters = []Filter{
-		NewNodeWithLabelFilter(factory.conf.nodeLabelFilterFunc),
-		NewPodFilter(*factory.conf.logger, factory.conf.cordonFilter, factory.conf.objectsStore),
+		NewPVCBoundFilter(factory.conf.pvcProtector, factory.conf.eventRecorder),
 	}
 	return f
 }

@@ -2,15 +2,14 @@ package drain_runner
 
 import (
 	"errors"
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/protector"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -26,7 +25,6 @@ type Config struct {
 	retryWall           drain.RetryWall
 	drainer             kubernetes.Drainer
 	sharedIndexInformer index.GetSharedIndexInformer
-	pvProtector         protector.PVProtector
 	eventRecorder       kubernetes.EventRecorder
 	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
@@ -62,9 +60,6 @@ func (conf *Config) Validate() error {
 	}
 	if conf.sharedIndexInformer == nil {
 		return errors.New("get shared index informer should be set")
-	}
-	if conf.pvProtector == nil {
-		return errors.New("pv protector should be set")
 	}
 	if conf.eventRecorder == nil {
 		return errors.New("event recorder should be set")
@@ -124,12 +119,6 @@ func WithDrainer(drainer kubernetes.Drainer) WithOption {
 func WithSharedIndexInformer(inf index.GetSharedIndexInformer) WithOption {
 	return func(conf *Config) {
 		conf.sharedIndexInformer = inf
-	}
-}
-
-func WithPVProtector(protector protector.PVProtector) WithOption {
-	return func(conf *Config) {
-		conf.pvProtector = protector
 	}
 }
 

@@ -9,21 +9,36 @@ import (
 )
 
 const (
-	CandidateRunnerInfoKey = "CandidateRunnerInfo"
+	CandidateRunnerInfoKey        = "CandidateRunnerInfo"
+	CandidateRunnerInfoCleanupKey = "CandidateRunnerCleanupInfo"
 )
 
 type DataInfo struct {
+	// Candidate Run
 	NodeCount          int
 	FilteredOutCount   int
 	Slots              string
 	ProcessingDuration time.Duration
 	LastTime           time.Time
-
 	// private filed that should not go through the serialization
 	lastNodeIterator scheduler.ItemProvider[*v1.Node]
 }
 
+type DataInfoForCleanupActivity struct {
+	// Cleanup data
+	CleanupLastTime           time.Time
+	CleanupProcessingDuration time.Duration
+}
+
 func (d *DataInfo) Import(i interface{}) error {
+	b, err := json.Marshal(i)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, d)
+}
+
+func (d *DataInfoForCleanupActivity) Import(i interface{}) error {
 	b, err := json.Marshal(i)
 	if err != nil {
 		return err

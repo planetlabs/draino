@@ -2,14 +2,17 @@ package drain_runner
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
-	"k8s.io/kubernetes/pkg/apis/core"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/groups"
@@ -17,12 +20,6 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	"github.com/planetlabs/draino/internal/kubernetes/utils"
-	"github.com/planetlabs/draino/internal/protector"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // DrainTimeout how long is it acceptable for a drain to run
@@ -41,7 +38,6 @@ type drainRunner struct {
 	drainer             kubernetes.Drainer
 	sharedIndexInformer index.GetSharedIndexInformer
 	runEvery            time.Duration
-	pvProtector         protector.PVProtector
 	eventRecorder       kubernetes.EventRecorder
 	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
@@ -71,6 +67,8 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 			info.Data.Set(DrainRunnerInfo, drainInfo)
 		}()
 
+		// Can't be done asynchronously, must be done in sequence with `handleGroup/handleCandidate` because these
+		// are the function dealing with the taint lifecycle
 		runner.handleLeftOverDraining(ctx, info)
 
 		if emptyGroup := runner.handleGroup(ctx, info); emptyGroup {
@@ -149,14 +147,11 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	loggerForNode := runner.logger.WithValues("node", candidate.Name)
 
 	// Check if the node is still candidate before processing
-	keep, reason, err := runner.isStillCandidate(ctx, candidate)
-	if err != nil {
-		loggerForNode.Error(err, "Failed to check if the node is still candidate")
-	}
+	keep, filterName, reason := runner.filter.FilterNode(ctx, candidate)
 	if !keep {
-		loggerForNode.Info("Removing candidate status", "reason", reason)
-		_, err := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
-		return err
+		loggerForNode.Info("Removing candidate status", "reason", reason, "filterName", filterName)
+		_, errRmTaint := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
+		return errRmTaint
 	}
 
 	// Checking pre-activities
@@ -169,6 +164,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 
 	loggerForNode.Info("start draining")
 	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
+	var err error
 	candidate, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDraining)
 	if err != nil {
 		return err
@@ -197,28 +193,6 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainSucceeded, "Drained node")
 	runner.logger.Info("successfully drained node", "node_name", candidate.Name)
 	return nil
-}
-
-func (runner *drainRunner) isStillCandidate(ctx context.Context, candidate *corev1.Node) (isCandidate bool, reason string, err error) {
-	span, ctx := tracer.StartSpanFromContext(ctx, "isStillCandidate")
-	defer span.Finish()
-
-	// In some cases a user might want to opt out a node even though it's a candidate already, so we have to remove the taint.
-	if keep, name, reasonFilter := runner.filter.FilterNode(ctx, candidate); !keep {
-		return false, fmt.Sprintf("filter[%s]: %s", name, reasonFilter), nil
-	}
-
-	podsAssociatedWithPV, err := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(candidate)
-	if err != nil {
-		return false, "pvcProtection", err
-	}
-	// TODO add metric to track how often this happens
-	if len(podsAssociatedWithPV) > 0 {
-		pods := strings.Join(utils.GetPodNames(podsAssociatedWithPV), "; ")
-		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonPendingPodWithLocalPV, "Pod(s) "+pods+" associated with local PV on that node")
-		return false, "pvcProtection triggered for pods: " + pods, nil
-	}
-	return true, "", nil
 }
 
 func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *corev1.Node) bool {

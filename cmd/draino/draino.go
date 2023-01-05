@@ -515,6 +515,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		filters.WithDrainBuffer(drainBuffer),
 		filters.WithGroupKeyGetter(keyGetter),
 		filters.WithGlobalBlocker(globalBlocker),
+		filters.WithEventRecorder(eventRecorder),
+		filters.WithPVCProtector(pvProtector),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the filters")
@@ -530,9 +532,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithRetryWall(retryWall),
 		drain_runner.WithLogger(mgr.GetLogger()),
 		drain_runner.WithSharedIndexInformer(indexer),
-		drain_runner.WithPVProtector(pvProtector),
 		drain_runner.WithEventRecorder(eventRecorder),
-		drain_runner.WithFilter(filterFactory.BuildScopeFilter()),
+		drain_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		drain_runner.WithDrainBuffer(drainBuffer),
 	)
 	if err != nil {
@@ -555,7 +556,6 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 			sorters.CompareNodeAnnotationDrainASAP,
 			sorters.NewConditionComparator(globalConfig.SuppliedConditions),
 		}),
-		candidate_runner.WithPVProtector(pvProtector),
 		candidate_runner.WithDryRun(options.dryRun),
 		candidate_runner.WithRetryWall(retryWall),
 	)

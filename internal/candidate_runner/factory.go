@@ -42,7 +42,6 @@ func (factory *CandidateRunnerFactory) build() *candidateRunner {
 		dryRun:                    factory.conf.dryRun,
 		nodeSorters:               factory.conf.nodeSorters,
 		nodeIteratorFactory:       factory.conf.nodeIteratorFactory,
-		pvProtector:               factory.conf.pvProtector,
 		filter:                    factory.conf.filter,
 		retryWall:                 factory.conf.retryWall,
 	}

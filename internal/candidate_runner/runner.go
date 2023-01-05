@@ -13,7 +13,6 @@ import (
 
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
-	"github.com/planetlabs/draino/internal/protector"
 	"github.com/planetlabs/draino/internal/scheduler"
 
 	"github.com/go-logr/logr"
@@ -48,7 +47,6 @@ type candidateRunner struct {
 	sharedIndexInformer index.GetSharedIndexInformer
 	runEvery            time.Duration
 	eventRecorder       kubernetes.EventRecorder
-	pvProtector         protector.PVProtector
 	retryWall           drain.RetryWall
 	filter              filters.Filter
 
@@ -62,12 +60,14 @@ type candidateRunner struct {
 
 func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 	ctx, cancel := context.WithCancel(info.Context)
-
 	// TODO if we add metrics associated with that key, when the group is closed we should purge all the series associated with that key (cleanup-gauges with groupKey=...)?
 	runner.logger = runner.logger.WithValues("groupKey", info.Key)
+
+	go runner.runCleanupWithContext(ctx, info)
+
 	// run an endless loop until there are no drain candidates left
 	wait.UntilWithContext(ctx, func(ctx context.Context) {
-		span, ctx := tracer.StartSpanFromContext(ctx, "EvaluateCandidate")
+		span, ctx := tracer.StartSpanFromContext(ctx, "EvaluateCandidates")
 		defer span.Finish()
 
 		start := runner.clock.Now()
@@ -91,15 +91,10 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 		// TODO add metric to track amount of nodes in the group
 		if len(nodes) == 0 {
-			// If there are no candidates left, we'll stop the loop
+			// If there are no candidates left, we'll stop the loop and the runner by closing the context
 			runner.logger.Info("no nodes in group left, stopping.")
 			cancel()
 			return
-		}
-
-		// remove retry wall from nodes that have drain-retry-failed=restart annotation
-		if err := runner.handleRetryFlagOnNodes(ctx, nodes); err != nil {
-			runner.logger.Error(err, "failed to remove retry wall from nodes that have retry annotation")
 		}
 
 		// filter nodes that are already candidate
@@ -130,21 +125,14 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 				continue
 			}
 
-			logForNode.Info("Adding drain candidate taint")
 			if !runner.dryRun {
-
-				if blockingPods, errPvProtection := runner.pvProtector.GetUnscheduledPodsBoundToNodeByPV(node); errPvProtection != nil {
-					logForNode.Error(err, "Failed to run PV protection")
-					continue
-				} else if len(blockingPods) > 0 {
-					kubernetes.LogrForVerboseNode(runner.logger, node, "Node can't become drain candidate: Pod needs to be scheduled on node due to PV binding", "pod", blockingPods[0].Namespace+"/"+blockingPods[0].Name)
-					continue
-				}
-
+				logForNode.Info("Adding drain candidate taint")
 				if _, errTaint := k8sclient.AddNLATaint(ctx, runner.client, node, runner.clock.Now(), k8sclient.TaintDrainCandidate); errTaint != nil {
 					logForNode.Error(errTaint, "Failed to taint node")
 					continue // let's try next node, maybe this one has a problem
 				}
+			} else {
+				logForNode.Info("Dry-Run: skip adding drain candidate taint")
 			}
 			remainCandidateSlot--
 			if remainCandidateSlot <= 0 {
@@ -189,9 +177,16 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 
 	var errors []error
 	for _, node := range nodes {
+		var err error
 		if val, exist := node.Annotations[drainRetryFailedAnnotationKey]; exist && val == drainRetryRestartAnnotationValue {
-			if _, err := runner.retryWall.ResetRetryCount(ctx, node); err != nil {
-				errors = append(errors, fmt.Errorf("cannot reset retry wall on node '%s': %v", node.Name, err))
+			if runner.retryWall.GetDrainRetryAttemptsCount(node) != 0 {
+				node, err = runner.retryWall.ResetRetryCount(ctx, node)
+				if err != nil {
+					errors = append(errors, fmt.Errorf("cannot reset retry wall on node '%s': %v", node.Name, err))
+				}
+			}
+			if errAnnotation := kubernetes.PatchDeleteNodeAnnotationKeyCR(ctx, runner.client, node, drainRetryFailedAnnotationKey); errAnnotation != nil {
+				errors = append(errors, fmt.Errorf("cannot remove retry wall annotation from node '%s': %v", node.Name, errAnnotation))
 			}
 		}
 	}
@@ -199,4 +194,41 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 		return nil
 	}
 	return utils.JoinErrors(errors, "|")
+}
+
+// runCleanupWithContext perform cleanup activities on nodes of the group
+// - handleRetryFlagOnNodes
+// -
+func (runner *candidateRunner) runCleanupWithContext(ctx context.Context, info *groups.RunnerInfo) {
+	// start the cleanup shifted compare to main runner to spread CPU consumption
+	time.Sleep(runner.runEvery / 2)
+	// run an endless loop until there are no drain candidates left
+	wait.UntilWithContext(ctx, func(ctx context.Context) {
+		span, ctx := tracer.StartSpanFromContext(ctx, "RunCleanupWithContext")
+		defer span.Finish()
+
+		start := runner.clock.Now()
+		var dataInfo DataInfoForCleanupActivity
+		defer func() {
+			dataInfo.CleanupLastTime = runner.clock.Now()
+			dataInfo.CleanupProcessingDuration = runner.clock.Now().Sub(start)
+
+			info.Data.Set(CandidateRunnerInfoCleanupKey, dataInfo)
+		}()
+
+		nodes, err := index.GetFromIndex[corev1.Node](ctx, runner.sharedIndexInformer, groups.SchedulingGroupIdx, string(info.Key))
+		// in case of an error we'll just try it again
+		if err != nil {
+			runner.logger.Error(err, "cannot get nodes for group")
+			return
+		}
+
+		// remove retry wall from nodes that have drain-retry-failed=restart annotation
+		if err := runner.handleRetryFlagOnNodes(ctx, nodes); err != nil {
+			runner.logger.Error(err, "failed to remove retry wall from nodes that have retry annotation")
+		}
+	},
+		runner.runEvery*4) // run less often
+
+	runner.logger.Info("End of runCleanupWithContext")
 }

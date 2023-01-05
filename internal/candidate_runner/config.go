@@ -2,10 +2,9 @@ package candidate_runner
 
 import (
 	"errors"
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"time"
 
-	"github.com/planetlabs/draino/internal/candidate_runner/filters"
-	"github.com/planetlabs/draino/internal/protector"
 	"github.com/planetlabs/draino/internal/scheduler"
 	corev1 "k8s.io/api/core/v1"
 
@@ -29,7 +28,6 @@ type Config struct {
 	eventRecorder       kubernetes.EventRecorder
 	drainSimulator      drain.DrainSimulator
 	nodeSorters         NodeSorters
-	pvProtector         protector.PVProtector
 	retryWall           drain.RetryWall
 	filter              filters.Filter
 
@@ -73,9 +71,6 @@ func (conf *Config) Validate() error {
 	}
 	if conf.nodeSorters == nil {
 		return errors.New("node sorters are note defined")
-	}
-	if conf.pvProtector == nil {
-		return errors.New("pv protector should be set")
 	}
 	if conf.filter == nil {
 		return errors.New("filter is not set")
@@ -150,12 +145,6 @@ func WithNodeSorters(sorters NodeSorters) WithOption {
 func WithNodeIteratorFactory(nodeIteratorFactory NodeIteratorFactory) WithOption {
 	return func(conf *Config) {
 		conf.nodeIteratorFactory = nodeIteratorFactory
-	}
-}
-
-func WithPVProtector(protector protector.PVProtector) WithOption {
-	return func(conf *Config) {
-		conf.pvProtector = protector
 	}
 }
 

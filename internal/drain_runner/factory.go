@@ -33,7 +33,6 @@ func (factory *DrainRunnerFactory) build() *drainRunner {
 		drainer:             factory.conf.drainer,
 		sharedIndexInformer: factory.conf.sharedIndexInformer,
 		runEvery:            factory.conf.rerunEvery,
-		pvProtector:         factory.conf.pvProtector,
 		eventRecorder:       factory.conf.eventRecorder,
 		filter:              factory.conf.filter,
 		drainBuffer:         factory.conf.drainBuffer,

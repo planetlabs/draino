@@ -11,7 +11,6 @@ import (
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	"github.com/planetlabs/draino/internal/protector"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -19,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/fake"
 	cachecr "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -144,10 +142,6 @@ func TestDrainRunner(t *testing.T) {
 			})
 			assert.NoError(t, err)
 
-			client := fake.NewSimpleClientset(tt.Node)
-			store, cl := kubernetes.RunStoreForTest(context.Background(), client)
-			defer cl()
-
 			ch := make(chan struct{})
 			defer close(ch)
 			runner, err := NewFakeRunner(&FakeOptions{
@@ -155,7 +149,6 @@ func TestDrainRunner(t *testing.T) {
 				ClientWrapper: wrapper,
 				Preprocessors: tt.Preprocessors,
 				Drainer:       tt.Drainer,
-				PVProtector:   protector.NewPVCProtector(store, zap.NewNop(), false),
 				Filter:        tt.Filter,
 			})
 			assert.NoError(t, err, "failed to create fake drain runner")

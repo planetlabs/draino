@@ -13,7 +13,6 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	"github.com/planetlabs/draino/internal/protector"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/utils/clock"
 )
@@ -25,7 +24,6 @@ type FakeOptions struct {
 	Preprocessors []DrainPreProzessor
 	Logger        *logr.Logger
 	RerunEvery    time.Duration
-	PVProtector   protector.PVProtector
 	Filter        filters.Filter
 	DrainBuffer   drainbuffer.DrainBuffer
 
@@ -36,9 +34,6 @@ type FakeOptions struct {
 }
 
 func (opts *FakeOptions) ApplyDefaults() error {
-	if opts.PVProtector == nil {
-		return fmt.Errorf("Please pass pv protector to fake runner")
-	}
 	if opts.ClientWrapper == nil {
 		return fmt.Errorf("Please pass client wrapper to fake runner")
 	}
@@ -111,7 +106,6 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 		drainer:             opts.Drainer,
 		runEvery:            opts.RerunEvery,
 		preprocessors:       opts.Preprocessors,
-		pvProtector:         opts.PVProtector,
 		eventRecorder:       &kubernetes.NoopEventRecorder{},
 		filter:              opts.Filter,
 		drainBuffer:         opts.DrainBuffer,

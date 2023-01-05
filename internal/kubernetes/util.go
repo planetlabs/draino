@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strconv"
 	"strings"
 	"time"
@@ -290,6 +291,14 @@ type AnnotationDeletePatch struct {
 	} `json:"metadata"`
 }
 
+func (a AnnotationDeletePatch) Type() types.PatchType {
+	return types.MergePatchType
+}
+
+func (a AnnotationDeletePatch) Data(obj client.Object) ([]byte, error) {
+	return json.Marshal(a)
+}
+
 type LabelPatch struct {
 	Metadata struct {
 		Labels map[string]string `json:"labels"`
@@ -311,6 +320,10 @@ func PatchNode(ctx context.Context, kclient kubernetes.Interface, nodeName strin
 	return err
 }
 
+func PatchNodeCR(ctx context.Context, client client.Client, node *core.Node, patch client.Patch) error {
+	return client.Patch(ctx, node, patch)
+}
+
 func PatchNodeAnnotationKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string, value string) error {
 	var annotationPatch AnnotationPatch
 	annotationPatch.Metadata.Annotations = map[string]string{key: value}
@@ -330,9 +343,15 @@ func PatchNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeNa
 }
 
 func PatchDeleteNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string) error {
+	var labelDeletePatch LabelDeletePatch
+	labelDeletePatch.Metadata.Labels = map[string]interface{}{key: nil}
+	return PatchNode(ctx, kclient, nodeName, labelDeletePatch)
+}
+
+func PatchDeleteNodeAnnotationKeyCR(ctx context.Context, client client.Client, node *core.Node, key string) error {
 	var annotationDeletePatch AnnotationDeletePatch
 	annotationDeletePatch.Metadata.Annotations = map[string]interface{}{key: nil}
-	return PatchNode(ctx, kclient, nodeName, annotationDeletePatch)
+	return PatchNodeCR(ctx, client, node, annotationDeletePatch)
 }
 
 // GetAnnotationFromPodOrController check if an annotation is present on the pod or the associated controller object
