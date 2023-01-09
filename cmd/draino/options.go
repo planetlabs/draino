@@ -87,6 +87,9 @@ type Options struct {
 	drainRateLimitQPS   float32
 	drainRateLimitBurst int
 
+	// Which ratio of the overall kube client rate limiting should be used by the drain simulation
+	simulationRateLimitingRatio float32
+
 	// events generation
 	eventAggregationPeriod        time.Duration
 	excludedPodsPerNodeEstimation int
@@ -173,6 +176,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	// The default is allowing up to 50 drains within one minute
 	fs.Float32Var(&opt.drainRateLimitQPS, "drain-rate-limit-qps", 50/60, "Maximum number of node drains per seconds over all node groups")
 	fs.IntVar(&opt.drainRateLimitBurst, "drain-rate-limit-burst", 10, "Maximum number of parallel drains within a timeframe")
+	fs.Float32Var(&opt.simulationRateLimitingRatio, "drain-sim-rate-limit-ratio", 0.7, "Which ratio of the overall kube client rate limiting should be used by the drain simulation. 1.0 means that it will use the same.")
 
 	return &opt, &fs
 }

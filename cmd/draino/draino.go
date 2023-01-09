@@ -544,6 +544,9 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
+	simulationRateLimiter := limit.NewRateLimiter(clock.RealClock{}, cfg.KubeClientConfig.QPS*options.simulationRateLimitingRatio, int(float32(cfg.KubeClientConfig.Burst)*options.simulationRateLimitingRatio))
+	simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion, eventRecorder, simulationRateLimiter, logger)
+
 	drainCandidateRunnerFactory, err := candidate_runner.NewFactory(
 		candidate_runner.WithKubeClient(mgr.GetClient()),
 		candidate_runner.WithClock(&clock.RealClock{}),
@@ -553,7 +556,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithEventRecorder(eventRecorder),
 		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
 		candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
-		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion, eventRecorder)),
+		candidate_runner.WithDrainSimulator(simulator),
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{
 			sorters.CompareNodeAnnotationDrainPriority,
 			sorters.NewConditionComparator(globalConfig.SuppliedConditions),

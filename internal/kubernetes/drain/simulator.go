@@ -6,15 +6,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
+	"github.com/planetlabs/draino/internal/limit"
 	"golang.org/x/mod/semver"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/version"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,6 +51,8 @@ type drainSimulatorImpl struct {
 	podIndexer    index.PodIndexer
 	client        client.Client
 	eventRecorder kubernetes.EventRecorder
+	rateLimiter   limit.RateLimiter
+	logger        logr.Logger
 	// skipPodFilter will be used to evaluate if pods running on a node should go through the eviction simulation
 	skipPodFilter          kubernetes.PodFilterFunc
 	podResultCache         utils.TTLCache[simulationResult]
@@ -68,6 +73,8 @@ func NewDrainSimulator(
 	skipPodFilter kubernetes.PodFilterFunc,
 	kubeVersion *version.Info,
 	eventRecorder kubernetes.EventRecorder,
+	rateLimiter limit.RateLimiter,
+	logger logr.Logger,
 ) DrainSimulator {
 	usePolicyV1 := semver.Compare(kubeVersion.String(), KubeMinVersionEvictionPolicyV1) >= 0
 	simulator := &drainSimulatorImpl{
@@ -77,6 +84,8 @@ func NewDrainSimulator(
 		skipPodFilter:          skipPodFilter,
 		usePolicyV1ForEviction: usePolicyV1,
 		eventRecorder:          eventRecorder,
+		rateLimiter:            rateLimiter,
+		logger:                 logger.WithName("EvictionSimulator"),
 
 		// TODO think about using alternative solutions like a MRU cache
 		podResultCache: utils.NewTTLCache[simulationResult](3*time.Minute, 10*time.Second),
@@ -132,6 +141,11 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod) (bool, string, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodDrain")
 	defer span.Finish()
+
+	if !sim.rateLimiter.TryAccept() {
+		sim.logger.Info("Drain simulation aborted due to rate limiting.")
+		return false, "", apierrors.NewTooManyRequestsError("Cannot get rate limiter token")
+	}
 
 	if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist {
 		return res.result, res.reason, nil

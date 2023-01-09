@@ -7,6 +7,26 @@ import (
 	"k8s.io/utils/clock"
 )
 
+type RateLimiter interface {
+	// TryAccept returns true if a token is taken immediately. Otherwise,
+	// it returns false.
+	TryAccept() bool
+}
+
+type rateLimiterImpl struct {
+	limiter flowcontrol.RateLimiter
+}
+
+func NewRateLimiter(clock clock.Clock, qps float32, burst int) RateLimiter {
+	return &rateLimiterImpl{
+		limiter: flowcontrol.NewTokenBucketRateLimiterWithClock(qps, burst, clock),
+	}
+}
+
+func (limiter *rateLimiterImpl) TryAccept() bool {
+	return limiter.limiter.TryAccept()
+}
+
 // TypedRateLimiter is a rate limiter that implements different rate limiters based on the given type t.
 type TypedRateLimiter interface {
 	// TryAccept takes a type t and returns true if a token is taken immediately.
