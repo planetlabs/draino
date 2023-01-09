@@ -10,6 +10,7 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	"github.com/planetlabs/draino/internal/limit"
 
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
@@ -49,6 +50,8 @@ type candidateRunner struct {
 	eventRecorder       kubernetes.EventRecorder
 	retryWall           drain.RetryWall
 	filter              filters.Filter
+	rateLimiter         limit.TypedRateLimiter
+	suppliedConditions  []kubernetes.SuppliedCondition
 
 	maxSimultaneousCandidates int
 	dryRun                    bool
@@ -125,6 +128,12 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 				continue
 			}
 
+			// Check if one of the condition rate limiters has capacity
+			if !runner.hasConditionRateLimitingCapacity(node) {
+				logForNode.V(logs.ZapDebug).Info("No rate limiter has capacity")
+				continue
+			}
+
 			if !runner.dryRun {
 				logForNode.Info("Adding drain candidate taint")
 				if _, errTaint := k8sclient.AddNLATaint(ctx, runner.client, node, runner.clock.Now(), k8sclient.TaintDrainCandidate); errTaint != nil {
@@ -145,6 +154,18 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 	}, runner.runEvery)
 	return nil
+}
+
+// hasConditionRateLimitingCapacity will iterate over all the node's conditions and try to get a token from each rate limiter.
+// It will return true when it receives the first token and returns false if it cannot get any token.
+func (runner *candidateRunner) hasConditionRateLimitingCapacity(node *corev1.Node) bool {
+	conditions := kubernetes.GetNodeOffendingConditions(node, runner.suppliedConditions)
+	for _, condition := range conditions {
+		if runner.rateLimiter.TryAccept(string(condition.Type)) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkAlreadyCandidates keep only the nodes that are not candidate. If maxSimultaneousCandidates>0, then we check against the max. If max is reached a nil slice is returned and the boolean returned is true

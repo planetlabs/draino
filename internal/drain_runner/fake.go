@@ -3,8 +3,9 @@ package drain_runner
 import (
 	"context"
 	"fmt"
-	"k8s.io/client-go/kubernetes/fake"
 	"time"
+
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"

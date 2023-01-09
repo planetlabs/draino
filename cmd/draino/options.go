@@ -83,6 +83,10 @@ type Options struct {
 	storageClassesAllowingVolumeDeletion []string
 	pvcManagementByDefault               bool
 
+	// Drain runner rate limiting
+	drainRateLimitQPS   float32
+	drainRateLimitBurst int
+
 	// events generation
 	eventAggregationPeriod        time.Duration
 	excludedPodsPerNodeEstimation int
@@ -166,6 +170,9 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.IntVar(&opt.maxNodeReplacementPerHour, "max-node-replacement-per-hour", 2, "Maximum number of nodes per hour for which draino can ask replacement.")
 	fs.IntVar(&opt.excludedPodsPerNodeEstimation, "excluded-pod-per-node-estimation", 5, "Estimation of the number of pods that should be excluded from nodes. Used to compute some event cache size.")
 	fs.Int32Var(&opt.klogVerbosity, "klog-verbosity", 4, "Verbosity to run klog at")
+	// The default is allowing up to 50 drains within one minute
+	fs.Float32Var(&opt.drainRateLimitQPS, "drain-rate-limit-qps", 50/60, "Maximum number of node drains per seconds over all node groups")
+	fs.IntVar(&opt.drainRateLimitBurst, "drain-rate-limit-burst", 10, "Maximum number of parallel drains within a timeframe")
 
 	return &opt, &fs
 }

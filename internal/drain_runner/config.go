@@ -2,8 +2,9 @@ package drain_runner
 
 import (
 	"errors"
-	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"time"
+
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 
 	"github.com/go-logr/logr"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"

@@ -2,8 +2,10 @@ package candidate_runner
 
 import (
 	"errors"
-	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"time"
+
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	"github.com/planetlabs/draino/internal/limit"
 
 	"github.com/planetlabs/draino/internal/scheduler"
 	corev1 "k8s.io/api/core/v1"
@@ -30,6 +32,8 @@ type Config struct {
 	nodeSorters         NodeSorters
 	retryWall           drain.RetryWall
 	filter              filters.Filter
+	rateLimiter         limit.TypedRateLimiter
+	suppliedCondition   []kubernetes.SuppliedCondition
 
 	// With defaults
 	clock                     clock.Clock
@@ -77,6 +81,12 @@ func (conf *Config) Validate() error {
 	}
 	if conf.retryWall == nil {
 		return errors.New("retry wall is not set")
+	}
+	if conf.rateLimiter == nil {
+		return errors.New("rate limiter is not set")
+	}
+	if len(conf.suppliedCondition) == 0 {
+		return errors.New("global config is not set")
 	}
 
 	return nil
@@ -157,5 +167,17 @@ func WithFilter(filter filters.Filter) WithOption {
 func WithRetryWall(retryWall drain.RetryWall) WithOption {
 	return func(conf *Config) {
 		conf.retryWall = retryWall
+	}
+}
+
+func WithRateLimiter(limiter limit.TypedRateLimiter) WithOption {
+	return func(conf *Config) {
+		conf.rateLimiter = limiter
+	}
+}
+
+func WithGlobalConfig(globalConfig kubernetes.GlobalConfig) WithOption {
+	return func(conf *Config) {
+		conf.suppliedCondition = globalConfig.SuppliedConditions
 	}
 }

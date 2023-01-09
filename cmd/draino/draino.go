@@ -48,6 +48,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	drainoklog "github.com/planetlabs/draino/internal/kubernetes/klog"
+	"github.com/planetlabs/draino/internal/limit"
 	"github.com/planetlabs/draino/internal/observability"
 	protector "github.com/planetlabs/draino/internal/protector"
 
@@ -544,7 +545,6 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	}
 
 	drainCandidateRunnerFactory, err := candidate_runner.NewFactory(
-		candidate_runner.WithDryRun(true), // TODO of course we want to remove that when we are ready
 		candidate_runner.WithKubeClient(mgr.GetClient()),
 		candidate_runner.WithClock(&clock.RealClock{}),
 		candidate_runner.WithRerun(options.groupRunnerPeriod),
@@ -561,6 +561,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		}),
 		candidate_runner.WithDryRun(options.dryRun),
 		candidate_runner.WithRetryWall(retryWall),
+		candidate_runner.WithRateLimiter(limit.NewTypedRateLimiter(&clock.RealClock{}, options.drainRateLimitQPS, options.drainRateLimitBurst)),
+		candidate_runner.WithGlobalConfig(globalConfig),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the candidate_runner")
