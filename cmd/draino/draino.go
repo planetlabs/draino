@@ -523,6 +523,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
+	pdbAnalyser := analyser.NewPDBAnalyser(ctx, mgr.GetLogger(), indexer, clock.RealClock{}, options.podWarmupDelayExtension)
+
 	drainRunnerFactory, err := drain_runner.NewFactory(
 		drain_runner.WithKubeClient(mgr.GetClient()),
 		drain_runner.WithClock(&clock.RealClock{}),
@@ -555,6 +557,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{
 			sorters.CompareNodeAnnotationDrainPriority,
 			sorters.NewConditionComparator(globalConfig.SuppliedConditions),
+			pdbAnalyser.CompareNode,
 		}),
 		candidate_runner.WithDryRun(options.dryRun),
 		candidate_runner.WithRetryWall(retryWall),

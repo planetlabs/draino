@@ -159,15 +159,16 @@ func Test_getLatestDisruption(t *testing.T) {
 	}
 }
 
-func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
+func Test_stabilityPeriodChecker_StabilityPeriodAcceptsDrain(t *testing.T) {
 	now := time.Date(2022, 11, 19, 18, 00, 00, 00, time.UTC)
-	drainBufferOneHour := time.Hour
+	stabilityPeriodOneHour := time.Hour
+	stabilityPeriodNegativeOneHour := -time.Hour
 	tests := []struct {
-		name               string
-		objects            []runtime.Object
-		node               *corev1.Node
-		defaultDrainBuffer *time.Duration
-		want               bool
+		name                   string
+		objects                []runtime.Object
+		node                   *corev1.Node
+		defaultStabilityPeriod *time.Duration
+		want                   bool
 	}{
 		{
 			name:    "just node, can drain",
@@ -180,10 +181,11 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "new pdb, using pdb creation timestamp",
+			name: "new pdb, using pdb creation timestamp with a stability period",
 			objects: []runtime.Object{&corev1.Pod{
 				ObjectMeta: meta.ObjectMeta{Name: "pod1", Namespace: "ns",
-					Labels: map[string]string{"app": "test"}},
+					Annotations: map[string]string{StabilityPeriodAnnotationKey: "3h"},
+					Labels:      map[string]string{"app": "test"}},
 				Spec: corev1.PodSpec{NodeName: "node1"},
 			},
 				&policyv1.PodDisruptionBudget{
@@ -204,15 +206,14 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			want: false,
 		},
 		{
-			name:               "new pdb, using pdb creation timestamp old enough to accept disruption",
-			defaultDrainBuffer: &drainBufferOneHour,
+			name: "new pdb, using pdb creation timestamp, stability period deactivated",
 			objects: []runtime.Object{&corev1.Pod{
 				ObjectMeta: meta.ObjectMeta{Name: "pod1", Namespace: "ns",
 					Labels: map[string]string{"app": "test"}},
 				Spec: corev1.PodSpec{NodeName: "node1"},
 			},
 				&policyv1.PodDisruptionBudget{
-					ObjectMeta: meta.ObjectMeta{Name: "pdb1", Namespace: "ns", CreationTimestamp: meta.Time{Time: now.Add(-2 * drainBufferOneHour)}},
+					ObjectMeta: meta.ObjectMeta{Name: "pdb1", Namespace: "ns", CreationTimestamp: meta.Time{Time: now}},
 					Spec: policyv1.PodDisruptionBudgetSpec{
 						Selector: &meta.LabelSelector{
 							MatchLabels: map[string]string{"app": "test"},
@@ -229,8 +230,33 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			want: true,
 		},
 		{
-			name:               "pdb not allowing disruption for long enough",
-			defaultDrainBuffer: &drainBufferOneHour,
+			name:                   "new pdb, using pdb creation timestamp old enough to accept disruption",
+			defaultStabilityPeriod: &stabilityPeriodOneHour,
+			objects: []runtime.Object{&corev1.Pod{
+				ObjectMeta: meta.ObjectMeta{Name: "pod1", Namespace: "ns",
+					Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{NodeName: "node1"},
+			},
+				&policyv1.PodDisruptionBudget{
+					ObjectMeta: meta.ObjectMeta{Name: "pdb1", Namespace: "ns", CreationTimestamp: meta.Time{Time: now.Add(-2 * stabilityPeriodOneHour)}},
+					Spec: policyv1.PodDisruptionBudgetSpec{
+						Selector: &meta.LabelSelector{
+							MatchLabels: map[string]string{"app": "test"},
+						},
+					},
+					Status: policyv1.PodDisruptionBudgetStatus{},
+				},
+			},
+			node: &corev1.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name: "node1",
+				},
+			},
+			want: true,
+		},
+		{
+			name:                   "pdb not allowing disruption for long enough",
+			defaultStabilityPeriod: &stabilityPeriodOneHour,
 			objects: []runtime.Object{
 				&corev1.Pod{
 					ObjectMeta: meta.ObjectMeta{Name: "pod1", Namespace: "ns",
@@ -249,7 +275,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 							{
 								Type:               policyv1.DisruptionAllowedCondition,
 								Status:             meta.ConditionTrue,
-								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour).Add(time.Minute)}, // missing one minute to allow
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour).Add(time.Minute)}, // missing one minute to allow
 							},
 						},
 					},
@@ -263,8 +289,42 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			want: false,
 		},
 		{
-			name:               "pdb allowing disruption +1 minute after drainBuffer",
-			defaultDrainBuffer: &drainBufferOneHour,
+			name:                   "pdb not allowing disruption for long enough, but stability period deactivated (negative value)",
+			defaultStabilityPeriod: &stabilityPeriodNegativeOneHour,
+			objects: []runtime.Object{
+				&corev1.Pod{
+					ObjectMeta: meta.ObjectMeta{Name: "pod1", Namespace: "ns",
+						Labels: map[string]string{"app": "test"}},
+					Spec: corev1.PodSpec{NodeName: "node1"},
+				},
+				&policyv1.PodDisruptionBudget{
+					ObjectMeta: meta.ObjectMeta{Name: "pdb1", Namespace: "ns"},
+					Spec: policyv1.PodDisruptionBudgetSpec{
+						Selector: &meta.LabelSelector{
+							MatchLabels: map[string]string{"app": "test"},
+						},
+					},
+					Status: policyv1.PodDisruptionBudgetStatus{
+						Conditions: []meta.Condition{
+							{
+								Type:               policyv1.DisruptionAllowedCondition,
+								Status:             meta.ConditionTrue,
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour).Add(time.Minute)}, // missing one minute to allow
+							},
+						},
+					},
+				},
+			},
+			node: &corev1.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name: "node1",
+				},
+			},
+			want: true,
+		},
+		{
+			name:                   "pdb allowing disruption +1 minute after stability period",
+			defaultStabilityPeriod: &stabilityPeriodOneHour,
 			objects: []runtime.Object{
 				&corev1.Pod{
 					ObjectMeta: meta.ObjectMeta{Name: "pod1", Namespace: "ns",
@@ -288,7 +348,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 							{
 								Type:               policyv1.DisruptionAllowedCondition,
 								Status:             meta.ConditionTrue,
-								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour).Add(-time.Minute)}, // one extra minute: allowed
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour).Add(-time.Minute)}, // one extra minute: allowed
 							},
 						},
 					},
@@ -305,7 +365,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 							{
 								Type:               policyv1.DisruptionAllowedCondition,
 								Status:             meta.ConditionTrue,
-								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour).Add(+time.Minute)}, // unrelated pod would block another node
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour).Add(+time.Minute)}, // unrelated pod would block another node
 							},
 						},
 					},
@@ -324,8 +384,8 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			want: true,
 		},
 		{
-			name:               "one of the 2 pods of node1 is blocking",
-			defaultDrainBuffer: &drainBufferOneHour,
+			name:                   "one of the 2 pods of node1 is blocking",
+			defaultStabilityPeriod: &stabilityPeriodOneHour,
 			objects: []runtime.Object{
 				&corev1.Pod{
 					ObjectMeta: meta.ObjectMeta{Name: "pod1", Namespace: "ns",
@@ -349,7 +409,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 							{
 								Type:               policyv1.DisruptionAllowedCondition,
 								Status:             meta.ConditionTrue,
-								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour).Add(-time.Minute)}, // one extra minute: allowed
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour).Add(-time.Minute)}, // one extra minute: allowed
 							},
 						},
 					},
@@ -366,7 +426,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 							{
 								Type:               policyv1.DisruptionAllowedCondition,
 								Status:             meta.ConditionTrue,
-								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour).Add(+time.Minute)}, // unrelated pod would block another node
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour).Add(+time.Minute)}, // unrelated pod would block another node
 							},
 						},
 					},
@@ -380,8 +440,8 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			want: false,
 		},
 		{
-			name:               "ignore filtered out pods",
-			defaultDrainBuffer: &drainBufferOneHour,
+			name:                   "ignore filtered out pods",
+			defaultStabilityPeriod: &stabilityPeriodOneHour,
 			objects: []runtime.Object{
 				&corev1.Pod{
 					ObjectMeta: meta.ObjectMeta{
@@ -409,7 +469,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 							{
 								Type:               policyv1.DisruptionAllowedCondition,
 								Status:             meta.ConditionTrue,
-								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour)},
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour)},
 							},
 						},
 					},
@@ -424,7 +484,7 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 							{
 								Type:               policyv1.DisruptionAllowedCondition,
 								Status:             meta.ConditionFalse,
-								LastTransitionTime: meta.Time{Time: now.Add(-drainBufferOneHour).Add(10 * time.Minute)},
+								LastTransitionTime: meta.Time{Time: now.Add(-stabilityPeriodOneHour).Add(10 * time.Minute)},
 							},
 						},
 					},
@@ -462,9 +522,9 @@ func Test_drainBufferChecker_DrainBufferAcceptsDrain(t *testing.T) {
 			}
 			d := NewStabilityPeriodChecker(context.Background(), testLogger, wrapper.GetManagerClient(), er, store, fakeIndexer,
 				StabilityPeriodCheckerConfiguration{
-					DefaultStabilityPeriod: tt.defaultDrainBuffer,
+					DefaultStabilityPeriod: tt.defaultStabilityPeriod,
 				}, podFilter)
-			assert.Equalf(t, tt.want, d.StabilityPeriodAcceptsDrain(context.Background(), tt.node, now), "DrainBufferAcceptsDrain bad result")
+			assert.Equalf(t, tt.want, d.StabilityPeriodAcceptsDrain(context.Background(), tt.node, now), "StabilityPeriodAcceptsDrain bad result")
 		})
 	}
 }

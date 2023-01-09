@@ -152,7 +152,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	// If there is a matching PDB, check if it would allow disruptions
 	if len(pdbs[podKey]) == 1 {
 		pdb := pdbs[podKey][0]
-		if analyser.IsPDBBlocked(ctx, pod, pdb) {
+		if analyser.IsPDBBlockedByPod(ctx, pod, pdb) {
 			reason = fmt.Sprintf("PDB '%s' does not allow any disruptions", pdb.GetName())
 			sim.writePodCache(pod, false, reason)
 			return false, reason, nil

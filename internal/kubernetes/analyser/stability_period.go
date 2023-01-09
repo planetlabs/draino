@@ -24,7 +24,7 @@ const (
 
 	DefaultEstimatedRecoveryRecordTTL = 15 * time.Minute
 	DefaultCacheCleanPeriod           = 3 * time.Minute
-	DefaultStabilityPeriodLength      = 3 * time.Minute
+	DefaultStabilityPeriodLength      = -time.Hour // negative value means that the feature is not active
 )
 
 // StabilityPeriodChecker, can a node be drain and respect stability period configuration
@@ -271,6 +271,9 @@ func (d *stabilityPeriodChecker) StabilityPeriodAcceptsDrain(ctx context.Context
 	canDrain := true
 	for podKey, pdbs := range pdbsForPods {
 		period := stabilityPeriods[podKey]
+		if period.length < 0 {
+			continue // this means that stability period is not activated for that PDB
+		}
 		disruptionAllowed, stableSince, pdb := getLatestDisruption(d.logger, pdbs)
 		pdbName := ""
 		if pdb != nil {
@@ -284,14 +287,14 @@ func (d *stabilityPeriodChecker) StabilityPeriodAcceptsDrain(ctx context.Context
 		}
 
 		if pdb == nil || stableSince.IsZero() {
-			loggerInLoop.Info("pdb blocking, no condition defined or no pdb")
+			loggerInLoop.Info("pdb blocking, no condition defined or no pdb (%v)", pdb == nil)
 			return false
 		}
 
 		recoverAt := stableSince.Add(period.length)
 		if recoverAt.After(now) && recoverAt.After(latestRecover) {
 			canDrain = false
-			loggerInLoop.Info("stability period blocking", "stability-period", period)
+			loggerInLoop.Info("stability period blocking", "stability-period", period.length, "sourceType", period.sourceType, "sourceName", period.sourceName)
 			latestRecover = recoverAt
 			if d.cacheRecoveryTime != nil {
 				// add an entry into the cache to avoid recomputing this state before the stability period is respected.
@@ -299,10 +302,10 @@ func (d *stabilityPeriodChecker) StabilityPeriodAcceptsDrain(ctx context.Context
 					estimatedRecovery: recoverAt,
 					ttl:               now.Add(*d.stabilityPeriodConfig.EstimatedRecoveryRecordTTL),
 				})
+				// TODO monitor the size of this cache, ttl default is 15min if we have a lot of pod churn it could grow quickly. Should we use a LRU with a fixed size instead ?
 			}
 		}
 	}
-
 	return canDrain
 }
 

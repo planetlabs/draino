@@ -92,7 +92,8 @@ type Options struct {
 	resetScopeLabel     bool
 	scopeAnalysisPeriod time.Duration
 
-	groupRunnerPeriod time.Duration
+	groupRunnerPeriod       time.Duration
+	podWarmupDelayExtension time.Duration
 
 	klogVerbosity int32
 
@@ -131,6 +132,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.preprovisioningCheckPeriod, "preprovisioning-check-period", kubernetes.DefaultPreprovisioningCheckPeriod, "Period to check if a node has been preprovisioned")
 	fs.DurationVar(&opt.scopeAnalysisPeriod, "scope-analysis-period", 5*time.Minute, "Period to run the scope analysis and generate metric")
 	fs.DurationVar(&opt.groupRunnerPeriod, "group-runner-period", 10*time.Second, "Period for running the group runner")
+	fs.DurationVar(&opt.podWarmupDelayExtension, "pod-warmup-delay-extension", 30*time.Second, "Extra delay given to the pod to complete is warmup phase (all containers have passed their startProbes)")
 	fs.DurationVar(&opt.eventAggregationPeriod, "event-aggregation-period", 15*time.Minute, "Period for event generation on kubernetes object.")
 
 	fs.StringSliceVar(&opt.nodeLabels, "node-label", []string{}, "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times")
@@ -247,6 +249,9 @@ func (o *Options) Validate() error {
 	}
 	if o.groupRunnerPeriod < time.Second {
 		return fmt.Errorf("group runner period should be at least 1s")
+	}
+	if o.podWarmupDelayExtension < time.Second {
+		return fmt.Errorf("pod warmup delay extension should be at least 1s")
 	}
 	return nil
 }
