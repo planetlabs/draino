@@ -50,6 +50,7 @@ func NewFakeDrainSimulator(opts *FakeSimulatorOptions) (DrainSimulator, error) {
 		client:         wrapper.GetManagerClient(),
 		podResultCache: utils.NewTTLCache[simulationResult](*opts.CacheTTL, *opts.CleanupDuration),
 		skipPodFilter:  opts.PodFilter,
+		eventRecorder:  kubernetes.NoopEventRecorder{},
 	}
 
 	return simulator, nil

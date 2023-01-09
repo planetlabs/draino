@@ -2,9 +2,10 @@ package drain
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"sort"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
 	corev1 "k8s.io/api/core/v1"
@@ -118,7 +119,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain if one pod has multiple PDBs",
 			IsDrainable: false,
-			Reason:      []string{"Cannot drain pod 'foo-pod', because: Pod has more than one associated PDB 2 > 1"},
+			Reason:      []string{"Cannot drain pod 'foo-pod', because: Pod has more than one associated PDB: foo-pdb1;foo-pdb2"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{

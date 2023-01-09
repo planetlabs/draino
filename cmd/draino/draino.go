@@ -553,7 +553,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithEventRecorder(eventRecorder),
 		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
 		candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
-		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion)),
+		candidate_runner.WithDrainSimulator(drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion, eventRecorder)),
 		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{
 			sorters.CompareNodeAnnotationDrainPriority,
 			sorters.NewConditionComparator(globalConfig.SuppliedConditions),
