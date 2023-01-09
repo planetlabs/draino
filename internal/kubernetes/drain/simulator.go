@@ -40,7 +40,7 @@ const (
 type DrainSimulator interface {
 	// SimulateDrain will simulate a drain for the given node.
 	// This means that it will perform an eviction simulation of all pods running on the node.
-	SimulateDrain(context.Context, *corev1.Node) (canEvict bool, reasons []string, err error)
+	SimulateDrain(context.Context, *corev1.Node) (canEvict bool, reasons []string, err []error)
 	// SimulatePodDrain will simulate a drain of the given pod.
 	// Before calling the API server it will make sure that some of the obvious problems are not given.
 	SimulatePodDrain(context.Context, *corev1.Pod) (canEvict bool, reason string, err error)
@@ -62,6 +62,7 @@ type drainSimulatorImpl struct {
 type simulationResult struct {
 	result bool
 	reason string
+	err    error
 }
 
 var _ DrainSimulator = &drainSimulatorImpl{}
@@ -96,33 +97,37 @@ func NewDrainSimulator(
 	return simulator
 }
 
-func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.Node) (bool, []string, error) {
+func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.Node) (bool, []string, []error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "SimulateNodeDrain")
 	defer span.Finish()
 
 	pods, err := sim.podIndexer.GetPodsByNode(ctx, node.GetName())
 	if err != nil {
-		return false, nil, err
+		return false, nil, []error{err}
 	}
 
 	// As we are  caching the positive results for one minute and negative ones for three minutes, we might make a lot of unneeded API calls
 	// As an optimization we are iterating over all pods and check if at least one has a negative cache entry, before simulating the drain for all the pods.
 	reasons := []string{}
+	var errors []error
 	for _, pod := range pods {
 		if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist && !res.result {
 			reasons = append(reasons, res.reason)
+			if res.err != nil {
+				errors = append(errors, res.err)
+			}
 		}
 	}
-	if len(reasons) > 0 {
+	if len(reasons) > 0 || len(errors) > 0 {
 		sim.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventDrainSimulationFailed, "Drain simulation failed: "+strings.Join(reasons, "; "))
-		return false, reasons, nil
+		return false, reasons, errors
 	}
 
 	for _, pod := range pods {
 		// TODO add suceeded/failed pod drain simulation count metric
 		canEvict, reason, err := sim.SimulatePodDrain(ctx, pod)
 		if err != nil {
-			return false, nil, err
+			return false, nil, []error{err}
 		}
 		if !canEvict {
 			reasons = append(reasons, fmt.Sprintf("Cannot drain pod '%s', because: %v", pod.GetName(), reason))
@@ -148,7 +153,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	}
 
 	if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist {
-		return res.result, res.reason, nil
+		return res.result, res.reason, res.err
 	}
 
 	passes, reason, err := sim.skipPodFilter(*pod)
@@ -157,7 +162,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	}
 	if !passes {
 		// If the pod does not pass the filter, it means that it will be accepted by default
-		sim.writePodCache(pod, true, reason)
+		sim.writePodCache(pod, true, reason, nil)
 		return true, reason, nil
 	}
 
@@ -170,7 +175,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	podKey := index.GeneratePodIndexKey(pod.GetName(), pod.GetNamespace())
 	if len(pdbs[podKey]) > 1 {
 		reason = fmt.Sprintf("Pod has more than one associated PDB: %s", strings.Join(utils.GetPDBNames(pdbs[podKey]), ";"))
-		sim.writePodCache(pod, false, reason)
+		sim.writePodCache(pod, false, reason, nil)
 		sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
 		return false, reason, nil
 	}
@@ -180,7 +185,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 		pdb := pdbs[podKey][0]
 		if analyser.IsPDBBlockedByPod(ctx, pod, pdb) {
 			reason = fmt.Sprintf("PDB '%s' does not allow any disruptions", pdb.GetName())
-			sim.writePodCache(pod, false, reason)
+			sim.writePodCache(pod, false, reason, nil)
 			sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
 			return false, reason, nil
 		}
@@ -190,12 +195,12 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	evictionDryRunRes, err := sim.simulateAPIEviction(ctx, pod)
 	if !evictionDryRunRes {
 		reason = fmt.Sprintf("Eviction dry run was not successful: %v", err)
-		sim.writePodCache(pod, false, reason)
+		sim.writePodCache(pod, false, reason, err)
 		sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
 		return false, reason, nil
 	}
 
-	sim.writePodCache(pod, true, "")
+	sim.writePodCache(pod, true, "", nil)
 	return true, "", nil
 }
 
@@ -234,12 +239,12 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 	return err == nil, err
 }
 
-func (sim *drainSimulatorImpl) writePodCache(pod *corev1.Pod, result bool, reason string) {
+func (sim *drainSimulatorImpl) writePodCache(pod *corev1.Pod, result bool, reason string, err error) {
 	ttl := NegativeCacheResTTL
 	if result {
 		ttl = PositiveCacheResTTL
 	}
-	sim.podResultCache.AddCustomTTL(createCacheKey(pod), simulationResult{result: result, reason: reason}, ttl)
+	sim.podResultCache.AddCustomTTL(createCacheKey(pod), simulationResult{result: result, reason: reason, err: err}, ttl)
 }
 
 func createCacheKey(pod *corev1.Pod) string {

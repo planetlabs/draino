@@ -3,6 +3,7 @@ package candidate_runner
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"strings"
 	"time"
 
@@ -115,12 +116,19 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 		// TODO think about adding tracing to the tree iterator/expander
 		nodeProvider := runner.GetNodeIterator(nodes)
+	groupIteration:
 		for node, ok := nodeProvider.Next(); ok; node, ok = nodeProvider.Next() {
 			logForNode := runner.logger.WithValues("node", node.Name)
 			// check that the node can be drained
 			canDrain, reasons, errDrainSimulation := runner.drainSimulator.SimulateDrain(ctx, node)
-			if errDrainSimulation != nil {
-				logForNode.Error(errDrainSimulation, "Failed to simulate drain")
+			if len(errDrainSimulation) > 0 {
+				for _, e := range errDrainSimulation {
+					if errors.IsTooManyRequests(e) {
+						logForNode.Error(e, "Failed to simulate drain due to rate limiting. Not exploring the group further")
+						break groupIteration
+					}
+				}
+				logForNode.Error(errDrainSimulation[0], "Failed to simulate drain")
 				continue
 			}
 			if !canDrain {

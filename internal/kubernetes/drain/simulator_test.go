@@ -143,7 +143,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 			)
 			assert.NoError(t, err)
 
-			drainable, reason, err := simulator.SimulateDrain(context.Background(), &tt.Node)
+			drainable, reason, _ := simulator.SimulateDrain(context.Background(), &tt.Node)
 			sort.Strings(tt.Reason)
 			sort.Strings(reason)
 
