@@ -299,10 +299,20 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
 	infos := s.runnerInfoGetter.GetRunnerInfo()
 	for group, info := range infos {
-		rawCandidateRunnerInfo, _ := info.Data.Get(candidate_runner.CandidateRunnerInfoKey)
+		rawCandidateRunnerInfo, exist := info.Data.Get(candidate_runner.CandidateRunnerInfoKey)
+		// In case the data doesn't exist yet, we'll skip this run and publish them the next time
+		// This might happen when we are trying to generate metrics from a very new node group (race condition).
+		if !exist {
+			continue
+		}
 		candidateDataInfo := rawCandidateRunnerInfo.(candidate_runner.DataInfo)
 
-		rawDrainRunnerInfo, _ := info.Data.Get(drain_runner.DrainRunnerInfo)
+		rawDrainRunnerInfo, exist := info.Data.Get(drain_runner.DrainRunnerInfo)
+		// In case the data doesn't exist yet, we'll skip this run and publish them the next time
+		// This might happen when we are trying to generate metrics from a very new node group (race condition).
+		if !exist {
+			continue
+		}
 		drainDataInfo := rawDrainRunnerInfo.(drain_runner.DataInfo)
 
 		groupRunnerLoopDuration.WithLabelValues(string(group), groups.DrainCandidateRunnerName).Set(float64(candidateDataInfo.ProcessingDuration.Microseconds()))
