@@ -988,7 +988,9 @@ func (d *APICordonDrainer) awaitDeletion(ctx context.Context, pod *core.Pod, tim
 		pollPeriod = 2 * time.Minute
 	}
 
+	polls := 0
 	err := wait.PollImmediate(pollPeriod, timeout, func() (bool, error) {
+		polls += 1
 		got, err := d.c.CoreV1().Pods(pod.GetNamespace()).Get(ctx, pod.GetName(), meta.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
@@ -1003,6 +1005,8 @@ func (d *APICordonDrainer) awaitDeletion(ctx context.Context, pod *core.Pod, tim
 	})
 	if err != nil {
 		if errors.Is(err, wait.ErrWaitTimeout) {
+			d.l.With(zap.String("pod", pod.Namespace+"/"+pod.Name), zap.Duration("timeout", timeout), zap.Duration("poll", pollPeriod), zap.Int("polls", polls)).
+				Warn("pod deletion timed out")
 			return PodDeletionTimeoutError{} // this one is typed because we match it to a failure cause
 		}
 		return err // unexpected Get error above
