@@ -222,7 +222,8 @@ func main() {
 
 		nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(options.maxNodeReplacementPerHour, time.Now())
 
-		eventRecorder, k8sEventRecorder := kubernetes.BuildEventRecorder(zapr.NewLogger(log), cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
+		eventRecorder, k8sEventRecorder := kubernetes.BuildEventRecorderWithAggregationOnEventType(zapr.NewLogger(log), cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
+		eventRecorderForDrainerActivities, _ := kubernetes.BuildEventRecorderWithAggregationOnEventTypeAndMessage(zapr.NewLogger(log), cs, options.eventAggregationPeriod, options.logEvents)
 
 		consolidatedOptInAnnotations := append(options.optInPodAnnotations, options.shortLivedPodAnnotations...)
 
@@ -239,7 +240,7 @@ func main() {
 				runtimeObjectStoreImpl, options.shortLivedPodAnnotations...))
 
 		cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
-			eventRecorder,
+			eventRecorderForDrainerActivities,
 			kubernetes.MaxGracePeriod(options.minEvictionTimeout),
 			kubernetes.EvictionHeadroom(options.evictionHeadroom),
 			kubernetes.WithSkipDrain(options.skipDrain),
@@ -489,7 +490,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
-	eventRecorder, _ := kubernetes.BuildEventRecorder(logger, cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
+	eventRecorder, _ := kubernetes.BuildEventRecorderWithAggregationOnEventType(logger, cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
+	eventRecorderForDrainRunnerActivities, _ := kubernetes.BuildEventRecorderWithAggregationOnEventTypeAndMessage(logger, cs, options.eventAggregationPeriod, options.logEvents)
 
 	pvProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
 	stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{}, filtersDef.drainPodFilter)
@@ -535,7 +537,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithRetryWall(retryWall),
 		drain_runner.WithLogger(mgr.GetLogger()),
 		drain_runner.WithSharedIndexInformer(indexer),
-		drain_runner.WithEventRecorder(eventRecorder),
+		drain_runner.WithEventRecorder(eventRecorderForDrainRunnerActivities),
 		drain_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		drain_runner.WithDrainBuffer(drainBuffer),
 		drain_runner.WithGlobalConfig(globalConfig),

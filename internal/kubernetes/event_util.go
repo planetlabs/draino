@@ -10,6 +10,7 @@ import (
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,9 +97,66 @@ var _ EventRecorder = &NoopEventRecorder{}
 
 var computeLRUSizeOnce sync.Once
 var lruSize = int(5000 * (6 + 1) * 1.10) // default value 5000 nodes with 6 pods (with +10%)
+var lruSizeMutex sync.Mutex
 
-func BuildEventRecorder(logger logr.Logger, cs *client.Clientset, aggregationPeriod time.Duration, excludedPodsPerNode int, alsoLogEvents bool) (EventRecorder, record.EventRecorder) {
+func BuildEventRecorderWithAggregationOnEventType(logger logr.Logger, cs *client.Clientset, aggregationPeriod time.Duration, excludedPodsPerNode int, alsoLogEvents bool) (EventRecorder, record.EventRecorder) {
 	logger = logger.WithName("EventRecorder")
+	computeLRUSize(logger, cs, excludedPodsPerNode)
+
+	options := record.CorrelatorOptions{
+		LRUCacheSize: lruSize, // used for nodes and pods
+		BurstSize:    1,
+		QPS:          float32(1 / aggregationPeriod.Seconds()),
+		MessageFunc:  func(event *core.Event) string { return event.Message }, // do not put any combined notification. It is useless since it appears for each message.
+
+		// if we see the same event that varies only by message
+		// more than 1 times in a 'aggregationPeriod'' period, aggregate the event
+		MaxEvents:            1,
+		MaxIntervalInSeconds: int(aggregationPeriod.Seconds()),
+
+		SpamKeyFunc: getSpamKeyEventReason,
+	}
+	b := record.NewBroadcasterWithCorrelatorOptions(options)
+
+	b.StartRecordingToSink(&customEventSink{
+		base:      &typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")},
+		logger:    logger,
+		logEvents: alsoLogEvents,
+	})
+	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
+	return NewEventRecorder(k8sEventRecorder), k8sEventRecorder
+}
+
+func BuildEventRecorderWithAggregationOnEventTypeAndMessage(logger logr.Logger, cs *client.Clientset, aggregationPeriod time.Duration, alsoLogEvents bool) (EventRecorder, record.EventRecorder) {
+	logger = logger.WithName("EventRecorder")
+
+	options := record.CorrelatorOptions{
+		LRUCacheSize: 1000, // 1000 event per minutes for evictions activity should be enough
+		BurstSize:    1,
+		QPS:          float32(1 / aggregationPeriod.Seconds()),
+		MessageFunc:  func(event *core.Event) string { return event.Message }, // do not put any combined notification. It is useless since it appears for each message.
+
+		// if we see the same event that varies only by message
+		// more than 2 times in a one minute, aggregate the event
+		MaxEvents:            2,
+		MaxIntervalInSeconds: 60,
+
+		SpamKeyFunc: getSpamKeyEventReasonAndMessage,
+	}
+	b := record.NewBroadcasterWithCorrelatorOptions(options)
+
+	b.StartRecordingToSink(&customEventSink{
+		base:      &typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")},
+		logger:    logger,
+		logEvents: alsoLogEvents,
+	})
+	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
+	return NewEventRecorder(k8sEventRecorder), k8sEventRecorder
+}
+
+func computeLRUSize(logger logr.Logger, cs *client.Clientset, excludedPodsPerNode int) {
+	lruSizeMutex.Lock()
+	defer lruSizeMutex.Unlock()
 	computeLRUSizeOnce.Do(func() {
 		podsMax := 0
 		nodeList, err := cs.CoreV1().Nodes().List(context.Background(), v1.ListOptions{})
@@ -112,36 +170,27 @@ func BuildEventRecorder(logger logr.Logger, cs *client.Clientset, aggregationPer
 		lruSize = int(float64(podsMax+len(nodeList.Items)) * 1.10)
 		logger.Info("Setting EventRecorder LRU cache size", "LRUCacheSize", lruSize, "maxPodEstimation", podsMax, "nodeCount", len(nodeList.Items))
 	})
-
-	options := record.CorrelatorOptions{
-		LRUCacheSize: lruSize, // used for nodes and pods
-		BurstSize:    1,
-		QPS:          float32(1 / aggregationPeriod.Seconds()),
-		MessageFunc:  func(event *core.Event) string { return event.Message }, // do not put any combined notification. It is useless since it appears for each message.
-
-		// if we see the same event that varies only by message
-		// more than 1 times in a 'aggregationPeriod'' period, aggregate the event
-		MaxEvents:            1,
-		MaxIntervalInSeconds: int(aggregationPeriod.Seconds()),
-
-		SpamKeyFunc: getSpamKey,
-	}
-	b := record.NewBroadcasterWithCorrelatorOptions(options)
-
-	b.StartRecordingToSink(&customEventSink{
-		base:      &typedcore.EventSinkImpl{Interface: typedcore.New(cs.CoreV1().RESTClient()).Events("")},
-		logger:    logger,
-		logEvents: alsoLogEvents,
-	})
-	k8sEventRecorder := b.NewRecorder(scheme.Scheme, core.EventSource{Component: Component})
-	eventRecorder := NewEventRecorder(k8sEventRecorder)
-	return eventRecorder, k8sEventRecorder
 }
 
-// getSpamKey builds unique event key based on source, involvedObject
-func getSpamKey(event *core.Event) string {
+// getSpamKeyEventReason builds unique event key based on source, involvedObject
+func getSpamKeyEventReason(event *core.Event) string {
 	s, _ := record.EventAggregatorByReasonFunc(event)
 	return s
+}
+
+// getSpamKeyEventReasonAndMessage builds unique event key based on source that include the message, involvedObject
+func getSpamKeyEventReasonAndMessage(event *core.Event) string {
+	return strings.Join([]string{
+		event.Source.Component,
+		event.Source.Host,
+		event.InvolvedObject.Kind,
+		event.InvolvedObject.Namespace,
+		event.InvolvedObject.Name,
+		string(event.InvolvedObject.UID),
+		event.Type,
+		event.Reason,
+		event.Message,
+	}, "")
 }
 
 type customEventSink struct {
