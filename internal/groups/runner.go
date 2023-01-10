@@ -3,7 +3,9 @@ package groups
 import (
 	"context"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
+	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -27,18 +29,20 @@ type RunnerFactory interface {
 
 type GroupsRunner struct {
 	sync.RWMutex
-	parentContext context.Context
-	running       map[GroupKey]*RunnerInfo
-	factory       RunnerFactory
-	logger        logr.Logger
+	parentContext       context.Context
+	running             map[GroupKey]*RunnerInfo
+	factory             RunnerFactory
+	logger              logr.Logger
+	maxRandomStartDelay time.Duration
 }
 
-func NewGroupsRunner(ctx context.Context, factory RunnerFactory, logger logr.Logger, groupName string) *GroupsRunner {
+func NewGroupsRunner(ctx context.Context, factory RunnerFactory, logger logr.Logger, groupName string, maxRandomStartDelay time.Duration) *GroupsRunner {
 	gr := &GroupsRunner{
-		parentContext: ctx,
-		running:       map[GroupKey]*RunnerInfo{},
-		factory:       factory,
-		logger:        logger.WithValues("group_name", groupName),
+		parentContext:       ctx,
+		running:             map[GroupKey]*RunnerInfo{},
+		factory:             factory,
+		logger:              logger.WithValues("group_name", groupName),
+		maxRandomStartDelay: maxRandomStartDelay,
 	}
 
 	go gr.observe()
@@ -68,7 +72,12 @@ func (g *GroupsRunner) runForGroup(key GroupKey) *RunnerInfo {
 	}
 	go func(runInfo *RunnerInfo, cancel context.CancelFunc) {
 		defer cancel()
-		g.logger.Info("Scheduling group opened", "groupKey", key)
+		var delay time.Duration
+		if g.maxRandomStartDelay > 0 {
+			delay = time.Duration(rand.Int31n(int32(g.maxRandomStartDelay.Seconds()))) * time.Second
+		}
+		g.logger.Info("Scheduling group opening", "groupKey", key, "delay", delay)
+		time.Sleep(delay)
 		err := g.factory.BuildRunner().Run(runInfo)
 		if err != nil {
 			g.logger.Error(err, "Runner stopped with error", "groupKey", key)

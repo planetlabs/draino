@@ -84,14 +84,15 @@ func NewGroupRegistry(
 	drainFactory, drainCandidateFactory RunnerFactory,
 	nodeFilteringFunc kubernetes.NodeLabelFilterFunc,
 	hasSyncedFunc func() bool,
+	maxRandomRunnerStartDelay time.Duration,
 ) *GroupRegistry {
 	return &GroupRegistry{
 		kclient:                   kclient,
 		logger:                    logger,
 		nodeWarmUpDelay:           nodeWarmUpDelay,
 		keyGetter:                 keyGetter,
-		groupDrainRunner:          NewGroupsRunner(ctx, drainFactory, logger, DrainRunnerName),
-		groupDrainCandidateRunner: NewGroupsRunner(ctx, drainCandidateFactory, logger, DrainCandidateRunnerName),
+		groupDrainRunner:          NewGroupsRunner(ctx, drainFactory, logger, DrainRunnerName, maxRandomRunnerStartDelay),
+		groupDrainCandidateRunner: NewGroupsRunner(ctx, drainCandidateFactory, logger, DrainCandidateRunnerName, maxRandomRunnerStartDelay),
 		eventRecorder:             eventRecorder,
 		nodeFilteringFunc:         nodeFilteringFunc,
 		hasSyncedFunc:             hasSyncedFunc,

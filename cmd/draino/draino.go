@@ -575,7 +575,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
-	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.nodeLabelFilter, store.HasSynced)
+	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.nodeLabelFilter, store.HasSynced, options.groupRunnerPeriod)
 	if err = groupRegistry.SetupWithManager(mgr); err != nil {
 		logger.Error(err, "failed to setup groupRegistry")
 		return err
