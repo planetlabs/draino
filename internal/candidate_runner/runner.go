@@ -124,7 +124,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 			if len(errDrainSimulation) > 0 {
 				for _, e := range errDrainSimulation {
 					if errors.IsTooManyRequests(e) {
-						logForNode.Error(e, "Failed to simulate drain due to rate limiting. Not exploring the group further")
+						logForNode.V(logs.ZapDebug).Info("Not exploring the group further: simulation rate limited")
 						break groupIteration
 					}
 				}

@@ -538,6 +538,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithEventRecorder(eventRecorder),
 		drain_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		drain_runner.WithDrainBuffer(drainBuffer),
+		drain_runner.WithGlobalConfig(globalConfig),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the drain_runner")

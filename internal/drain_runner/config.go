@@ -29,6 +29,7 @@ type Config struct {
 	eventRecorder       kubernetes.EventRecorder
 	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
+	suppliedCondition   []kubernetes.SuppliedCondition
 
 	// With defaults
 	clock         clock.Clock
@@ -70,6 +71,9 @@ func (conf *Config) Validate() error {
 	}
 	if conf.drainBuffer == nil {
 		return errors.New("drain buffer should be set")
+	}
+	if len(conf.suppliedCondition) == 0 {
+		return errors.New("global config is not set")
 	}
 
 	return nil
@@ -138,5 +142,11 @@ func WithFilter(f filters.Filter) WithOption {
 func WithDrainBuffer(buffer drainbuffer.DrainBuffer) WithOption {
 	return func(conf *Config) {
 		conf.drainBuffer = buffer
+	}
+}
+
+func WithGlobalConfig(globalConfig kubernetes.GlobalConfig) WithOption {
+	return func(conf *Config) {
+		conf.suppliedCondition = globalConfig.SuppliedConditions
 	}
 }

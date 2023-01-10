@@ -2,6 +2,8 @@ package drain_runner
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"time"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
@@ -41,6 +43,7 @@ type drainRunner struct {
 	eventRecorder       kubernetes.EventRecorder
 	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
+	suppliedConditions  []kubernetes.SuppliedCondition
 
 	preprocessors []DrainPreProzessor
 }
@@ -170,8 +173,22 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 		return err
 	}
 	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainStarting, "Draining node")
-	// TODO add metric to show how many drains are successful / failed
-	if err = runner.drainCandidate(ctx, info, candidate); err != nil {
+
+	err = runner.drainCandidate(ctx, info, candidate)
+	var errRefresh error
+	candidate, errRefresh = runner.refreshNode(ctx, candidate)
+	if errRefresh != nil {
+		if errors.IsNotFound(errRefresh) {
+			loggerForNode.Info("node has been deleted while we were waiting for the drain to complete")
+			CounterDrainedNodes(candidate, DrainedNodeResultSucceeded, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), "node_deleted")
+			return nil
+		}
+		loggerForNode.Error(errRefresh, "failed to refresh node after drain")
+		CounterDrainedNodes(candidate, DrainedNodeResultFailed, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), "node_refresh")
+		return errRefresh
+	}
+	if err != nil {
+		CounterDrainedNodes(candidate, DrainedNodeResultFailed, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), string(kubernetes.GetFailureCause(err)))
 		loggerForNode.Error(err, "failed to drain node")
 		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: %v", err)
 		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, candidate, err.Error())
@@ -188,8 +205,8 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	if candidate, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDrained); err != nil {
 		loggerForNode.Error(err, "Failed to add 'drained' taint")
 		return err
-
 	}
+	CounterDrainedNodes(candidate, DrainedNodeResultSucceeded, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), "")
 	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainSucceeded, "Drained node")
 	runner.logger.Info("successfully drained node", "node_name", candidate.Name)
 	return nil
@@ -213,6 +230,14 @@ func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *co
 		}
 	}
 	return allPreprocessorsDone
+}
+
+func (runner *drainRunner) refreshNode(ctx context.Context, node *corev1.Node) (refreshedNode *corev1.Node, err error) {
+
+	var n corev1.Node
+	err = runner.client.Get(ctx, types.NamespacedName{Name: node.Name}, &n)
+
+	return &n, err
 }
 
 func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.RunnerInfo, candidate *corev1.Node) error {

@@ -412,7 +412,7 @@ func (d *DrainSchedules) handleDrainFailure(ctx context.Context, sched *schedule
 	sched.setFailed()
 	sched.failedCount++
 	log.Info("Failed to drain", zap.Error(drainError))
-	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(getFailureCause(drainError)))) // nolint:gosec
+	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed), tag.Upsert(TagFailureCause, string(GetFailureCause(drainError)))) // nolint:gosec
 	StatRecordForEachCondition(tags, node, GetNodeOffendingConditions(node, d.suppliedConditions), MeasureNodesDrained.M(1))
 	d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, EventReasonDrainFailed, "Drain failed: %v", drainError)
 	if err := d.drainer.MarkDrain(ctx, node, sched.when, sched.finish, true, sched.failedCount); err != nil {
@@ -449,7 +449,7 @@ const (
 	NodePreprovisioning             FailureCause = "node_preprovisioning_timeout"
 )
 
-func getFailureCause(err error) FailureCause {
+func GetFailureCause(err error) FailureCause {
 	if errors.As(err, &NodePreprovisioningTimeoutError{}) {
 		return NodePreprovisioning
 	}

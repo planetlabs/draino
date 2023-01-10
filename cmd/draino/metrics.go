@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/planetlabs/draino/internal/drain_runner"
 	"net/http"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
@@ -75,7 +76,12 @@ func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
 		}
 	)
 
-	kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon, skippedCordon, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
+	if options.noLegacyNodeHandler {
+		// removing: nodesDrained
+		kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrainScheduled, limitedCordon, skippedCordon, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
+	} else {
+		kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon, skippedCordon, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
+	}
 
 	promOptions := prometheus.Options{Namespace: kubernetes.Component, Registry: prom.NewRegistry()}
 	kubernetes.InitWorkqueueMetrics(promOptions.Registry)
@@ -91,9 +97,17 @@ func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
 	groups.RegisterMetrics(promOptions.Registry)
 	observability.RegisterNewMetrics(promOptions.Registry, options.scopeAnalysisPeriod)
 
+	if options.noLegacyNodeHandler {
+		DrainoMetrics(promOptions.Registry)
+	}
+
 	go func() {
 		logger.Info("web server is running", zap.String("listen", options.listen))
 		kingpin.FatalIfError(kubernetes.Await(web), "error serving")
 	}()
 
+}
+
+func DrainoMetrics(promExporter prom.Registerer) {
+	drain_runner.RegisterMetrics(promExporter)
 }

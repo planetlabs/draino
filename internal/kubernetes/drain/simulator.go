@@ -3,6 +3,7 @@ package drain
 import (
 	"context"
 	"fmt"
+	"github.com/DataDog/compute-go/logs"
 	"strings"
 	"time"
 
@@ -27,10 +28,8 @@ const (
 	PositiveCacheResTTL = time.Minute
 	NegativeCacheResTTL = 3 * time.Minute
 
-	eventDrainSimulationFailed        = "DrainSimulationFailed"
-	eventDrainSimulationSuccessful    = "DrainSimulationSuccessful"
-	eventEvictionSimulationFailed     = "EvictionSimulationFailed"
-	eventEvictionSimulationSuccessful = "EvictionSimulationSuccessful"
+	eventDrainSimulationFailed    = "DrainSimulationFailed"
+	eventEvictionSimulationFailed = "EvictionSimulationFailed"
 
 	// Starting at v1.22, we should use policy/v1 instead of policy/v1beta1 for evictions
 	// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#calling-the-eviction-api
@@ -148,7 +147,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	defer span.Finish()
 
 	if !sim.rateLimiter.TryAccept() {
-		sim.logger.Info("Drain simulation aborted due to rate limiting.")
+		sim.logger.V(logs.ZapDebug).Info("Drain simulation aborted due to rate limiting.")
 		return false, "", apierrors.NewTooManyRequestsError("Cannot get rate limiter token")
 	}
 
