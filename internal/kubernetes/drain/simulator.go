@@ -208,7 +208,6 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 	defer span.Finish()
 
 	var eviction client.Object
-	var gracePeriod int64 = 30
 
 	if sim.usePolicyV1ForEviction {
 		eviction = &policyv1.Eviction{
@@ -217,8 +216,7 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 				Namespace: pod.GetNamespace(),
 			},
 			DeleteOptions: &metav1.DeleteOptions{
-				GracePeriodSeconds: &gracePeriod,
-				DryRun:             []string{"All"},
+				DryRun: []string{"All"},
 			},
 		}
 	} else {
@@ -228,8 +226,7 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 				Namespace: pod.GetNamespace(),
 			},
 			DeleteOptions: &metav1.DeleteOptions{
-				GracePeriodSeconds: &gracePeriod,
-				DryRun:             []string{"All"},
+				DryRun: []string{"All"},
 			},
 		}
 	}

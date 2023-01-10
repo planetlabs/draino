@@ -768,13 +768,11 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(ctx context.Context, node *cor
 	span, ctx := tracer.StartSpanFromContext(ctx, "evictWithKubernetesAPI")
 	defer span.Finish()
 
-	gracePeriod := int64(d.getGracePeriodWithEvictionHeadRoom(pod).Seconds())
 	return d.evictionSequence(ctx, node, pod, abort,
 		// eviction function
 		func() error {
 			return d.c.CoreV1().Pods(pod.GetNamespace()).Evict(ctx, &policy.Eviction{
-				ObjectMeta:    meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
-				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
+				ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
 			})
 		},
 		// error handling function
@@ -805,7 +803,6 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 
 	conditions := GetConditionsTypes(GetNodeOffendingConditions(node, d.globalConfig.SuppliedConditions))
 	d.l.Info("using custom eviction endpoint", zap.String("pod", pod.Namespace+"/"+pod.Name), zap.String("endpoint", url))
-	gracePeriod := int64(d.getGracePeriodWithEvictionHeadRoom(pod).Seconds())
 	maxRetryOn500 := 4
 	return d.evictionSequence(ctx, node, pod, abort,
 		// eviction function
@@ -815,7 +812,6 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 			evictionPayload := &policy.Eviction{
 				ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName(),
 					Annotations: map[string]string{EvictionNodeConditionsAnnotationKey: strings.Join(conditions, ",")}},
-				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
 			}
 
 			var client *http.Client
