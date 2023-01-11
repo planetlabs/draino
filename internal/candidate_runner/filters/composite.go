@@ -3,6 +3,7 @@ package filters
 import (
 	"context"
 	"fmt"
+	"github.com/planetlabs/draino/internal/kubernetes"
 	"strings"
 
 	"github.com/DataDog/compute-go/logs"
@@ -50,16 +51,17 @@ func (c *CompositeFilter) Filter(ctx context.Context, nodes []*v1.Node) (keep []
 	return nodes
 }
 
-func (c *CompositeFilter) FilterNode(ctx context.Context, n *v1.Node) (keep bool, name, reason string) {
-	var filteringStr []string
-	keep = true
+func (c *CompositeFilter) FilterNode(ctx context.Context, n *v1.Node) FilterOutput {
+	keep := true
+	result := FilterOutput{}
 	for _, f := range c.filters {
-		k, _, r := f.FilterNode(ctx, n)
-		keep = keep && k
-		filteringStr = append(filteringStr, fmt.Sprintf("%v:%s", keep, r))
+		fOut := f.FilterNode(ctx, n)
+		result.Checks = append(result.Checks, fOut.Checks...)
+		keep = keep && fOut.Keep
 	}
-	c.logger.Info("filtering", "result", filteringStr)
-	return keep, c.Name(), strings.Join(filteringStr, CompositeFilterSeparator)
+	result.Keep = keep
+	kubernetes.LogrForVerboseNode(c.logger, n, "result", result)
+	return result
 }
 
 var _ Filter = &CompositeFilter{}

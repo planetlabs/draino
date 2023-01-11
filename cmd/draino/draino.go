@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/planetlabs/draino/internal/diagnostics"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -549,6 +550,11 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 
 	simulationRateLimiter := limit.NewRateLimiter(clock.RealClock{}, cfg.KubeClientConfig.QPS*options.simulationRateLimitingRatio, int(float32(cfg.KubeClientConfig.Burst)*options.simulationRateLimitingRatio))
 	simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, filtersDef.drainPodFilter, kubeVersion, eventRecorder, simulationRateLimiter, logger)
+	sorters := candidate_runner.NodeSorters{
+		sorters.CompareNodeAnnotationDrainPriority,
+		sorters.NewConditionComparator(globalConfig.SuppliedConditions),
+		pdbAnalyser.CompareNode,
+	}
 
 	drainCandidateRunnerFactory, err := candidate_runner.NewFactory(
 		candidate_runner.WithKubeClient(mgr.GetClient()),
@@ -560,11 +566,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
 		candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		candidate_runner.WithDrainSimulator(simulator),
-		candidate_runner.WithNodeSorters(candidate_runner.NodeSorters{
-			sorters.CompareNodeAnnotationDrainPriority,
-			sorters.NewConditionComparator(globalConfig.SuppliedConditions),
-			pdbAnalyser.CompareNode,
-		}),
+		candidate_runner.WithNodeSorters(sorters),
 		candidate_runner.WithDryRun(options.dryRun),
 		candidate_runner.WithRetryWall(retryWall),
 		candidate_runner.WithRateLimiter(limit.NewTypedRateLimiter(&clock.RealClock{}, options.drainRateLimitQPS, options.drainRateLimitBurst)),
@@ -578,6 +580,30 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.nodeLabelFilter, store.HasSynced, options.groupRunnerPeriod)
 	if err = groupRegistry.SetupWithManager(mgr); err != nil {
 		logger.Error(err, "failed to setup groupRegistry")
+		return err
+	}
+
+	diagnosticFactory, err := diagnostics.NewFactory(
+		diagnostics.WithKubeClient(mgr.GetClient()),
+		diagnostics.WithClock(&clock.RealClock{}),
+		diagnostics.WithLogger(mgr.GetLogger()),
+		diagnostics.WithFilter(filterFactory.BuildCandidateFilter()),
+		diagnostics.WithDrainSimulator(simulator),
+		diagnostics.WithNodeSorters(sorters),
+		diagnostics.WithRetryWall(retryWall),
+		diagnostics.WithDrainBuffer(drainBuffer),
+		diagnostics.WithGlobalConfig(globalConfig),
+		diagnostics.WithKeyGetter(keyGetter),
+		diagnostics.WithStabilityPeriodChecker(stabilityPeriodChecker),
+	)
+	if err != nil {
+		logger.Error(err, "failed to configure the diagnostics")
+		return err
+	}
+
+	diagnostics := diagnostics.NewDiagnosticsController(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, []diagnostics.Diagnostician{diagnosticFactory.BuildDiagnosticWriter()}, store.HasSynced)
+	if err = diagnostics.SetupWithManager(mgr); err != nil {
+		logger.Error(err, "failed to setup diagnostics")
 		return err
 	}
 

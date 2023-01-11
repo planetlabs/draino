@@ -285,6 +285,14 @@ type AnnotationPatch struct {
 	} `json:"metadata"`
 }
 
+func (a AnnotationPatch) Type() types.PatchType {
+	return types.MergePatchType
+}
+
+func (a AnnotationPatch) Data(obj client.Object) ([]byte, error) {
+	return json.Marshal(a)
+}
+
 type AnnotationDeletePatch struct {
 	Metadata struct {
 		Annotations map[string]interface{} `json:"annotations"`
@@ -352,6 +360,12 @@ func PatchDeleteNodeAnnotationKeyCR(ctx context.Context, client client.Client, n
 	var annotationDeletePatch AnnotationDeletePatch
 	annotationDeletePatch.Metadata.Annotations = map[string]interface{}{key: nil}
 	return PatchNodeCR(ctx, client, node, annotationDeletePatch)
+}
+
+func PatchNodeAnnotationKeyCR(ctx context.Context, client client.Client, node *core.Node, key string, value string) error {
+	var annotationPatch AnnotationPatch
+	annotationPatch.Metadata.Annotations = map[string]string{key: value}
+	return PatchNodeCR(ctx, client, node, annotationPatch)
 }
 
 // GetAnnotationFromPodOrController check if an annotation is present on the pod or the associated controller object

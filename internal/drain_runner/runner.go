@@ -150,9 +150,9 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	loggerForNode := runner.logger.WithValues("node", candidate.Name)
 
 	// Check if the node is still candidate before processing
-	keep, filterName, reason := runner.filter.FilterNode(ctx, candidate)
-	if !keep {
-		loggerForNode.Info("Removing candidate status", "reason", reason, "filterName", filterName)
+	filterOutput := runner.filter.FilterNode(ctx, candidate)
+	if !filterOutput.Keep {
+		loggerForNode.Info("Removing candidate status", "rejections", filterOutput.OnlyFailingChecks().Checks)
 		_, errRmTaint := k8sclient.RemoveNLATaint(ctx, runner.client, candidate)
 		return errRmTaint
 	}

@@ -3,7 +3,6 @@ package candidate_runner
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"strings"
 	"time"
 
@@ -11,10 +10,9 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
-	"github.com/planetlabs/draino/internal/limit"
-
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
+	"github.com/planetlabs/draino/internal/limit"
 	"github.com/planetlabs/draino/internal/scheduler"
 
 	"github.com/go-logr/logr"
@@ -23,7 +21,9 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
+
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )

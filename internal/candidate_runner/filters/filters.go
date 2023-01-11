@@ -10,8 +10,32 @@ type Filter interface {
 	Name() string
 	// Filter should be used to process and entire list. It is optimized for list processing
 	Filter(ctx context.Context, nodes []*v1.Node) (keep []*v1.Node)
-	// FilterNode returns the name of the filter and the a detailed reason for rejection
-	FilterNode(ctx context.Context, n *v1.Node) (keep bool, name, reason string)
+	// FilterNode returns the name(s) of the filter(s) and detailed reason(s) for rejection
+	FilterNode(ctx context.Context, n *v1.Node) FilterOutput
+}
+
+type FilterOutput struct {
+	Keep   bool
+	Checks []CheckOutput `json:",omitempty"`
+}
+
+type CheckOutput struct {
+	FilterName string
+	Keep       bool
+	Reason     string `json:",omitempty"`
+}
+
+func (f FilterOutput) OnlyFailingChecks() FilterOutput {
+	if f.Keep {
+		return FilterOutput{Keep: true}
+	}
+	results := FilterOutput{Keep: false}
+	for _, c := range f.Checks {
+		if !c.Keep {
+			results.Checks = append(results.Checks, c)
+		}
+	}
+	return results
 }
 
 type NodeFilterFunc func(ctx context.Context, n *v1.Node) bool
@@ -26,10 +50,18 @@ func (g *genericFilterFromFunc) Name() string {
 	return g.name
 }
 
-func (g *genericFilterFromFunc) FilterNode(ctx context.Context, n *v1.Node) (keep bool, name, reason string) {
-	keep, reason = g.f(ctx, n)
-	name = g.name
-	return
+func (g *genericFilterFromFunc) FilterNode(ctx context.Context, n *v1.Node) FilterOutput {
+	keep, reason := g.f(ctx, n)
+	return FilterOutput{
+		Keep: keep,
+		Checks: []CheckOutput{
+			{
+				FilterName: g.name,
+				Keep:       keep,
+				Reason:     reason,
+			},
+		},
+	}
 }
 
 func (g *genericFilterFromFunc) Filter(ctx context.Context, nodes []*v1.Node) (keep []*v1.Node) {
@@ -55,7 +87,7 @@ func FilterFromFunction(name string, filterFunc NodeFilterFunc) Filter {
 	return FilterFromFunctionWithReason(
 		name,
 		func(ctx context.Context, n *v1.Node) (bool, string) {
-			return filterFunc(ctx, n), "rejected"
+			return filterFunc(ctx, n), ""
 		},
 	)
 }
