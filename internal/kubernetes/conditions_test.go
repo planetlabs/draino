@@ -27,7 +27,7 @@ func TestOffendingConditions(t *testing.T) {
 				}},
 			},
 			conditions: []string{"Cool"},
-			expected:   []SuppliedCondition{{Type: "Cool", Status: core.ConditionTrue}},
+			expected:   []SuppliedCondition{{Type: "Cool", Status: core.ConditionTrue, parsedExpectedResolutionTime: DefaultExpectedResolutionTime}},
 		},
 		{
 			name: "ManyMatchingConditions",
@@ -40,8 +40,8 @@ func TestOffendingConditions(t *testing.T) {
 			},
 			conditions: []string{"Cool", "Rad"},
 			expected: []SuppliedCondition{
-				{Type: "Cool", Status: core.ConditionTrue},
-				{Type: "Rad", Status: core.ConditionTrue},
+				{Type: "Cool", Status: core.ConditionTrue, parsedExpectedResolutionTime: DefaultExpectedResolutionTime},
+				{Type: "Rad", Status: core.ConditionTrue, parsedExpectedResolutionTime: DefaultExpectedResolutionTime},
 			},
 		},
 		{
@@ -55,7 +55,7 @@ func TestOffendingConditions(t *testing.T) {
 			},
 			conditions: []string{"Cool", "Rad"},
 			expected: []SuppliedCondition{
-				{Type: "Cool", Status: core.ConditionTrue},
+				{Type: "Cool", Status: core.ConditionTrue, parsedExpectedResolutionTime: DefaultExpectedResolutionTime},
 			},
 		},
 		{
@@ -68,7 +68,7 @@ func TestOffendingConditions(t *testing.T) {
 			},
 			conditions: []string{"Cool", "Rad"},
 			expected: []SuppliedCondition{
-				{Type: "Rad", Status: core.ConditionTrue},
+				{Type: "Rad", Status: core.ConditionTrue, parsedExpectedResolutionTime: DefaultExpectedResolutionTime},
 			},
 		},
 		{
@@ -108,7 +108,7 @@ func TestOffendingConditions(t *testing.T) {
 			},
 			conditions: []string{`Cool={"conditionStatus":"Unknown", "delay":"10m"}`},
 			expected: []SuppliedCondition{
-				{Type: "Cool", Status: core.ConditionUnknown, parsedDelay: 10 * time.Minute, Delay: "10m"},
+				{Type: "Cool", Status: core.ConditionUnknown, parsedDelay: 10 * time.Minute, Delay: "10m", parsedExpectedResolutionTime: DefaultExpectedResolutionTime},
 			},
 		},
 		{
@@ -132,7 +132,7 @@ func TestOffendingConditions(t *testing.T) {
 			},
 			conditions: []string{`Cool={"conditionStatus":"Unknown", "delay":"14m","priority":99}`},
 			expected: []SuppliedCondition{
-				{Type: "Cool", Status: core.ConditionUnknown, parsedDelay: 14 * time.Minute, Delay: "14m", Priority: 99},
+				{Type: "Cool", Status: core.ConditionUnknown, parsedDelay: 14 * time.Minute, Delay: "14m", Priority: 99, parsedExpectedResolutionTime: DefaultExpectedResolutionTime},
 			},
 		},
 	}

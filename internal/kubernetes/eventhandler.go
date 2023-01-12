@@ -111,6 +111,7 @@ var (
 	TagUserOptInViaPodAnnotation, _       = tag.NewKey("user_opt_in_via_pod_annotation")
 	TagUserAllowedConditionsAnnotation, _ = tag.NewKey("user_allowed_conditions_annotation")
 	TagUserEvictionURL, _                 = tag.NewKey("eviction_url")
+	TagOverdue, _                         = tag.NewKey("overdue")
 )
 
 // A DrainingResourceEventHandler cordons and drains any added or updated nodes.

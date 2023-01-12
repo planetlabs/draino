@@ -8,11 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/planetlabs/draino/internal/candidate_runner"
-	"github.com/planetlabs/draino/internal/drain_runner"
-	"github.com/planetlabs/draino/internal/groups"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
@@ -24,6 +19,12 @@ import (
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/drain_runner"
+	"github.com/planetlabs/draino/internal/groups"
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/drain"
 )
 
 const (
@@ -106,7 +107,25 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureNodesWithNodeOptions,
 		Description: "Number of nodes for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam, kubernetes.TagDrainStatus, kubernetes.TagConditions, kubernetes.TagUserOptInViaPodAnnotation, kubernetes.TagUserOptOutViaPodAnnotation, kubernetes.TagUserAllowedConditionsAnnotation, kubernetes.TagDrainRetry, kubernetes.TagDrainRetryFailed, kubernetes.TagDrainRetryCustomMaxAttempt, kubernetes.TagPVCManagement, kubernetes.TagPreprovisioning, kubernetes.TagInScope, kubernetes.TagUserEvictionURL},
+		TagKeys: []tag.Key{
+			kubernetes.TagNodegroupName,
+			kubernetes.TagNodegroupNamePrefix,
+			kubernetes.TagNodegroupNamespace,
+			kubernetes.TagTeam,
+			kubernetes.TagDrainStatus,
+			kubernetes.TagConditions,
+			kubernetes.TagUserOptInViaPodAnnotation,
+			kubernetes.TagUserOptOutViaPodAnnotation,
+			kubernetes.TagUserAllowedConditionsAnnotation,
+			kubernetes.TagDrainRetry,
+			kubernetes.TagDrainRetryFailed,
+			kubernetes.TagDrainRetryCustomMaxAttempt,
+			kubernetes.TagPVCManagement,
+			kubernetes.TagPreprovisioning,
+			kubernetes.TagInScope,
+			kubernetes.TagUserEvictionURL,
+			kubernetes.TagOverdue,
+		},
 	}
 
 	g.previousMeasureCPUsWithNodeOptions = &view.View{
@@ -197,6 +216,7 @@ type inScopeTags struct {
 	UserAllowedConditionsAnnotation bool
 	TagUserEvictionURLViaAnnotation bool
 	Condition                       string
+	Overdue                         bool
 }
 
 type inScopeCPUTags struct {
@@ -280,15 +300,21 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					NodeTagsValues: nodeTags,
 					InScope:        NodeInScopeWithConditionCheck(conditions, node),
 				}
+
+				overdue := map[string]bool{}
+				for _, c := range conditions {
+					overdue[string(c.Type)] = kubernetes.IsOverdue(node, c)
+				}
+
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
 				conditionsWithAll := append(kubernetes.GetConditionsTypes(conditions), "any")
 				for _, c := range conditionsWithAll {
 					t.Condition = c
+					t.Overdue = overdue[c]
 					newMetricsValue[t] = newMetricsValue[t] + 1
 
 					tCPU.Condition = c
 					newMetricsCPUValue[tCPU] = newMetricsCPUValue[tCPU] + node.Status.Capacity.Cpu().Value()
-
 				}
 			}
 			s.updateGauges(newMetricsValue, newMetricsCPUValue)
@@ -360,7 +386,8 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 			tag.Upsert(kubernetes.TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
 			tag.Upsert(kubernetes.TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
 			tag.Upsert(kubernetes.TagUserOptOutViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptOutViaPodAnnotation)),
-			tag.Upsert(kubernetes.TagUserAllowedConditionsAnnotation, strconv.FormatBool(tagsValues.UserAllowedConditionsAnnotation)))
+			tag.Upsert(kubernetes.TagUserAllowedConditionsAnnotation, strconv.FormatBool(tagsValues.UserAllowedConditionsAnnotation)),
+			tag.Upsert(kubernetes.TagOverdue, strconv.FormatBool(tagsValues.Overdue)))
 		stats.Record(allTags, s.metricsObjects.MeasureNodesWithNodeOptions.M(count))
 	}
 

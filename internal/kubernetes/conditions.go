@@ -11,14 +11,26 @@ import (
 	core "k8s.io/api/core/v1"
 )
 
+const DefaultExpectedResolutionTime = time.Hour * 24 * 7
+
 // SuppliedCondition defines the condition will be watched.
 type SuppliedCondition struct {
-	Type     core.NodeConditionType `json:"type"`
-	Status   core.ConditionStatus   `json:"conditionStatus"`
-	Delay    string                 `json:"delay"`
-	Priority int                    `json:"priority"` // higher value first in priority, default is 0, negative value are accepted
+	Type   core.NodeConditionType `json:"type"`
+	Status core.ConditionStatus   `json:"conditionStatus"`
+	// Draino starts acting on a node with this condition after Delay has elapsed.
+	// If a node has multiple conditions, the smallest Delay is applied. Default is 0.
+	Delay    string `json:"delay"`
+	Priority int    `json:"priority"` // higher value first in priority, default is 0, negative value are accepted
+	// ExpectedResolutionTime is the duration given to draino and cluster-autoscaler (for
+	// in-scope nodes) or users (for out-of-scope nodes) to drain and scale down
+	// nodes with this condition. ExpectedResolutionTime and Delay start concurrently, so
+	// ExpectedResolutionTime should be higher than Delay. After ExpectedResolutionTime, the nodes need
+	// attention (metric->monitor->SLO). A higher priority is typically associated
+	// with a lower time limit. Default is 7 days for now.
+	ExpectedResolutionTime string `json:"expectedResolutionTime"`
 
-	parsedDelay time.Duration
+	parsedDelay                  time.Duration
+	parsedExpectedResolutionTime time.Duration
 }
 
 func GetNodeOffendingConditions(n *core.Node, suppliedConditions []SuppliedCondition) []SuppliedCondition {
@@ -33,6 +45,17 @@ func GetNodeOffendingConditions(n *core.Node, suppliedConditions []SuppliedCondi
 		}
 	}
 	return conditions
+}
+
+func IsOverdue(n *core.Node, suppliedCondition SuppliedCondition) bool {
+	for _, nodeCondition := range n.Status.Conditions {
+		if suppliedCondition.Type == nodeCondition.Type &&
+			suppliedCondition.Status == nodeCondition.Status &&
+			time.Since(nodeCondition.LastTransitionTime.Time) >= suppliedCondition.parsedExpectedResolutionTime {
+			return true
+		}
+	}
+	return false
 }
 
 func GetConditionsTypes(conditions []SuppliedCondition) []string {
@@ -69,6 +92,14 @@ func ParseConditions(conditions []string) ([]SuppliedCondition, error) {
 			if condition.parsedDelay, errParse = time.ParseDuration(condition.Delay); errParse != nil {
 				return nil, errParse
 			}
+		}
+		if condition.ExpectedResolutionTime != "" {
+			var errParse error
+			if condition.parsedExpectedResolutionTime, errParse = time.ParseDuration(condition.ExpectedResolutionTime); errParse != nil {
+				return nil, errParse
+			}
+		} else {
+			condition.parsedExpectedResolutionTime = DefaultExpectedResolutionTime
 		}
 		if condition.Status == "" {
 			condition.Status = core.ConditionTrue
