@@ -146,11 +146,6 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodDrain")
 	defer span.Finish()
 
-	if !sim.rateLimiter.TryAccept() {
-		sim.logger.V(logs.ZapDebug).Info("Drain simulation aborted due to rate limiting.")
-		return false, "", apierrors.NewTooManyRequestsError("Cannot get rate limiter token")
-	}
-
 	if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist {
 		return res.result, res.reason, res.err
 	}
@@ -188,6 +183,11 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 			sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
 			return false, reason, nil
 		}
+	}
+
+	if !sim.rateLimiter.TryAccept() {
+		sim.logger.V(logs.ZapDebug).Info("Drain simulation aborted due to rate limiting.")
+		return false, "", apierrors.NewTooManyRequestsError("Cannot get rate limiter token")
 	}
 
 	// do a dry-run eviction call
