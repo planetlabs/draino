@@ -21,7 +21,6 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/utils/clock"
@@ -123,8 +122,8 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 			canDrain, reasons, errDrainSimulation := runner.drainSimulator.SimulateDrain(ctx, node)
 			if len(errDrainSimulation) > 0 {
 				for _, e := range errDrainSimulation {
-					if errors.IsTooManyRequests(e) {
-						logForNode.V(logs.ZapDebug).Info("Not exploring the group further: simulation rate limited")
+					if k8sclient.IsClientSideRateLimiting(e) {
+						logForNode.Info("Not exploring the group further: simulation rate limited")
 						break groupIteration
 					}
 				}

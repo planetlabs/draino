@@ -3,10 +3,11 @@ package drain
 import (
 	"context"
 	"fmt"
-	"github.com/DataDog/compute-go/logs"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"strings"
 	"time"
 
+	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
@@ -187,16 +188,19 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 
 	if !sim.rateLimiter.TryAccept() {
 		sim.logger.V(logs.ZapDebug).Info("Drain simulation aborted due to rate limiting.")
-		return false, "", apierrors.NewTooManyRequestsError("Cannot get rate limiter token")
+		return false, "", &k8sclient.ClientSideRateLimit{}
 	}
 
 	// do a dry-run eviction call
 	evictionDryRunRes, err := sim.simulateAPIEviction(ctx, pod)
 	if !evictionDryRunRes {
 		reason = fmt.Sprintf("Eviction dry run was not successful: %v", err)
+		if apierrors.IsForbidden(err) { // This is the admission that is rejecting the drain. The error carry the reason for the rejection
+			err = nil
+		}
 		sim.writePodCache(pod, false, reason, err)
 		sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
-		return false, reason, nil
+		return false, reason, err
 	}
 
 	sim.writePodCache(pod, true, "", nil)
@@ -230,8 +234,11 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 			},
 		}
 	}
-
 	err := sim.client.SubResource("eviction").Create(ctx, pod, eviction)
+	if err != nil {
+		sim.logger.V(logs.ZapDebug).Info("Error returned by simulation eviction", "pod", pod.Namespace+"/"+pod.Name, "err", err, "IsTooManyReq", apierrors.IsTooManyRequests(err), "IsForbidden", apierrors.IsForbidden(err), "Reason", apierrors.ReasonForError(err))
+	}
+
 	return err == nil, err
 }
 
