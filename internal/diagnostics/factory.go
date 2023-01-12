@@ -36,6 +36,6 @@ func (factory *Factory) build() *Diagnostics {
 		stabilityPeriod:     factory.conf.stabilityPeriodChecker,
 	}
 }
-func (factory *Factory) BuildDiagnosticWriter() Diagnostician {
+func (factory *Factory) BuildDiagnostician() Diagnostician {
 	return factory.build()
 }

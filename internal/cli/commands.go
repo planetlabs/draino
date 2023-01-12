@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -11,9 +13,9 @@ import (
 
 	"github.com/DataDog/compute-go/table"
 	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/diagnostics"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
-	"github.com/spf13/cobra"
 )
 
 type CLICommands struct {
@@ -23,9 +25,25 @@ type CLICommands struct {
 
 	tableOutputParams table.OutputParameters
 	outputFormat      outputFormatType
+	nodeName          string
 }
 
 func (h *CLICommands) Commands() []*cobra.Command {
+	return []*cobra.Command{h.buildGroupCmd(), h.buildNodeCmd()}
+}
+
+func (h *CLICommands) setTableFlags(f *pflag.FlagSet) {
+	f.VarP(&h.outputFormat, "output", "o", "output format (table|json)")
+	f.BoolVarP(&h.tableOutputParams.NoHeader, "no-header", "", false, "do not display table header")
+	f.StringVarP(&h.tableOutputParams.Separator, "separator", "s", "\t|", "column Separator in table output")
+	f.IntVarP(&h.tableOutputParams.Padding, "padding", "", 3, "Padding in table output")
+	f.StringArrayVarP(&h.tableOutputParams.Sort, "sort", "", []string{"group"}, "comma separated list of columns for sorting table output")
+	f.StringArrayVarP(&h.tableOutputParams.ColumnsVisible, "visible", "", nil, "comma separated list of visible columns for table output")
+	f.StringArrayVarP(&h.tableOutputParams.ColumnsHide, "hidden", "", nil, "comma separated list of hidden columns for table output")
+	f.StringArrayVarP(&h.tableOutputParams.Filter, "filter", "", nil, "filtering expression for table output")
+}
+
+func (h *CLICommands) buildGroupCmd() *cobra.Command {
 	groupCmd := &cobra.Command{
 		Use:        "group",
 		SuggestFor: []string{"group", "groups"},
@@ -33,14 +51,7 @@ func (h *CLICommands) Commands() []*cobra.Command {
 		Run:        func(cmd *cobra.Command, args []string) {},
 	}
 
-	groupCmd.PersistentFlags().VarP(&h.outputFormat, "output", "o", "output format (table|json)")
-	groupCmd.PersistentFlags().BoolVarP(&h.tableOutputParams.NoHeader, "no-header", "", false, "do not display table header")
-	groupCmd.PersistentFlags().StringVarP(&h.tableOutputParams.Separator, "separator", "s", "\t|", "column Separator in table output")
-	groupCmd.PersistentFlags().IntVarP(&h.tableOutputParams.Padding, "padding", "", 3, "Padding in table output")
-	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.Sort, "sort", "", []string{"group"}, "comma separated list of columns for sorting table output")
-	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.ColumnsVisible, "visible", "", nil, "comma separated list of visible columns for table output")
-	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.ColumnsHide, "hidden", "", nil, "comma separated list of hidden columns for table output")
-	groupCmd.PersistentFlags().StringArrayVarP(&h.tableOutputParams.Filter, "filter", "", nil, "filtering expression for table output")
+	h.setTableFlags(groupCmd.PersistentFlags())
 	groupCmd.PersistentFlags().StringVarP(&h.groupName, "group-name", "", "", "name of the group")
 
 	groupListCmd := &cobra.Command{
@@ -68,8 +79,31 @@ func (h *CLICommands) Commands() []*cobra.Command {
 	groupGraphCmd.AddCommand(groupGraphLastCmd)
 
 	groupCmd.AddCommand(groupListCmd, groupGraphCmd)
+	return groupCmd
+}
 
-	return []*cobra.Command{groupCmd}
+func (h *CLICommands) buildNodeCmd() *cobra.Command {
+	nodeCmd := &cobra.Command{
+		Use:        "node",
+		SuggestFor: []string{"node", "nodes"},
+		Args:       cobra.MaximumNArgs(2),
+		Run:        func(cmd *cobra.Command, args []string) {},
+	}
+
+	h.setTableFlags(nodeCmd.PersistentFlags())
+	nodeCmd.PersistentFlags().StringVarP(&h.nodeName, "node-name", "", "", "name of the node")
+
+	nodeDiagnosticsCmd := &cobra.Command{
+		Use:        "diagnostics",
+		SuggestFor: []string{"diagnostics"},
+		Args:       cobra.ExactArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return h.cmdNodeDiagnostics()
+		},
+	}
+
+	nodeCmd.AddCommand(nodeDiagnosticsCmd)
+	return nodeCmd
 }
 
 func ReadFromURL(url string) ([]byte, error) {
@@ -87,6 +121,27 @@ func ReadFromURL(url string) ([]byte, error) {
 		return nil, fmt.Errorf("%s\n%s", resp.Status, string(b))
 	}
 	return b, nil
+}
+
+func (h *CLICommands) cmdNodeDiagnostics() error {
+	params := url.Values{}
+	params.Add("node-name", h.nodeName)
+	b, err := ReadFromURL("http://" + *h.ServerAddr + "/nodes/diagnostics?" + params.Encode())
+	if err != nil {
+		return err
+	}
+
+	var nd diagnostics.NodeDiagnostics
+	if errMarshall := json.Unmarshal(b, &nd); errMarshall != nil {
+		return errMarshall
+	}
+
+	bPretty, errIndent := json.MarshalIndent(nd, "", "  ")
+	if errIndent != nil {
+		return errIndent
+	}
+	fmt.Println(string(bPretty))
+	return nil
 }
 
 func (h *CLICommands) cmdGroupGraphLast() error {

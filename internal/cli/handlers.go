@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/go-logr/logr"
 	"github.com/gorilla/mux"
 	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/diagnostics"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
 	"net/http"
@@ -14,26 +16,32 @@ type CLIHandlers struct {
 	keysGetter    groups.RunnerInfoGetter
 	candidateInfo candidate_runner.CandidateInfo
 	drainInfo     drain_runner.DrainInfo
+	diagnostics   diagnostics.Diagnostician
 	logger        logr.Logger
 }
 
 func (c *CLIHandlers) Initialize(logger logr.Logger,
 	keysGetter groups.RunnerInfoGetter,
 	candidateInfo candidate_runner.CandidateInfo,
-	drainInfo drain_runner.DrainInfo) error {
+	drainInfo drain_runner.DrainInfo,
+	diagnostics diagnostics.Diagnostician) error {
 
 	c.keysGetter = keysGetter
 	c.candidateInfo = candidateInfo
 	c.drainInfo = drainInfo
 	c.logger = logger.WithName("cliHandler")
+	c.diagnostics = diagnostics
 	c.logger.Info("Initialized")
 	return nil
 }
 
 func (c *CLIHandlers) RegisterRoute(m *mux.Router) {
-	s := m.PathPrefix("/groups").Subrouter() //Handler(groupRouter)
-	s.HandleFunc("/list", c.handleGroupsList)
-	s.HandleFunc("/graph/last", c.handleGroupsGraphLast)
+	sg := m.PathPrefix("/groups").Subrouter() //Handler(groupRouter)
+	sg.HandleFunc("/list", c.handleGroupsList)
+	sg.HandleFunc("/graph/last", c.handleGroupsGraphLast)
+
+	sn := m.PathPrefix("/nodes").Subrouter() //Handler(groupRouter)
+	sn.HandleFunc("/diagnostics", c.handleNodesDiagnostics)
 }
 
 // handleGroupsList list all groups
@@ -91,6 +99,22 @@ func (h *CLIHandlers) handleGroupsGraphLast(writer http.ResponseWriter, request 
 
 	writer.WriteHeader(http.StatusOK)
 	data, err := json.Marshal(candidateRunnerInfo.GetLastNodeIteratorGraph(true))
+	if err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writer.Write(data)
+}
+
+// handleGroupsList list all groups
+func (h *CLIHandlers) handleNodesDiagnostics(writer http.ResponseWriter, request *http.Request) {
+	nodeName := request.URL.Query().Get("node-name")
+	h.logger.Info("handleNodesDiagnostics", "path", request.URL.Path, "nodeName", nodeName)
+
+	result := h.diagnostics.GetNodeDiagnostic(context.Background(), nodeName)
+
+	writer.WriteHeader(http.StatusOK)
+	data, err := json.Marshal(result)
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
 		return

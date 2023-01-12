@@ -10,6 +10,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
@@ -43,7 +44,7 @@ func (diag *Diagnostics) GetName() string {
 func (diag *Diagnostics) GetNodeDiagnostic(ctx context.Context, nodeName string) interface{} {
 	var node v1.Node
 	if err := diag.client.Get(ctx, types.NamespacedName{Name: nodeName}, &node); err != nil {
-		return NodeDiagnostics{Errors: []error{err}}
+		return NodeDiagnostics{Errors: []interface{}{err}}
 	}
 	groupKey := diag.keyGetter.GetGroupKey(&node)
 
@@ -54,8 +55,9 @@ func (diag *Diagnostics) GetNodeDiagnostic(ctx context.Context, nodeName string)
 	}
 
 	var dsr DrainSimulationResult
-	dsr.CanDrain, dsr.Reasons, dsr.Errors = diag.drainSimulator.SimulateDrain(ctx, &node)
-
+	var errs []error
+	dsr.CanDrain, dsr.Reasons, errs = diag.drainSimulator.SimulateDrain(ctx, &node)
+	dsr.Errors = utils.AsInterfaces(errs)
 	return NodeDiagnostics{
 		GroupKey:          string(groupKey),
 		Filters:           diag.filter.FilterNode(ctx, &node).OnlyFailingChecks(),
@@ -88,8 +90,8 @@ func (diag *Diagnostics) getRetryDiagnostics(node *v1.Node) *RetryDiagnostics {
 
 type DrainSimulationResult struct {
 	CanDrain bool
-	Reasons  []string `json:",omitempty"`
-	Errors   []error  `json:",omitempty"`
+	Reasons  []string      `json:",omitempty"`
+	Errors   []interface{} `json:",omitempty"`
 }
 type DrainBufferDiagnostics struct {
 	NextAttemptAfter time.Time `json:",omitempty"`
@@ -98,7 +100,7 @@ type DrainBufferDiagnostics struct {
 }
 
 type NodeDiagnostics struct {
-	Errors            []error                        `json:",omitempty"`
+	Errors            []interface{}                  `json:",omitempty"`
 	GroupKey          string                         `json:",omitempty"`
 	DrainBufferAt     *time.Time                     `json:",omitempty"`
 	Filters           filters.FilterOutput           `json:",omitempty"`

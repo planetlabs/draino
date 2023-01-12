@@ -601,13 +601,14 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
-	diagnostics := diagnostics.NewDiagnosticsController(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, []diagnostics.Diagnostician{diagnosticFactory.BuildDiagnosticWriter()}, store.HasSynced)
+	nodeDiagnostician := diagnosticFactory.BuildDiagnostician()
+	diagnostics := diagnostics.NewDiagnosticsController(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, []diagnostics.Diagnostician{nodeDiagnostician}, store.HasSynced)
 	if err = diagnostics.SetupWithManager(mgr); err != nil {
 		logger.Error(err, "failed to setup diagnostics")
 		return err
 	}
 
-	if errCli := cliHandlers.Initialize(logger, groupRegistry, drainCandidateRunnerFactory.BuildCandidateInfo(), drainRunnerFactory.BuildRunner()); errCli != nil {
+	if errCli := cliHandlers.Initialize(logger, groupRegistry, drainCandidateRunnerFactory.BuildCandidateInfo(), drainRunnerFactory.BuildRunner(), nodeDiagnostician); errCli != nil {
 		logger.Error(errCli, "Failed to initialize CLIHandlers")
 		return errCli
 	}
