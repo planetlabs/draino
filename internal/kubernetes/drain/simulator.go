@@ -3,9 +3,10 @@ package drain
 import (
 	"context"
 	"fmt"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"strings"
 	"time"
+
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 
 	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
@@ -237,9 +238,10 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 	err := sim.client.SubResource("eviction").Create(ctx, pod, eviction)
 	if err != nil {
 		sim.logger.V(logs.ZapDebug).Info("Error returned by simulation eviction", "pod", pod.Namespace+"/"+pod.Name, "err", err, "IsTooManyReq", apierrors.IsTooManyRequests(err), "IsForbidden", apierrors.IsForbidden(err), "Reason", apierrors.ReasonForError(err))
+		return false, fmt.Errorf("Cannot evict pod '%s/%s': %w", pod.Namespace, pod.Name, err)
 	}
 
-	return err == nil, err
+	return true, nil
 }
 
 func (sim *drainSimulatorImpl) writePodCache(pod *corev1.Pod, result bool, reason string, err error) {
