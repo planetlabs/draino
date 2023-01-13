@@ -2,9 +2,10 @@ package drain_runner
 
 import (
 	"context"
+	"time"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"time"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
@@ -131,7 +132,7 @@ func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerI
 
 	for _, candidate := range candidates {
 		if err := runner.handleCandidate(ctx, info, candidate); err != nil {
-			runner.logger.Error(err, "error during candidate evaluation", "node_name", candidate.Name)
+			runner.logger.Error(err, "error during candidate evaluation", "node", candidate.Name)
 		}
 	}
 	return
@@ -161,7 +162,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	kubernetes.LogrForVerboseNode(runner.logger, candidate, "Node is candidate for drain, checking pre-activities")
 	allPreprocessorsDone := runner.checkPreprocessors(ctx, candidate)
 	if !allPreprocessorsDone {
-		loggerForNode.Info("waiting for preprocessors to be done before draining", "node_name", candidate.Name)
+		loggerForNode.Info("waiting for preprocessors to be done before draining", "node", candidate.Name)
 		return nil
 	}
 
@@ -208,7 +209,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	}
 	CounterDrainedNodes(candidate, DrainedNodeResultSucceeded, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), "")
 	runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeNormal, kubernetes.EventReasonDrainSucceeded, "Drained node")
-	runner.logger.Info("successfully drained node", "node_name", candidate.Name)
+	runner.logger.Info("successfully drained node", "node", candidate.Name)
 	return nil
 }
 
@@ -221,11 +222,11 @@ func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *co
 		done, err := pre.IsDone(ctx, candidate)
 		if err != nil {
 			allPreprocessorsDone = false
-			runner.logger.Error(err, "failed during preprocessor evaluation", "preprocessor", pre.GetName(), "node_name", candidate.Name)
+			runner.logger.Error(err, "failed during preprocessor evaluation", "preprocessor", pre.GetName(), "node", candidate.Name)
 			continue
 		}
 		if !done {
-			runner.logger.Info("preprocessor still pending", "node_name", candidate.Name, "preprocessor", pre.GetName())
+			runner.logger.Info("preprocessor still pending", "node", candidate.Name, "preprocessor", pre.GetName())
 			allPreprocessorsDone = false
 		}
 	}

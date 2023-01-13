@@ -111,7 +111,7 @@ func (wall *retryWallImpl) GetRetryWallTimestamp(node *corev1.Node) time.Time {
 func (wall *retryWallImpl) getRetryDelay(node *corev1.Node, retries int) time.Duration {
 	strategy := wall.getStrategyFromNode(node)
 	if retries >= strategy.GetAlertThreashold() {
-		wall.logger.Info("retry wall is hitting limit for node", "node_name", node.GetName(), "retry_strategy", strategy.GetName(), "retries", retries, "max_retries", strategy.GetAlertThreashold())
+		wall.logger.Info("retry wall is hitting limit for node", "node", node.GetName(), "retry_strategy", strategy.GetName(), "retries", retries, "max_retries", strategy.GetAlertThreashold())
 	}
 
 	return strategy.GetDelay(retries)
@@ -143,13 +143,13 @@ func (wall *retryWallImpl) getStrategyFromNode(node *corev1.Node) RetryStrategy 
 		if ok {
 			defaultStrategy = strategy
 		} else {
-			wall.logger.Error(fmt.Errorf("cannot find node strategy '%s' in retry wall", val), "falling back to default retry strategy", "node_name", node.GetName(), "strategy", val, "default_strategy", defaultStrategy.GetName())
+			wall.logger.Error(fmt.Errorf("cannot find node strategy '%s' in retry wall", val), "falling back to default retry strategy", "node", node.GetName(), "strategy", val, "default_strategy", defaultStrategy.GetName())
 		}
 	}
 
 	nodeAnnotationStrategy, err := buildNodeAnnotationRetryStrategy(node, defaultStrategy)
 	if err != nil {
-		wall.logger.Error(err, "node contains invalid retry wall configruation", "node_name", node.GetName(), "annotations", node.GetAnnotations())
+		wall.logger.Error(err, "node contains invalid retry wall configruation", "node", node.GetName(), "annotations", node.GetAnnotations())
 	}
 
 	return nodeAnnotationStrategy
