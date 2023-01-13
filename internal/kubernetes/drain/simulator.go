@@ -199,6 +199,11 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 		if apierrors.IsForbidden(err) { // This is the admission that is rejecting the drain. The error carry the reason for the rejection
 			err = nil
 		}
+		// Too many requests means either we are rate limited (what's expected in some cases) or that the eviction was rejected by the apiserver.
+		// In both cases we don't want to treat it as an error, because it's somewhat expected behaviour.
+		if apierrors.IsTooManyRequests(err) {
+			err = nil
+		}
 		sim.writePodCache(pod, false, reason, err)
 		sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
 		return false, reason, err
