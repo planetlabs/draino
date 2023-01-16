@@ -818,7 +818,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 			urlParsed, err := url2.Parse(url)
 			if err != nil {
 				logger.Info("custom eviction endpoint response error, can't parse URL", zap.Error(err))
-				return &EvictionEndpointError{}
+				return EvictionEndpointError{}
 			}
 
 			// building the base roundTripper
@@ -857,7 +857,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 			resp, err := client.Do(req)
 			if err != nil {
 				logger.Info("custom eviction endpoint response error", zap.Error(err))
-				return &EvictionEndpointError{}
+				return EvictionEndpointError{}
 			}
 			defer resp.Body.Close()
 			logger.Info("custom eviction endpoint response", zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
@@ -878,11 +878,11 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 					return apierrors.NewTooManyRequests("retry later following endpoint error", 20)
 				}
 				logger.Error("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return &EvictionEndpointError{StatusCode: resp.StatusCode, AfterSeveralRetries: true}
+				return EvictionEndpointError{StatusCode: resp.StatusCode, AfterSeveralRetries: true}
 			default:
 				respContent, _ := ioutil.ReadAll(resp.Body)
 				logger.Error("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return &EvictionEndpointError{StatusCode: resp.StatusCode}
+				return EvictionEndpointError{StatusCode: resp.StatusCode}
 			}
 		},
 		// error handling function
@@ -956,7 +956,7 @@ func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node
 				return nil
 			case err != nil:
 				if eh := otherErrorsHandlerFunc(err); eh != nil {
-					return err
+					return eh
 				}
 			default: // this means the API answered 200/201, we wait for the pod deletion
 				// now that the eviction is confirmed we can only wait for the pod terminationGracePeriod (and evictionHeadroom to give some buffer)
