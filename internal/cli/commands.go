@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/DataDog/compute-go/table"
 	"github.com/planetlabs/draino/internal/candidate_runner"
 	"github.com/planetlabs/draino/internal/diagnostics"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
+	"k8s.io/apimachinery/pkg/util/duration"
 )
 
 type CLICommands struct {
@@ -25,6 +27,7 @@ type CLICommands struct {
 
 	tableOutputParams table.OutputParameters
 	outputFormat      outputFormatType
+	perferDuration    bool
 	nodeName          string
 }
 
@@ -35,6 +38,7 @@ func (h *CLICommands) Commands() []*cobra.Command {
 func (h *CLICommands) setTableFlags(f *pflag.FlagSet) {
 	f.VarP(&h.outputFormat, "output", "o", "output format (table|json)")
 	f.BoolVarP(&h.tableOutputParams.NoHeader, "no-header", "", false, "do not display table header")
+	f.BoolVarP(&h.perferDuration, "prefer-duration", "", true, "display duration instead of timestamp where it makes sense")
 	f.StringVarP(&h.tableOutputParams.Separator, "separator", "s", "\t|", "column Separator in table output")
 	f.IntVarP(&h.tableOutputParams.Padding, "padding", "", 3, "Padding in table output")
 	f.StringArrayVarP(&h.tableOutputParams.Sort, "sort", "", []string{"group"}, "comma separated list of columns for sorting table output")
@@ -156,6 +160,16 @@ func (h *CLICommands) cmdGroupGraphLast() error {
 	return nil
 }
 
+func (h *CLICommands) outputDurationOrTimestamp(t time.Time) string {
+	if t.IsZero() {
+		return "NA"
+	}
+	if h.perferDuration {
+		return duration.ShortHumanDuration(time.Since(t))
+	}
+	return t.Format(time.RFC3339)
+}
+
 func (h *CLICommands) cmdGroupList() error {
 	b, err := ReadFromURL("http://" + *h.ServerAddr + "/groups/list")
 	if err != nil {
@@ -173,7 +187,7 @@ func (h *CLICommands) cmdGroupList() error {
 	}
 
 	table := table.NewTable([]string{
-		"Group", "Nodes", "Slot", "Filtered", "Warn", "last candidate run", "candidate duration", "drain duration",
+		"Group", "Nodes", "Slot", "Filtered", "Warn", "last candidate run", "candidate duration", "last candidate(s)", "last candidate(s) at", "last candidates sort", "drain duration",
 	},
 		func(obj interface{}) []string {
 			item := obj.(groups.RunnerInfo)
@@ -199,8 +213,11 @@ func (h *CLICommands) cmdGroupList() error {
 				fmt.Sprintf("%v", candidateDataInfo.Slots),
 				fmt.Sprintf("%v", candidateDataInfo.FilteredOutCount),
 				fmt.Sprintf("%s", warn),
-				fmt.Sprintf("%v", candidateDataInfo.LastTime),
+				h.outputDurationOrTimestamp(candidateDataInfo.LastRunTime),
 				fmt.Sprintf("%v", candidateDataInfo.ProcessingDuration.String()),
+				strings.Join(candidateDataInfo.LastCandidates, ","),
+				h.outputDurationOrTimestamp(candidateDataInfo.LastCandidatesTime),
+				h.outputDurationOrTimestamp(candidateDataInfo.LastNodeIteratorTime),
 				fmt.Sprintf("%v", drainDataInfo.ProcessingDuration.String()),
 			}
 		})

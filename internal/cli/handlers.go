@@ -65,7 +65,7 @@ func (h *CLIHandlers) handleGroupsList(writer http.ResponseWriter, request *http
 // handleGroupsList list all groups
 func (h *CLIHandlers) handleGroupsGraphLast(writer http.ResponseWriter, request *http.Request) {
 	groupName := request.URL.Query().Get("group-name")
-	h.logger.Info("handleGroupsList", "path", request.URL.Path, "groupName", groupName)
+	h.logger.Info("handleGroupsGraphLast", "path", request.URL.Path, "groupName", groupName)
 
 	var group groups.RunnerInfo
 
@@ -76,6 +76,7 @@ func (h *CLIHandlers) handleGroupsGraphLast(writer http.ResponseWriter, request 
 	}
 
 	if group.Key == "" {
+		h.logger.Info("handleGroupsGraphLast group not found", "groupName", groupName)
 		writer.WriteHeader(http.StatusNotFound)
 		return
 	}

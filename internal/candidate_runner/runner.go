@@ -75,10 +75,14 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 		start := runner.clock.Now()
 
-		var dataInfo DataInfo
+		var dataInfo, previousDataInfo DataInfo
+		if previous, hasPrevious := info.Data.Get(CandidateRunnerInfoKey); hasPrevious {
+			previousDataInfo = previous.(DataInfo)
+			dataInfo.importLongLastingData(previousDataInfo)
+		}
 
 		defer func() {
-			dataInfo.LastTime = runner.clock.Now()
+			dataInfo.LastRunTime = runner.clock.Now()
 			dataInfo.ProcessingDuration = runner.clock.Now().Sub(start)
 			info.Data.Set(CandidateRunnerInfoKey, dataInfo)
 		}()
@@ -114,6 +118,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		dataInfo.FilteredOutCount = evaluatedCount - len(nodes)
 
 		// TODO think about adding tracing to the tree iterator/expander
+		var candidatesName []string
 		nodeProvider := runner.GetNodeIterator(nodes)
 	groupIteration:
 		for node, ok := nodeProvider.Next(); ok; node, ok = nodeProvider.Next() {
@@ -141,6 +146,8 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 				continue
 			}
 
+			candidatesName = append(candidatesName, node.Name)
+
 			if !runner.dryRun {
 				logForNode.Info("Adding drain candidate taint")
 				if _, errTaint := k8sclient.AddNLATaint(ctx, runner.client, node, runner.clock.Now(), k8sclient.TaintDrainCandidate); errTaint != nil {
@@ -155,7 +162,12 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 				break
 			}
 		}
+		if len(candidatesName) > 0 {
+			dataInfo.LastCandidates = candidatesName
+			dataInfo.LastCandidatesTime = runner.clock.Now()
+		}
 		dataInfo.lastNodeIterator = nodeProvider
+		dataInfo.LastNodeIteratorTime = runner.clock.Now()
 		runner.logger.V(logs.ZapDebug).Info("Remain slot after drain candidate analysis", "count", remainCandidateSlot)
 		dataInfo.Slots = fmt.Sprintf("%d/%d", remainCandidateSlot, runner.maxSimultaneousCandidates)
 
