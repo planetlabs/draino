@@ -324,6 +324,9 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 
 func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
 	infos := s.runnerInfoGetter.GetRunnerInfo()
+
+	// keep the metrics for two periods to make sure they are really not used.
+	cleanupPeriod := s.analysisPeriod * 2
 	for group, info := range infos {
 		rawCandidateRunnerInfo, exist := info.Data.Get(candidate_runner.CandidateRunnerInfoKey)
 		// In case the data doesn't exist yet, we'll skip this run and publish them the next time
@@ -341,8 +344,23 @@ func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
 		}
 		drainDataInfo := rawDrainRunnerInfo.(drain_runner.DataInfo)
 
-		groupRunnerLoopDuration.WithLabelValues(string(group), groups.DrainCandidateRunnerName).Set(float64(candidateDataInfo.ProcessingDuration.Microseconds()))
-		groupRunnerLoopDuration.WithLabelValues(string(group), groups.DrainRunnerName).Set(float64(drainDataInfo.ProcessingDuration.Microseconds()))
+		groupRunnerLoopDurationCleaner.SetAndPlanCleanup(float64(candidateDataInfo.ProcessingDuration.Microseconds()), []string{string(group), groups.DrainCandidateRunnerName}, false, cleanupPeriod, false)
+		groupRunnerLoopDurationCleaner.SetAndPlanCleanup(float64(drainDataInfo.ProcessingDuration.Microseconds()), []string{string(group), groups.DrainRunnerName}, false, cleanupPeriod, false)
+
+		candidateRunnerTags := []string{string(group)}
+		candidateRunnerTotalNodesCleaner.SetAndPlanCleanup(float64(candidateDataInfo.NodeCount), candidateRunnerTags, false, cleanupPeriod, false)
+		candidateRunnerFilteredOutNodesCleaner.SetAndPlanCleanup(float64(candidateDataInfo.FilteredOutCount), candidateRunnerTags, false, cleanupPeriod, false)
+		candidateRunnerTotalSlotsCleaner.SetAndPlanCleanup(float64(candidateDataInfo.Slots), candidateRunnerTags, false, cleanupPeriod, false)
+		candidateRunnerSimulationRejectionsCleaner.SetAndPlanCleanup(float64(len(candidateDataInfo.LastSimulationRejections)), candidateRunnerTags, false, cleanupPeriod, false)
+
+		var wasRateLimited float64
+		if candidateDataInfo.LastRunRateLimited {
+			wasRateLimited = 1.0
+		}
+		candidateRunnerRunRateLimitedCleaner.SetAndPlanCleanup(wasRateLimited, candidateRunnerTags, false, cleanupPeriod, false)
+
+		remainingSlots := candidateDataInfo.Slots - len(candidateDataInfo.CurrentCandidates)
+		candidateRunnerRemainingSlotsCleaner.SetAndPlanCleanup(float64(remainingSlots), candidateRunnerTags, false, cleanupPeriod, false)
 	}
 }
 

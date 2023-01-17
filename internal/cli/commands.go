@@ -3,14 +3,15 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/DataDog/compute-go/table"
 	"github.com/planetlabs/draino/internal/candidate_runner"
@@ -187,7 +188,7 @@ func (h *CLICommands) cmdGroupList() error {
 	}
 
 	table := table.NewTable([]string{
-		"Group", "Nodes", "Slot", "Filtered", "Warn", "last candidate run", "candidate duration", "last candidate(s)", "last candidate(s) at", "last candidates sort", "drain duration",
+		"Group", "Nodes", "Slot", "Filtered", "Simulation failed", "Warn", "last run aborted", "last candidate run", "candidate duration", "last candidate(s)", "last candidate(s) at", "last candidates sort", "drain duration",
 	},
 		func(obj interface{}) []string {
 			item := obj.(groups.RunnerInfo)
@@ -202,17 +203,27 @@ func (h *CLICommands) cmdGroupList() error {
 
 			warn := ""
 			if candidateDataInfo.NodeCount > 0 {
-				if !strings.HasPrefix(candidateDataInfo.Slots, "0") && candidateDataInfo.NodeCount > candidateDataInfo.FilteredOutCount {
+				// Show warning if there are free slots available and we have potential candidates that fail on the way to get the taint
+				if len(candidateDataInfo.CurrentCandidates) < candidateDataInfo.Slots && candidateDataInfo.NodeCount > candidateDataInfo.FilteredOutCount {
 					warn = "*"
 				}
 
 			}
+
+			lastRunAborted := ""
+			if candidateDataInfo.LastRunRateLimited {
+				lastRunAborted = "*"
+			}
+
+			remainingSlots := candidateDataInfo.Slots - len(candidateDataInfo.CurrentCandidates)
 			return []string{
 				string(item.Key),
 				fmt.Sprintf("%v", candidateDataInfo.NodeCount),
-				fmt.Sprintf("%v", candidateDataInfo.Slots),
+				fmt.Sprintf("%d/%d", remainingSlots, candidateDataInfo.Slots),
 				fmt.Sprintf("%v", candidateDataInfo.FilteredOutCount),
+				fmt.Sprintf("%v", candidateDataInfo.LastSimulationRejections),
 				fmt.Sprintf("%s", warn),
+				fmt.Sprintf("%s", lastRunAborted),
 				h.outputDurationOrTimestamp(candidateDataInfo.LastRunTime),
 				fmt.Sprintf("%v", candidateDataInfo.ProcessingDuration.String()),
 				strings.Join(candidateDataInfo.LastCandidates, ","),

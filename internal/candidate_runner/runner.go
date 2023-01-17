@@ -76,6 +76,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		start := runner.clock.Now()
 
 		var dataInfo, previousDataInfo DataInfo
+		dataInfo.Slots = runner.maxSimultaneousCandidates
 		if previous, hasPrevious := info.Data.Get(CandidateRunnerInfoKey); hasPrevious {
 			previousDataInfo = previous.(DataInfo)
 			dataInfo.importLongLastingData(previousDataInfo)
@@ -106,8 +107,8 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 		// filter nodes that are already candidate
 		nodes, alreadyCandidateNodes, maxReached := runner.checkAlreadyCandidates(nodes)
+		dataInfo.CurrentCandidates = utils.NodesNames(alreadyCandidateNodes)
 		if maxReached {
-			dataInfo.Slots = fmt.Sprintf("0/%d", runner.maxSimultaneousCandidates)
 			runner.logger.Info("Max candidate already reached", "count", runner.maxSimultaneousCandidates, "nodes", strings.Join(utils.NodesNames(alreadyCandidateNodes), ","))
 			return
 		}
@@ -128,14 +129,17 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 			if len(errDrainSimulation) > 0 {
 				for _, e := range errDrainSimulation {
 					if k8sclient.IsClientSideRateLimiting(e) {
+						dataInfo.LastRunRateLimited = true
 						logForNode.Info("Not exploring the group further: simulation rate limited")
 						break groupIteration
 					}
 				}
+				dataInfo.LastSimulationRejections = append(dataInfo.LastSimulationRejections, node.Name)
 				logForNode.Error(errDrainSimulation[0], "Failed to simulate drain")
 				continue
 			}
 			if !canDrain {
+				dataInfo.LastSimulationRejections = append(dataInfo.LastSimulationRejections, node.Name)
 				logForNode.Info("Rejected by drain simulation", "reason", strings.Join(reasons, ";"))
 				continue
 			}
@@ -169,7 +173,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		dataInfo.lastNodeIterator = nodeProvider
 		dataInfo.LastNodeIteratorTime = runner.clock.Now()
 		runner.logger.V(logs.ZapDebug).Info("Remain slot after drain candidate analysis", "count", remainCandidateSlot)
-		dataInfo.Slots = fmt.Sprintf("%d/%d", remainCandidateSlot, runner.maxSimultaneousCandidates)
+		dataInfo.CurrentCandidates = append(dataInfo.CurrentCandidates, candidatesName...)
 
 	}, runner.runEvery)
 	return nil
