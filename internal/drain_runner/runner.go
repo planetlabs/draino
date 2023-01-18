@@ -2,9 +2,12 @@ package drain_runner
 
 import (
 	"context"
+	"fmt"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	"errors"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
@@ -46,7 +49,7 @@ type drainRunner struct {
 	drainBuffer         drainbuffer.DrainBuffer
 	suppliedConditions  []kubernetes.SuppliedCondition
 
-	preprocessors []DrainPreProzessor
+	preprocessors []DrainPreProcessor
 }
 
 func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
@@ -160,7 +163,16 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 
 	// Checking pre-activities
 	kubernetes.LogrForVerboseNode(runner.logger, candidate, "Node is candidate for drain, checking pre-activities")
-	allPreprocessorsDone := runner.checkPreprocessors(ctx, candidate)
+	allPreprocessorsDone, shouldAbort, err := runner.checkPreprocessors(ctx, candidate)
+	if shouldAbort {
+		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Error while waiting fro pre conditions: %v", err)
+		newNode, err := runner.updateRetryWallOnCandidate(ctx, candidate, fmt.Sprintf("pre-conditions failed %v", err))
+		if err != nil {
+			return err
+		}
+		_, err = k8sclient.RemoveNLATaint(ctx, runner.client, newNode)
+		return err
+	}
 	if !allPreprocessorsDone {
 		loggerForNode.Info("waiting for preprocessors to be done before draining", "node", candidate.Name)
 		return nil
@@ -168,7 +180,6 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 
 	loggerForNode.Info("start draining")
 	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
-	var err error
 	candidate, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDraining)
 	if err != nil {
 		return err
@@ -179,7 +190,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	var errRefresh error
 	candidate, errRefresh = runner.refreshNode(ctx, candidate)
 	if errRefresh != nil {
-		if errors.IsNotFound(errRefresh) {
+		if apierrors.IsNotFound(errRefresh) {
 			loggerForNode.Info("node has been deleted while we were waiting for the drain to complete")
 			CounterDrainedNodes(candidate, DrainedNodeResultSucceeded, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), "node_deleted")
 			return nil
@@ -213,24 +224,30 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	return nil
 }
 
-func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *corev1.Node) bool {
-	span, ctx := tracer.StartSpanFromContext(ctx, "RunDrainPreprocessors")
+func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *corev1.Node) (allDone bool, shouldAbort bool, errRes error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "CheckDrainPreprocessors")
 	defer span.Finish()
 
-	allPreprocessorsDone := true
+	allDone = true
 	for _, pre := range runner.preprocessors {
 		done, err := pre.IsDone(ctx, candidate)
 		if err != nil {
-			allPreprocessorsDone = false
+			if errors.As(err, &PreProcessorFatalError{}) {
+				runner.logger.Error(err, "cannot finish pre-processing node, aborting", "node", candidate.Name, "preprocessor", pre.GetName())
+				shouldAbort = true
+				errRes = err
+				return
+			}
+			allDone = false
 			runner.logger.Error(err, "failed during preprocessor evaluation", "preprocessor", pre.GetName(), "node", candidate.Name)
 			continue
 		}
 		if !done {
 			runner.logger.Info("preprocessor still pending", "node", candidate.Name, "preprocessor", pre.GetName())
-			allPreprocessorsDone = false
+			allDone = false
 		}
 	}
-	return allPreprocessorsDone
+	return
 }
 
 func (runner *drainRunner) refreshNode(ctx context.Context, node *corev1.Node) (refreshedNode *corev1.Node, err error) {

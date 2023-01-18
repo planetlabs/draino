@@ -422,7 +422,14 @@ func (d *DrainSchedules) handleDrainFailure(ctx context.Context, sched *schedule
 }
 
 func (d *DrainSchedules) hasPreprovisioningAnnotation(node *v1.Node) bool {
-	return node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningAnnotationValue || (d.preprovisioningConfiguration.AllNodesByDefault && !(node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningFalseAnnotationValue))
+	return HasPreprovisioningAnnotation(node, d.preprovisioningConfiguration.AllNodesByDefault)
+}
+
+func HasPreprovisioningAnnotation(node *v1.Node, allNodesByDefault bool) bool {
+	if node.Annotations == nil {
+		return allNodesByDefault
+	}
+	return node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningAnnotationValue || (allNodesByDefault && !(node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningFalseAnnotationValue))
 }
 
 type AlreadyScheduledError struct {

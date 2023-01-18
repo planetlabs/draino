@@ -221,6 +221,10 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 
 	var errors []error
 	for _, node := range nodes {
+		// We don't want to mutate the node while it's in the draining phase
+		if _, exist := k8sclient.GetNLATaint(node); exist {
+			continue
+		}
 		var err error
 		if val, exist := node.Annotations[drainRetryFailedAnnotationKey]; exist && val == drainRetryRestartAnnotationValue {
 			if runner.retryWall.GetDrainRetryAttemptsCount(node) != 0 {
@@ -231,6 +235,16 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 			}
 			if errAnnotation := kubernetes.PatchDeleteNodeAnnotationKeyCR(ctx, runner.client, node, drainRetryFailedAnnotationKey); errAnnotation != nil {
 				errors = append(errors, fmt.Errorf("cannot remove retry wall annotation from node '%s': %v", node.Name, errAnnotation))
+			}
+
+			// At this point we have a node that used to be a drain candidate, but the drain failed at some point.
+			// Now, the user want's to reset everything to start a new drain attempt, so we are also resetting the node replacement pre process.
+			_, exist := node.Annotations[kubernetes.NodeLabelKeyReplaceRequest]
+			if exist {
+				err = kubernetes.PatchDeleteNodeLabelKeyCR(ctx, runner.client, node, kubernetes.NodeLabelKeyReplaceRequest)
+				if err != nil {
+					errors = append(errors, err)
+				}
 			}
 		}
 	}

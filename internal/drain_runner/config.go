@@ -33,7 +33,7 @@ type Config struct {
 
 	// With defaults
 	clock         clock.Clock
-	preprocessors []DrainPreProzessor
+	preprocessors []DrainPreProcessor
 	rerunEvery    time.Duration
 }
 
@@ -41,7 +41,7 @@ type Config struct {
 func NewConfig() *Config {
 	return &Config{
 		clock:         clock.RealClock{},
-		preprocessors: make([]DrainPreProzessor, 0),
+		preprocessors: make([]DrainPreProcessor, 0),
 		rerunEvery:    time.Second,
 	}
 }
@@ -91,7 +91,7 @@ func WithLogger(logger logr.Logger) WithOption {
 	}
 }
 
-func WithPreprocessors(pre ...DrainPreProzessor) WithOption {
+func WithPreprocessors(pre ...DrainPreProcessor) WithOption {
 	return func(conf *Config) {
 		conf.preprocessors = append(conf.preprocessors, pre...)
 	}

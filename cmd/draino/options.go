@@ -87,6 +87,8 @@ type Options struct {
 	drainRateLimitQPS   float32
 	drainRateLimitBurst int
 
+	waitBeforeDraining time.Duration
+
 	// Which ratio of the overall kube client rate limiting should be used by the drain simulation
 	simulationRateLimitingRatio float32
 
@@ -141,6 +143,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.groupRunnerPeriod, "group-runner-period", 10*time.Second, "Period for running the group runner")
 	fs.DurationVar(&opt.podWarmupDelayExtension, "pod-warmup-delay-extension", 30*time.Second, "Extra delay given to the pod to complete is warmup phase (all containers have passed their startProbes)")
 	fs.DurationVar(&opt.eventAggregationPeriod, "event-aggregation-period", 15*time.Minute, "Period for event generation on kubernetes object.")
+	fs.DurationVar(&opt.waitBeforeDraining, "wait-before-draining", 30*time.Second, "Time to wait between moving a node in candidate status and starting the actual drain.")
 
 	fs.StringSliceVar(&opt.nodeLabels, "node-label", []string{}, "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times")
 	fs.StringSliceVar(&opt.doNotEvictPodControlledBy, "do-not-evict-pod-controlled-by", []string{"", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet},

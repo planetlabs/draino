@@ -21,11 +21,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-logr/logr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/oklog/run"
 	"go.opencensus.io/stats"
@@ -313,10 +314,26 @@ type LabelPatch struct {
 	} `json:"metadata"`
 }
 
+func (l LabelPatch) Type() types.PatchType {
+	return types.MergePatchType
+}
+
+func (l LabelPatch) Data(obj client.Object) ([]byte, error) {
+	return json.Marshal(l)
+}
+
 type LabelDeletePatch struct {
 	Metadata struct {
 		Labels map[string]interface{} `json:"labels"`
 	} `json:"metadata"`
+}
+
+func (l LabelDeletePatch) Type() types.PatchType {
+	return types.MergePatchType
+}
+
+func (l LabelDeletePatch) Data(obj client.Object) ([]byte, error) {
+	return json.Marshal(l)
 }
 
 func PatchNode(ctx context.Context, kclient kubernetes.Interface, nodeName string, patch interface{}) error {
@@ -348,6 +365,18 @@ func PatchNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeNa
 	var labelPatch LabelPatch
 	labelPatch.Metadata.Labels = map[string]string{key: value}
 	return PatchNode(ctx, kclient, nodeName, labelPatch)
+}
+
+func PatchNodeLabelKeyCR(ctx context.Context, client client.Client, node *core.Node, key string, value string) error {
+	var labelPatch LabelPatch
+	labelPatch.Metadata.Labels = map[string]string{key: value}
+	return PatchNodeCR(ctx, client, node, labelPatch)
+}
+
+func PatchDeleteNodeLabelKeyCR(ctx context.Context, client client.Client, node *core.Node, key string) error {
+	var labelDeletePatch LabelDeletePatch
+	labelDeletePatch.Metadata.Labels = map[string]interface{}{key: nil}
+	return PatchNodeCR(ctx, client, node, labelDeletePatch)
 }
 
 func PatchDeleteNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string) error {

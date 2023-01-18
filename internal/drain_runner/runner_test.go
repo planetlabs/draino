@@ -47,7 +47,7 @@ func TestDrainRunner(t *testing.T) {
 		Name          string
 		Key           groups.GroupKey
 		Node          *corev1.Node
-		Preprocessors []DrainPreProzessor
+		Preprocessors []DrainPreProcessor
 		Drainer       kubernetes.Drainer
 		Filter        filters.Filter
 
@@ -94,7 +94,7 @@ func TestDrainRunner(t *testing.T) {
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
 			Drainer:         &kubernetes.NoopCordonDrainer{},
-			Preprocessors:   []DrainPreProzessor{&testPreprocessor{isDone: false}},
+			Preprocessors:   []DrainPreProcessor{&testPreprocessor{isDone: false}},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrainCandidate,
 			ExpectedRetries: 0,
@@ -104,7 +104,7 @@ func TestDrainRunner(t *testing.T) {
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
 			Drainer:         &kubernetes.NoopCordonDrainer{},
-			Preprocessors:   []DrainPreProzessor{&testPreprocessor{isDone: true}},
+			Preprocessors:   []DrainPreProcessor{&testPreprocessor{isDone: true}},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrained,
 			ExpectedRetries: 0,
@@ -124,7 +124,7 @@ func TestDrainRunner(t *testing.T) {
 			},
 			Filter:         filters.NewNodeWithLabelFilter(nodeLabelsFilterFunc),
 			Drainer:        &kubernetes.NoopCordonDrainer{},
-			Preprocessors:  []DrainPreProzessor{&testPreprocessor{isDone: true}},
+			Preprocessors:  []DrainPreProcessor{&testPreprocessor{isDone: true}},
 			ShoulHaveTaint: false,
 		},
 	}

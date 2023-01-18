@@ -19,13 +19,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/planetlabs/draino/internal/diagnostics"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/planetlabs/draino/internal/diagnostics"
 
 	"github.com/DataDog/compute-go/controllerruntime"
 	"github.com/DataDog/compute-go/infraparameters"
@@ -533,7 +534,10 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithKubeClient(mgr.GetClient()),
 		drain_runner.WithClock(&clock.RealClock{}),
 		drain_runner.WithDrainer(drainer),
-		drain_runner.WithPreprocessors(), // TODO when we will add the pre-provisioning pre-processor
+		drain_runner.WithPreprocessors(
+			drain_runner.NewWaitTimePreprocessor(options.waitBeforeDraining),
+			drain_runner.NewNodeReplacementPreProcessor(mgr.GetClient(), options.preprovisioningActivatedByDefault, mgr.GetLogger()),
+		),
 		drain_runner.WithRerun(options.groupRunnerPeriod),
 		drain_runner.WithRetryWall(retryWall),
 		drain_runner.WithLogger(mgr.GetLogger()),

@@ -22,7 +22,7 @@ type FakeOptions struct {
 	// Chan is used to start and keep the informers running
 	Chan          chan struct{}
 	ClientWrapper *k8sclient.FakeClientWrapper
-	Preprocessors []DrainPreProzessor
+	Preprocessors []DrainPreProcessor
 	Logger        *logr.Logger
 	RerunEvery    time.Duration
 	Filter        filters.Filter
@@ -43,7 +43,7 @@ func (opts *FakeOptions) ApplyDefaults() error {
 		opts.Chan = make(chan struct{})
 	}
 	if opts.Preprocessors == nil {
-		opts.Preprocessors = make([]DrainPreProzessor, 0)
+		opts.Preprocessors = make([]DrainPreProcessor, 0)
 	}
 	if opts.Logger == nil {
 		discard := logr.Discard()
