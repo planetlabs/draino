@@ -507,7 +507,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
-	keyGetter := groups.NewGroupKeyFromNodeMetadata(strings.Split(options.drainGroupLabelKey, ","), []string{kubernetes.DrainGroupAnnotation}, kubernetes.DrainGroupOverrideAnnotation)
+	keyGetter := groups.NewGroupKeyFromNodeMetadata(mgr.GetClient(), mgr.GetLogger(), eventRecorder, indexer, store, strings.Split(options.drainGroupLabelKey, ","), []string{kubernetes.DrainGroupAnnotation}, kubernetes.DrainGroupOverrideAnnotation)
 
 	filterFactory, err := filters.NewFactory(
 		filters.WithLogger(mgr.GetLogger()),
@@ -584,6 +584,11 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.nodeLabelFilter, store.HasSynced, options.groupRunnerPeriod)
 	if err = groupRegistry.SetupWithManager(mgr); err != nil {
 		logger.Error(err, "failed to setup groupRegistry")
+		return err
+	}
+	groupFromPod := groups.NewGroupFromPod(mgr.GetClient(), mgr.GetLogger(), keyGetter, filtersDef.drainPodFilter, store.HasSynced)
+	if err = groupFromPod.SetupWithManager(mgr); err != nil {
+		logger.Error(err, "failed to setup groupFromPod")
 		return err
 	}
 

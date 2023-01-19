@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,6 +68,15 @@ func (h *CLICommands) buildGroupCmd() *cobra.Command {
 			return h.cmdGroupList()
 		},
 	}
+	groupNodesCmd := &cobra.Command{
+		Use:        "nodes",
+		SuggestFor: []string{"nodes"},
+		Args:       cobra.ExactArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return h.cmdGroupNodes()
+		},
+	}
+
 	groupGraphCmd := &cobra.Command{
 		Use:        "graph",
 		SuggestFor: []string{"graph"},
@@ -83,7 +93,7 @@ func (h *CLICommands) buildGroupCmd() *cobra.Command {
 	}
 	groupGraphCmd.AddCommand(groupGraphLastCmd)
 
-	groupCmd.AddCommand(groupListCmd, groupGraphCmd)
+	groupCmd.AddCommand(groupListCmd, groupNodesCmd, groupGraphCmd)
 	return groupCmd
 }
 
@@ -169,6 +179,61 @@ func (h *CLICommands) outputDurationOrTimestamp(t time.Time) string {
 		return duration.ShortHumanDuration(time.Since(t))
 	}
 	return t.Format(time.RFC3339)
+}
+
+func (h *CLICommands) cmdGroupNodes() error {
+	params := url.Values{}
+	params.Add("group-name", h.groupName)
+	b, err := ReadFromURL("http://" + *h.ServerAddr + "/groups/nodes?" + params.Encode())
+	if err != nil {
+		return err
+	}
+
+	if h.outputFormat == formatJSON {
+		fmt.Printf("%s", string(b))
+		return nil
+	}
+
+	var result []diagnostics.NodeDiagnostics
+	if err := json.Unmarshal(b, &result); err != nil {
+		return err
+	}
+
+	table := table.NewTable([]string{
+		"Node", "Namespace", "NodeGroup", "Zone", "Taint", "FilteredOut", "Retry", "Retry_after", "Conditions", "StabilityPeriod", "CanDrain",
+	}, func(obj interface{}) []string {
+		item := obj.(diagnostics.NodeDiagnostics)
+
+		retryCount := "-"
+		retryAfter := "-"
+		if item.Retry != nil {
+			retryCount = strconv.Itoa(item.Retry.RetryCount)
+			retryAfter = item.Retry.NextAttemptAfter.Format(time.RFC3339)
+		}
+		var conditions []string
+		for _, c := range item.Conditions {
+			conditions = append(conditions, string(c.Type))
+		}
+		return []string{
+			item.Node,
+			item.Namespace,
+			item.Nodegroup,
+			item.Zone,
+			item.TaintNLA,
+			strconv.FormatBool(!item.Filters.Keep),
+			retryCount,
+			retryAfter,
+			strings.Join(conditions, ","),
+			strconv.FormatBool(item.StabilityPeriodOk),
+			strconv.FormatBool(item.DrainSimulation.CanDrain),
+		}
+	})
+	for _, s := range result {
+		table.Add(s)
+	}
+	h.tableOutputParams.Apply(table)
+	table.Display(os.Stdout)
+	return nil
 }
 
 func (h *CLICommands) cmdGroupList() error {

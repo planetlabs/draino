@@ -61,11 +61,14 @@ type candidateRunner struct {
 	drainSimulator      drain.DrainSimulator
 }
 
+func (runner *candidateRunner) GetNodes(ctx context.Context, key groups.GroupKey) ([]*corev1.Node, error) {
+	return index.GetFromIndex[corev1.Node](ctx, runner.sharedIndexInformer, groups.SchedulingGroupIdx, string(key))
+}
+
 func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 	ctx, cancel := context.WithCancel(info.Context)
 	// TODO if we add metrics associated with that key, when the group is closed we should purge all the series associated with that key (cleanup-gauges with groupKey=...)?
 	runner.logger = runner.logger.WithValues("groupKey", info.Key)
-
 	go runner.runCleanupWithContext(ctx, info)
 
 	// run an endless loop until there are no drain candidates left
@@ -88,7 +91,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 			info.Data.Set(CandidateRunnerInfoKey, dataInfo)
 		}()
 
-		nodes, err := index.GetFromIndex[corev1.Node](ctx, runner.sharedIndexInformer, groups.SchedulingGroupIdx, string(info.Key))
+		nodes, err := runner.GetNodes(ctx, info.Key)
 		// in case of an error we'll just try it again
 		if err != nil {
 			runner.logger.Error(err, "cannot get nodes for group")

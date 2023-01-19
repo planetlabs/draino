@@ -2,11 +2,13 @@ package groups
 
 import (
 	"context"
+	"github.com/go-logr/zapr"
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"go.uber.org/zap"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -51,7 +53,7 @@ var _ RunnerFactory = &TestRunnerFactory{}
 func TestNewGroupRegistry(t *testing.T) {
 
 	RegisterMetrics(prometheus.NewRegistry())
-
+	testLogger := zapr.NewLogger(zap.NewNop())
 	tests := []struct {
 		name                  string
 		drainFactory          RunnerFactory
@@ -64,7 +66,7 @@ func TestNewGroupRegistry(t *testing.T) {
 			name:                  "test1",
 			drainFactory:          NewTestRunnerFactory(),
 			drainCandidateFactory: NewTestRunnerFactory(),
-			keyGetter:             NewGroupKeyFromNodeMetadata([]string{"key"}, nil, ""),
+			keyGetter:             NewGroupKeyFromNodeMetadata(nil, testLogger, kubernetes.NoopEventRecorder{}, nil, nil, []string{"key"}, nil, ""),
 			runCount: map[GroupKey]int{
 				"g1": 1,
 				"g2": 1,
@@ -94,8 +96,6 @@ func TestNewGroupRegistry(t *testing.T) {
 			},
 		},
 	}
-
-	testLogger := logr.New(logr.Discard().GetSink())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -38,6 +38,7 @@ func (c *CLIHandlers) Initialize(logger logr.Logger,
 func (c *CLIHandlers) RegisterRoute(m *mux.Router) {
 	sg := m.PathPrefix("/groups").Subrouter() //Handler(groupRouter)
 	sg.HandleFunc("/list", c.handleGroupsList)
+	sg.HandleFunc("/nodes", c.handleGroupsNodes)
 	sg.HandleFunc("/graph/last", c.handleGroupsGraphLast)
 
 	sn := m.PathPrefix("/nodes").Subrouter() //Handler(groupRouter)
@@ -53,20 +54,62 @@ func (h *CLIHandlers) handleGroupsList(writer http.ResponseWriter, request *http
 		groups = append(groups, v)
 	}
 
-	writer.WriteHeader(http.StatusOK)
 	data, err := json.Marshal(groups)
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	writer.WriteHeader(http.StatusOK)
 	writer.Write(data)
 }
 
-// handleGroupsList list all groups
+// handleGroupsNodes display the list of nodes (and diagnostics) associated with a group
+func (h *CLIHandlers) handleGroupsNodes(writer http.ResponseWriter, request *http.Request) {
+	groupName := request.URL.Query().Get("group-name")
+	h.logger.Info("handleGroupsNodes", "path", request.URL.Path, "groupName", groupName)
+
+	nodes, err := h.candidateInfo.GetNodes(context.Background(), groups.GroupKey(groupName))
+	if err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	var result []interface{}
+	for _, n := range nodes {
+		// Here we are potentially making a lot of calls to layers like drainSimulation that could end up into rate limiting behind the scene
+		// If we see an increasing usage (slack bot, or diagnostic service) of this service, we might need to rate limit the access to the diagnostics (or part of it) function
+		// to ensure that regular operations still have tokens to operate.
+		// Let's note that at the same time most of the layers have caches and that diagnostics contribute to cache warmup.
+		result = append(result, h.diagnostics.GetNodeDiagnostic(context.Background(), n.Name))
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writer.WriteHeader(http.StatusOK)
+	writer.Write(data)
+}
+
+// handleGroupsGraphLast display the last sortingTree of the group as a graph
 func (h *CLIHandlers) handleGroupsGraphLast(writer http.ResponseWriter, request *http.Request) {
 	groupName := request.URL.Query().Get("group-name")
 	h.logger.Info("handleGroupsGraphLast", "path", request.URL.Path, "groupName", groupName)
 
+	candidateRunnerInfo, ok := h.GetCandidateRunnerInfo(writer, groupName)
+	if !ok {
+		return
+	}
+
+	data, err := json.Marshal(candidateRunnerInfo.GetLastNodeIteratorGraph(true))
+	if err != nil {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writer.WriteHeader(http.StatusOK)
+	writer.Write(data)
+}
+
+func (h *CLIHandlers) GetCandidateRunnerInfo(writer http.ResponseWriter, groupName string) (candidate_runner.CandidateRunnerInfo, bool) {
 	var group groups.RunnerInfo
 
 	for k, v := range h.keysGetter.GetRunnerInfo() {
@@ -78,33 +121,26 @@ func (h *CLIHandlers) handleGroupsGraphLast(writer http.ResponseWriter, request 
 	if group.Key == "" {
 		h.logger.Info("handleGroupsGraphLast group not found", "groupName", groupName)
 		writer.WriteHeader(http.StatusNotFound)
-		return
+		return nil, false
 	}
 
 	if group.Data == nil {
 		writer.WriteHeader(http.StatusNoContent)
-		return
+		return nil, false
 	}
 
 	di, ok := group.Data.Get(candidate_runner.CandidateRunnerInfoKey)
 	if !ok {
 		writer.WriteHeader(http.StatusNoContent)
-		return
+		return nil, false
 	}
 
 	candidateRunnerInfo, ok := (di).(candidate_runner.CandidateRunnerInfo)
 	if !ok {
 		writer.WriteHeader(http.StatusInternalServerError)
-		return
+		return nil, false
 	}
-
-	writer.WriteHeader(http.StatusOK)
-	data, err := json.Marshal(candidateRunnerInfo.GetLastNodeIteratorGraph(true))
-	if err != nil {
-		writer.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	writer.Write(data)
+	return candidateRunnerInfo, true
 }
 
 // handleGroupsList list all groups
@@ -114,11 +150,11 @@ func (h *CLIHandlers) handleNodesDiagnostics(writer http.ResponseWriter, request
 
 	result := h.diagnostics.GetNodeDiagnostic(context.Background(), nodeName)
 
-	writer.WriteHeader(http.StatusOK)
 	data, err := json.Marshal(result)
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	writer.WriteHeader(http.StatusOK)
 	writer.Write(data)
 }

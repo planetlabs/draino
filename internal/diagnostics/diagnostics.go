@@ -10,6 +10,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -58,7 +59,20 @@ func (diag *Diagnostics) GetNodeDiagnostic(ctx context.Context, nodeName string)
 	var errs []error
 	dsr.CanDrain, dsr.Reasons, errs = diag.drainSimulator.SimulateDrain(ctx, &node)
 	dsr.Errors = utils.AsInterfaces(errs)
+	ng := node.Labels["nodegroups.datadoghq.com/name"]
+	ngns := node.Labels["nodegroups.datadoghq.com/namespace"]
+	zone := node.Labels["topology.ebs.csi.aws.com/zone"]
+
+	nlaTaint := ""
+	if v, hasTaint := k8sclient.GetNLATaint(&node); hasTaint {
+		nlaTaint = v.Value
+	}
 	return NodeDiagnostics{
+		Node:              node.Name,
+		Nodegroup:         ng,
+		Namespace:         ngns,
+		Zone:              zone,
+		TaintNLA:          nlaTaint,
 		GroupKey:          string(groupKey),
 		Filters:           diag.filter.FilterNode(ctx, &node).OnlyFailingChecks(),
 		Retry:             diag.getRetryDiagnostics(&node),
@@ -100,12 +114,17 @@ type DrainBufferDiagnostics struct {
 }
 
 type NodeDiagnostics struct {
-	Errors            []interface{}                  `json:",omitempty"`
-	GroupKey          string                         `json:",omitempty"`
-	DrainBufferAt     *time.Time                     `json:",omitempty"`
-	Filters           filters.FilterOutput           `json:",omitempty"`
-	Retry             *RetryDiagnostics              `json:",omitempty"`
-	Conditions        []kubernetes.SuppliedCondition `json:",omitempty"`
-	DrainSimulation   DrainSimulationResult          `json:",omitempty"`
-	StabilityPeriodOk bool
+	Node              string                         `json:"node"`
+	Nodegroup         string                         `json:"nodegroup,omitempty"`
+	Namespace         string                         `json:"namespace,omitempty"`
+	Zone              string                         `json:"zone,omitempty"`
+	TaintNLA          string                         `json:"taintNLA,omitempty"`
+	Errors            []interface{}                  `json:"errors,omitempty"`
+	GroupKey          string                         `json:"groupKey,omitempty"`
+	DrainBufferAt     *time.Time                     `json:"drainBufferAt,omitempty"`
+	Filters           filters.FilterOutput           `json:"filters,omitempty"`
+	Retry             *RetryDiagnostics              `json:"retry,omitempty"`
+	Conditions        []kubernetes.SuppliedCondition `json:"conditions,omitempty"`
+	DrainSimulation   DrainSimulationResult          `json:"drainSimulation,omitempty"`
+	StabilityPeriodOk bool                           `json:"stabilityPeriodOk"`
 }

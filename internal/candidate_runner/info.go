@@ -1,7 +1,9 @@
 package candidate_runner
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/planetlabs/draino/internal/groups"
 	"time"
 
 	"github.com/planetlabs/draino/internal/scheduler"
@@ -56,6 +58,7 @@ func (d *DataInfoForCleanupActivity) Import(i interface{}) error {
 // CandidateInfo Read only interface that is able to mimic he Candidate Runner behavior
 type CandidateInfo interface {
 	GetNodeIterator(node []*v1.Node) scheduler.ItemProvider[*v1.Node] // TODO consume this in a CLI command to display the tree
+	GetNodes(context.Context, groups.GroupKey) ([]*v1.Node, error)
 }
 
 // CandidateRunnerInfo Read only interface that gives access to runtime information collected in the DataInfo

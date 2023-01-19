@@ -24,13 +24,6 @@ func setClockForTest() clock.Clock {
 	return clockInTest
 }
 
-func Test_candidateRunner_checkNodesRetryWall(t *testing.T) {
-
-}
-
-func Test_candidateRunner_checkNodesTerminating(t *testing.T) {
-}
-
 func Test_candidateRunner_checkAlreadyCandidates(t *testing.T) {
 	setClockForTest()
 	n0 := &corev1.Node{}
