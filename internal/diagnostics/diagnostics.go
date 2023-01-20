@@ -54,6 +54,7 @@ func (diag *Diagnostics) GetNodeDiagnostic(ctx context.Context, nodeName string)
 	if diag.drainBuffer.IsReady() && !nextDrainBufferTime.IsZero() {
 		drainBufferAt = &nextDrainBufferTime
 	}
+	drainBufferConfig, _ := diag.drainBuffer.GetDrainBufferConfigurationDetails(ctx, &node)
 
 	var dsr DrainSimulationResult
 	var errs []error
@@ -77,6 +78,7 @@ func (diag *Diagnostics) GetNodeDiagnostic(ctx context.Context, nodeName string)
 		Filters:           diag.filter.FilterNode(ctx, &node).OnlyFailingChecks(),
 		Retry:             diag.getRetryDiagnostics(&node),
 		DrainBufferAt:     drainBufferAt,
+		DrainBufferConfig: drainBufferConfig,
 		DrainSimulation:   dsr,
 		Conditions:        kubernetes.GetNodeOffendingConditions(&node, diag.suppliedConditions),
 		StabilityPeriodOk: diag.stabilityPeriod.StabilityPeriodAcceptsDrain(ctx, &node, diag.clock.Now()),
@@ -114,17 +116,18 @@ type DrainBufferDiagnostics struct {
 }
 
 type NodeDiagnostics struct {
-	Node              string                         `json:"node"`
-	Nodegroup         string                         `json:"nodegroup,omitempty"`
-	Namespace         string                         `json:"namespace,omitempty"`
-	Zone              string                         `json:"zone,omitempty"`
-	TaintNLA          string                         `json:"taintNLA,omitempty"`
-	Errors            []interface{}                  `json:"errors,omitempty"`
-	GroupKey          string                         `json:"groupKey,omitempty"`
-	DrainBufferAt     *time.Time                     `json:"drainBufferAt,omitempty"`
-	Filters           filters.FilterOutput           `json:"filters,omitempty"`
-	Retry             *RetryDiagnostics              `json:"retry,omitempty"`
-	Conditions        []kubernetes.SuppliedCondition `json:"conditions,omitempty"`
-	DrainSimulation   DrainSimulationResult          `json:"drainSimulation,omitempty"`
-	StabilityPeriodOk bool                           `json:"stabilityPeriodOk"`
+	Node              string                                    `json:"node"`
+	Nodegroup         string                                    `json:"nodegroup,omitempty"`
+	Namespace         string                                    `json:"namespace,omitempty"`
+	Zone              string                                    `json:"zone,omitempty"`
+	TaintNLA          string                                    `json:"taintNLA,omitempty"`
+	Errors            []interface{}                             `json:"errors,omitempty"`
+	GroupKey          string                                    `json:"groupKey,omitempty"`
+	DrainBufferAt     *time.Time                                `json:"drainBufferAt,omitempty"`
+	DrainBufferConfig *kubernetes.MetadataSearch[time.Duration] `json:"drainBufferConfig,omitempty"`
+	Filters           filters.FilterOutput                      `json:"filters,omitempty"`
+	Retry             *RetryDiagnostics                         `json:"retry,omitempty"`
+	Conditions        []kubernetes.SuppliedCondition            `json:"conditions,omitempty"`
+	DrainSimulation   DrainSimulationResult                     `json:"drainSimulation,omitempty"`
+	StabilityPeriodOk bool                                      `json:"stabilityPeriodOk"`
 }

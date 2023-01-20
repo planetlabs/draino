@@ -25,9 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	"github.com/oklog/run"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
@@ -43,6 +42,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubernetestrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/k8s.io/client-go/kubernetes"
 )
@@ -400,7 +400,7 @@ func PatchNodeAnnotationKeyCR(ctx context.Context, client client.Client, node *c
 // GetAnnotationFromPodOrController check if an annotation is present on the pod or the associated controller object
 // Supported controller object:
 // - statefulset
-//
+// - deployment
 // Method made generic to be able to extend to deployments and other controllers later
 func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store RuntimeObjectStore) (value string, found bool) {
 	// Check directly on the pod and return if any value
@@ -487,5 +487,7 @@ func LogForVerboseNode(logger *zap.Logger, node *core.Node, msg string, fields .
 func LogrForVerboseNode(logger logr.Logger, node *core.Node, msg string, fields ...interface{}) {
 	if node.Annotations["draino/logs"] == "verbose" {
 		logger.Info(msg, append(fields, "node", node.Name))
+	} else {
+		logger.V(logs.ZapDebug).Info(msg, append(fields, "node", node.Name))
 	}
 }

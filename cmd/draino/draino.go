@@ -499,7 +499,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{}, filtersDef.drainPodFilter)
 
 	persistor := drainbuffer.NewConfigMapPersistor(cs.CoreV1().ConfigMaps(cfg.InfraParam.Namespace), options.drainBufferConfigMapName, cfg.InfraParam.Namespace)
-	drainBuffer := drainbuffer.NewDrainBuffer(ctx, persistor, clock.RealClock{}, mgr.GetLogger())
+	drainBuffer := drainbuffer.NewDrainBuffer(ctx, persistor, clock.RealClock{}, mgr.GetLogger(), eventRecorder, indexer, store, options.drainBuffer)
 	// The drain buffer can only be initialized when the manager client cache was started.
 	// Adding a custom runnable to the controller manager will make sure, that the initialization will be started as soon as possible.
 	if err := mgr.Add(getInitDrainBufferRunner(drainBuffer, &logger)); err != nil {

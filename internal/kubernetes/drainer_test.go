@@ -51,6 +51,7 @@ const (
 	statefulsetName = "coolStatefulSet"
 	deploymentName  = "coolDeployment"
 	kindDeployment  = "Deployment"
+	kindReplicaSet  = "ReplicaSet"
 )
 
 var (

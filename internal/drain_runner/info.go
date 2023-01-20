@@ -11,6 +11,7 @@ const (
 
 type DataInfo struct {
 	ProcessingDuration time.Duration
+	DrainBufferTill    time.Time
 }
 
 func (d *DataInfo) Import(i interface{}) error {

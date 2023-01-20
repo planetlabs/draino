@@ -3,6 +3,7 @@ package drain_runner
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/tools/record"
 	"time"
 
 	"k8s.io/client-go/kubernetes/fake"
@@ -68,7 +69,8 @@ func (opts *FakeOptions) ApplyDefaults() error {
 		fakeClient := fake.NewSimpleClientset()
 		configMapClient := fakeClient.CoreV1().ConfigMaps("default")
 		persistor := drainbuffer.NewConfigMapPersistor(configMapClient, "fake-buffer", "default")
-		opts.DrainBuffer = drainbuffer.NewDrainBuffer(context.Background(), persistor, opts.Clock, *opts.Logger)
+		recorder := kubernetes.NewEventRecorder(record.NewFakeRecorder(1000))
+		opts.DrainBuffer = drainbuffer.NewDrainBuffer(context.Background(), persistor, opts.Clock, *opts.Logger, recorder, nil, nil, kubernetes.DefaultDrainBuffer)
 	}
 	return nil
 }

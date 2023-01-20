@@ -176,7 +176,11 @@ func (h *CLICommands) outputDurationOrTimestamp(t time.Time) string {
 		return "NA"
 	}
 	if h.perferDuration {
-		return duration.ShortHumanDuration(time.Since(t))
+		now := time.Now()
+		if t.After(now) {
+			return "+" + duration.ShortHumanDuration(t.Sub(now))
+		}
+		return "-" + duration.ShortHumanDuration(time.Since(t))
 	}
 	return t.Format(time.RFC3339)
 }
@@ -200,7 +204,7 @@ func (h *CLICommands) cmdGroupNodes() error {
 	}
 
 	table := table.NewTable([]string{
-		"Node", "Namespace", "NodeGroup", "Zone", "Taint", "FilteredOut", "Retry", "Retry_after", "Conditions", "StabilityPeriod", "CanDrain",
+		"Node", "Namespace", "NodeGroup", "Zone", "Taint", "FilteredOut", "Retry", "Retry After", "Conditions", "StabilityPeriod", "Drain Buffer Cfg", "CanDrain",
 	}, func(obj interface{}) []string {
 		item := obj.(diagnostics.NodeDiagnostics)
 
@@ -209,6 +213,16 @@ func (h *CLICommands) cmdGroupNodes() error {
 		if item.Retry != nil {
 			retryCount = strconv.Itoa(item.Retry.RetryCount)
 			retryAfter = item.Retry.NextAttemptAfter.Format(time.RFC3339)
+		}
+		drainBufferCfg := "-"
+		if item.DrainBufferConfig != nil {
+			var values []string
+			for _, v := range item.DrainBufferConfig.ValuesWithoutDupe() {
+				values = append(values, duration.ShortHumanDuration(v))
+			}
+			if len(values) > 0 {
+				drainBufferCfg = strings.Join(values, ",")
+			}
 		}
 		var conditions []string
 		for _, c := range item.Conditions {
@@ -225,6 +239,7 @@ func (h *CLICommands) cmdGroupNodes() error {
 			retryAfter,
 			strings.Join(conditions, ","),
 			strconv.FormatBool(item.StabilityPeriodOk),
+			drainBufferCfg,
 			strconv.FormatBool(item.DrainSimulation.CanDrain),
 		}
 	})
@@ -253,7 +268,7 @@ func (h *CLICommands) cmdGroupList() error {
 	}
 
 	table := table.NewTable([]string{
-		"Group", "Nodes", "Slot", "Filtered", "Simulation failed", "Warn", "last run aborted", "last candidate run", "candidate duration", "last candidate(s)", "last candidate(s) at", "last candidates sort", "drain duration",
+		"Group", "Nodes", "Slot", "Filtered", "Simulation failed", "Warn", "Last Run Aborted", "Last Candidate Run", "Candidate Duration", "Last Candidate(s)", "Last Candidate(s) At", "Last Candidates Sort", "Drain Duration", "Drain Buffer",
 	},
 		func(obj interface{}) []string {
 			item := obj.(groups.RunnerInfo)
@@ -295,6 +310,7 @@ func (h *CLICommands) cmdGroupList() error {
 				h.outputDurationOrTimestamp(candidateDataInfo.LastCandidatesTime),
 				h.outputDurationOrTimestamp(candidateDataInfo.LastNodeIteratorTime),
 				fmt.Sprintf("%v", drainDataInfo.ProcessingDuration.String()),
+				h.outputDurationOrTimestamp(drainDataInfo.DrainBufferTill),
 			}
 		})
 

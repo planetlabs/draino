@@ -1,6 +1,8 @@
 package drainbuffer
 
 import (
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"k8s.io/client-go/tools/record"
 	"testing"
 	"time"
 
@@ -56,7 +58,8 @@ func TestDrainBuffer(t *testing.T) {
 			// initial setup
 			ctx, cancel := context.WithCancel(context.Background())
 			persistor := NewConfigMapPersistor(configMapClient, cmName, cmNS)
-			interf := NewDrainBuffer(ctx, persistor, tt.Clock, logger)
+			recorder := kubernetes.NewEventRecorder(record.NewFakeRecorder(1000))
+			interf := NewDrainBuffer(ctx, persistor, tt.Clock, logger, recorder, nil, nil, time.Second)
 			drainBuffer := interf.(*drainBufferImpl)
 			drainBuffer.Initialize(ctx)
 
@@ -72,7 +75,7 @@ func TestDrainBuffer(t *testing.T) {
 			ctx, cancel = context.WithCancel(context.Background())
 			defer cancel()
 			persistor = NewConfigMapPersistor(configMapClient, cmName, cmNS)
-			interf = NewDrainBuffer(ctx, persistor, tt.Clock, logger)
+			interf = NewDrainBuffer(ctx, persistor, tt.Clock, logger, recorder, nil, nil, time.Second)
 			drainBuffer = interf.(*drainBufferImpl)
 
 			// Move clock forward & trigger cleanup

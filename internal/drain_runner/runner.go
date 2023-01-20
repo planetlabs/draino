@@ -70,6 +70,7 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 		var drainInfo DataInfo
 		start := runner.clock.Now()
 		defer func() {
+			drainInfo.DrainBufferTill, _ = runner.drainBuffer.NextDrain(info.Key)
 			drainInfo.ProcessingDuration = runner.clock.Now().Sub(start)
 			info.Data.Set(DrainRunnerInfo, drainInfo)
 		}()
@@ -266,14 +267,25 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 	drainContext, cancel := context.WithTimeout(ctx, DrainTimeout)
 	defer cancel()
 
-	err := runner.drainer.Drain(drainContext, candidate)
+	// We must capture the drainBuffer configuration before starting the drain
+	// because the values can be stored on the node OR on the pods. So we have to read from the pods
+	// before any eviction is performed.
+	drainBuffer, err := runner.drainBuffer.GetDrainBufferConfiguration(ctx, candidate)
+	if err != nil {
+		// we only log, worst case the default will be applied
+		runner.logger.Error(err, "Using default drainBuffer because we cannot retrieve the configuration for the node", "node", candidate.Name)
+	}
+	kubernetes.LogrForVerboseNode(runner.logger, candidate, "drainBuffer configuration", "drainBuffer", drainBuffer)
+
+	err = runner.drainer.Drain(drainContext, candidate)
 	if err != nil {
 		return err
 	}
+	kubernetes.LogrForVerboseNode(runner.logger, candidate, "node was drained")
 
 	// We can ignore the error as it's only fired when the drain buffer is not initialized.
 	// This cannot happen as the main loop of the drain runner will be blocked in that case.
-	_ = runner.drainBuffer.StoreSuccessfulDrain(info.Key, 0)
+	_ = runner.drainBuffer.StoreSuccessfulDrain(info.Key, drainBuffer)
 	return nil
 }
 
