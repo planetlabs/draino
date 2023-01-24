@@ -3,14 +3,16 @@ package drain_runner
 import (
 	"context"
 	"fmt"
-	"k8s.io/client-go/tools/record"
 	"time"
+
+	"k8s.io/client-go/tools/record"
 
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
+	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
@@ -23,7 +25,7 @@ type FakeOptions struct {
 	// Chan is used to start and keep the informers running
 	Chan          chan struct{}
 	ClientWrapper *k8sclient.FakeClientWrapper
-	Preprocessors []DrainPreProcessor
+	Preprocessors []preprocessor.DrainPreProcessor
 	Logger        *logr.Logger
 	RerunEvery    time.Duration
 	Filter        filters.Filter
@@ -44,7 +46,7 @@ func (opts *FakeOptions) ApplyDefaults() error {
 		opts.Chan = make(chan struct{})
 	}
 	if opts.Preprocessors == nil {
-		opts.Preprocessors = make([]DrainPreProcessor, 0)
+		opts.Preprocessors = make([]preprocessor.DrainPreProcessor, 0)
 	}
 	if opts.Logger == nil {
 		discard := logr.Discard()

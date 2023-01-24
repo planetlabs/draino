@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/go-logr/zapr"
 	"testing"
 	"time"
 
+	"github.com/go-logr/zapr"
+
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
@@ -37,8 +39,8 @@ func (_ *testPreprocessor) GetName() string {
 	return "testPreprocessor"
 }
 
-func (p *testPreprocessor) IsDone(ctx context.Context, node *corev1.Node) (bool, error) {
-	return p.isDone, nil
+func (p *testPreprocessor) IsDone(ctx context.Context, node *corev1.Node) (bool, preprocessor.PreProcessNotDoneReason, error) {
+	return p.isDone, "", nil
 }
 
 func TestDrainRunner(t *testing.T) {
@@ -48,7 +50,7 @@ func TestDrainRunner(t *testing.T) {
 		Name          string
 		Key           groups.GroupKey
 		Node          *corev1.Node
-		Preprocessors []DrainPreProcessor
+		Preprocessors []preprocessor.DrainPreProcessor
 		Drainer       kubernetes.Drainer
 		Filter        filters.Filter
 
@@ -95,7 +97,7 @@ func TestDrainRunner(t *testing.T) {
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
 			Drainer:         &kubernetes.NoopCordonDrainer{},
-			Preprocessors:   []DrainPreProcessor{&testPreprocessor{isDone: false}},
+			Preprocessors:   []preprocessor.DrainPreProcessor{&testPreprocessor{isDone: false}},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrainCandidate,
 			ExpectedRetries: 0,
@@ -105,7 +107,7 @@ func TestDrainRunner(t *testing.T) {
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
 			Drainer:         &kubernetes.NoopCordonDrainer{},
-			Preprocessors:   []DrainPreProcessor{&testPreprocessor{isDone: true}},
+			Preprocessors:   []preprocessor.DrainPreProcessor{&testPreprocessor{isDone: true}},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrained,
 			ExpectedRetries: 0,
@@ -125,7 +127,7 @@ func TestDrainRunner(t *testing.T) {
 			},
 			Filter:         filters.NewNodeWithLabelFilter(nodeLabelsFilterFunc),
 			Drainer:        &kubernetes.NoopCordonDrainer{},
-			Preprocessors:  []DrainPreProcessor{&testPreprocessor{isDone: true}},
+			Preprocessors:  []preprocessor.DrainPreProcessor{&testPreprocessor{isDone: true}},
 			ShoulHaveTaint: false,
 		},
 	}

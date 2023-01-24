@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
 
 	"github.com/go-logr/logr"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
@@ -33,7 +34,7 @@ type Config struct {
 
 	// With defaults
 	clock         clock.Clock
-	preprocessors []DrainPreProcessor
+	preprocessors []preprocessor.DrainPreProcessor
 	rerunEvery    time.Duration
 }
 
@@ -41,7 +42,7 @@ type Config struct {
 func NewConfig() *Config {
 	return &Config{
 		clock:         clock.RealClock{},
-		preprocessors: make([]DrainPreProcessor, 0),
+		preprocessors: make([]preprocessor.DrainPreProcessor, 0),
 		rerunEvery:    time.Second,
 	}
 }
@@ -91,7 +92,7 @@ func WithLogger(logger logr.Logger) WithOption {
 	}
 }
 
-func WithPreprocessors(pre ...DrainPreProcessor) WithOption {
+func WithPreprocessors(pre ...preprocessor.DrainPreProcessor) WithOption {
 	return func(conf *Config) {
 		conf.preprocessors = append(conf.preprocessors, pre...)
 	}

@@ -1,4 +1,4 @@
-package drain_runner
+package pre_processor
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 		Node                     corev1.Node
 
 		ExpectedResult bool
-		ExpectErr      bool
+		ExpectedReason PreProcessNotDoneReason
 		ExpectLabel    bool
 	}{
 		{
@@ -37,7 +37,6 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ReplaceAllNodesByDefault: false,
 			Node:                     createNodeToReplace(nil, nil),
 			ExpectedResult:           true,
-			ExpectErr:                false,
 			ExpectLabel:              false,
 		},
 		{
@@ -45,7 +44,7 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ReplaceAllNodesByDefault: true,
 			Node:                     createNodeToReplace(nil, nil),
 			ExpectedResult:           false,
-			ExpectErr:                false,
+			ExpectedReason:           PreProcessNotDoneReasonProcessing,
 			ExpectLabel:              true,
 		},
 		{
@@ -53,7 +52,6 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ReplaceAllNodesByDefault: true,
 			Node:                     createNodeToReplace(&falseVal, nil),
 			ExpectedResult:           true,
-			ExpectErr:                false,
 			ExpectLabel:              false,
 		},
 		{
@@ -61,7 +59,7 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ReplaceAllNodesByDefault: false,
 			Node:                     createNodeToReplace(&trueVal, nil),
 			ExpectedResult:           false,
-			ExpectErr:                false,
+			ExpectedReason:           PreProcessNotDoneReasonProcessing,
 			ExpectLabel:              true,
 		},
 		{
@@ -69,7 +67,6 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ReplaceAllNodesByDefault: false,
 			Node:                     createNodeToReplace(&trueVal, &doneVal),
 			ExpectedResult:           true,
-			ExpectErr:                false,
 			ExpectLabel:              true,
 		},
 		{
@@ -77,7 +74,7 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ReplaceAllNodesByDefault: false,
 			Node:                     createNodeToReplace(&trueVal, &requestedVal),
 			ExpectedResult:           false,
-			ExpectErr:                false,
+			ExpectedReason:           PreProcessNotDoneReasonProcessing,
 			ExpectLabel:              true,
 		},
 		{
@@ -85,15 +82,15 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ReplaceAllNodesByDefault: false,
 			Node:                     createNodeToReplace(&trueVal, &unknownVal),
 			ExpectedResult:           false,
-			ExpectErr:                false,
+			ExpectedReason:           PreProcessNotDoneReasonProcessing,
 			ExpectLabel:              true,
 		},
 		{
 			Name:                     "Should return error if replacement failed",
 			ReplaceAllNodesByDefault: false,
 			Node:                     createNodeToReplace(&trueVal, &failedVal),
-			ExpectedResult:           true,
-			ExpectErr:                true,
+			ExpectedResult:           false,
+			ExpectedReason:           PreProcessNotDoneReasonFailure,
 			ExpectLabel:              true,
 		},
 	}
@@ -103,13 +100,10 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			client := fake.NewFakeClient(&tt.Node)
 			pre := NewNodeReplacementPreProcessor(client, tt.ReplaceAllNodesByDefault, logr.Discard())
 
-			res, err := pre.IsDone(context.Background(), tt.Node.DeepCopy())
+			res, reason, err := pre.IsDone(context.Background(), tt.Node.DeepCopy())
 			assert.Equal(t, tt.ExpectedResult, res)
-			if tt.ExpectErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
+			assert.Equal(t, tt.ExpectedReason, reason)
+			assert.NoError(t, err)
 
 			exist, err := hasNodeReplacementLabel(client, tt.Node.Name)
 			assert.NoError(t, err)

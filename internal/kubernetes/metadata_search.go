@@ -3,6 +3,8 @@ package kubernetes
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +22,7 @@ type MetadataSearch[T any] struct {
 }
 
 type MetadataSearchResultItem[T any] struct {
+	Key          string     `json:"key"`
 	Value        T          `json:"value"`
 	errorConv    error      // this is private because it can and shouldn't be serialized for diagnostics
 	ErrorConvStr string     `json:"errorConversion,omitempty"`
@@ -30,10 +33,48 @@ type MetadataSearchResultItem[T any] struct {
 	OnController bool       `json:"onController,omitempty"`
 }
 
-type MetadataGetterFunc func(object metav1.Object) map[string]string
+type MetadataGetterResult struct {
+	Key   string
+	Value string
+}
+type MetadataGetterFunc func(object metav1.Object, key string) (values []MetadataGetterResult, exist bool)
 
-func GetLabels(object metav1.Object) map[string]string      { return object.GetLabels() }
-func GetAnnotations(object metav1.Object) map[string]string { return object.GetAnnotations() }
+var GetExactLabel MetadataGetterFunc = func(object metav1.Object, key string) ([]MetadataGetterResult, bool) {
+	labels := object.GetLabels()
+	if labels == nil {
+		return nil, false
+	}
+	val, exist := labels[key]
+	return []MetadataGetterResult{{Key: key, Value: val}}, exist
+}
+
+var GetExactAnnotation MetadataGetterFunc = func(object metav1.Object, key string) ([]MetadataGetterResult, bool) {
+	annotations := object.GetAnnotations()
+	if annotations == nil {
+		return nil, false
+	}
+	val, exist := annotations[key]
+	return []MetadataGetterResult{{Key: key, Value: val}}, exist
+}
+
+var GetPrefixedAnnotation MetadataGetterFunc = func(object metav1.Object, prefix string) ([]MetadataGetterResult, bool) {
+	annotations := object.GetAnnotations()
+	if annotations == nil {
+		return nil, false
+	}
+
+	results := []MetadataGetterResult{}
+	for key, val := range annotations {
+		if strings.HasPrefix(key, prefix) {
+			results = append(results, MetadataGetterResult{
+				Key:   key,
+				Value: val,
+			})
+		}
+	}
+
+	return results, len(results) > 0
+}
 
 func NewSearch[T any](ctx context.Context, podIndexer index.PodIndexer, store RuntimeObjectStore, converter func(string) (T, error), node *core.Node, annotationKey string, stopIfFoundOnNode, stopIfFoundOnPod bool, metadataFunc MetadataGetterFunc) (*MetadataSearch[T], error) {
 	search := &MetadataSearch[T]{
@@ -65,42 +106,55 @@ func NewSearch[T any](ctx context.Context, podIndexer index.PodIndexer, store Ru
 	return search, nil
 }
 func (a *MetadataSearch[T]) processNode(node *core.Node) {
-	if a.metadataGetter(node) == nil {
-		return
-	}
-	var item MetadataSearchResultItem[T]
-	if valueStr, ok := a.metadataGetter(node)[a.Key]; ok {
-		item.setNode(node)
-		item.setValueAndError(a.converter(valueStr))
-		a.Result[valueStr] = append(a.Result[valueStr], item)
+	if values, ok := a.metadataGetter(node, a.Key); ok {
+		for _, val := range values {
+			var item MetadataSearchResultItem[T]
+			item.Key = val.Key
+			item.setNode(node)
+			item.setValueAndError(a.converter(val.Value))
+			a.Result[val.Value] = append(a.Result[val.Value], item)
+		}
 	}
 }
 
 func (a *MetadataSearch[T]) processPod(pod *core.Pod) {
-	if a.metadataGetter(pod) != nil {
-		var item MetadataSearchResultItem[T]
-		if valueStr, ok := a.metadataGetter(pod)[a.Key]; ok {
+	if values, ok := a.metadataGetter(pod, a.Key); ok {
+		for _, val := range values {
+			var item MetadataSearchResultItem[T]
+			item.Key = val.Key
 			item.setPod(pod)
-			item.setValueAndError(a.converter(valueStr))
-			a.Result[valueStr] = append(a.Result[valueStr], item)
-			if a.stopIfFoundOnPod {
-				return
-			}
+			item.setValueAndError(a.converter(val.Value))
+			a.Result[val.Value] = append(a.Result[val.Value], item)
+		}
+		if a.stopIfFoundOnPod {
+			return
 		}
 	}
 
 	if ctrl, found := GetControllerForPod(pod, a.store); found {
-		if a.metadataGetter(ctrl) == nil {
-			return
-		}
-		if valueStr, ok := a.metadataGetter(ctrl)[a.Key]; ok {
-			var item MetadataSearchResultItem[T]
-			item.setPod(pod)
-			item.OnController = true
-			item.setValueAndError(a.converter(valueStr))
-			a.Result[valueStr] = append(a.Result[valueStr], item)
+		if values, ok := a.metadataGetter(ctrl, a.Key); ok {
+			for _, val := range values {
+				var item MetadataSearchResultItem[T]
+				item.Key = val.Key
+				item.setPod(pod)
+				item.OnController = true
+				item.setValueAndError(a.converter(val.Value))
+				a.Result[val.Value] = append(a.Result[val.Value], item)
+			}
 		}
 	}
+}
+
+func (a *MetadataSearch[T]) Results() (out []MetadataSearchResultItem[T]) {
+	for _, v := range a.Result {
+		for _, item := range v {
+			if item.errorConv != nil {
+				continue
+			}
+			out = append(out, item)
+		}
+	}
+	return
 }
 
 func (a *MetadataSearch[T]) ValuesWithoutDupe() (out []T) {
@@ -150,7 +204,20 @@ func (i *MetadataSearchResultItem[T]) setValueAndError(value T, e error) {
 		i.ErrorConvStr = e.Error()
 	}
 }
+func (i *MetadataSearchResultItem[T]) GetItemId() string {
+	if i.NodeId != "" {
+		return i.NodeId
+	}
+	if i.PodId != "" {
+		prefix := ""
+		if i.OnController {
+			prefix = "ctrl-"
+		}
+		return prefix + i.PodId
+	}
+	return "not_available"
+}
 
 func SearchAnnotationFromNodeAndThenPodOrController[T any](ctx context.Context, podIndexer index.PodIndexer, store RuntimeObjectStore, converter func(string) (T, error), annotationKey string, node *core.Node, stopIfFoundOnNode, stopIfFoundOnPod bool) (*MetadataSearch[T], error) {
-	return NewSearch[T](ctx, podIndexer, store, converter, node, annotationKey, stopIfFoundOnPod, stopIfFoundOnNode, GetAnnotations)
+	return NewSearch(ctx, podIndexer, store, converter, node, annotationKey, stopIfFoundOnPod, stopIfFoundOnNode, GetExactAnnotation)
 }

@@ -43,6 +43,7 @@ import (
 	"github.com/planetlabs/draino/internal/cli"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/drain_runner"
+	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
@@ -535,8 +536,9 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithClock(&clock.RealClock{}),
 		drain_runner.WithDrainer(drainer),
 		drain_runner.WithPreprocessors(
-			drain_runner.NewWaitTimePreprocessor(options.waitBeforeDraining),
-			drain_runner.NewNodeReplacementPreProcessor(mgr.GetClient(), options.preprovisioningActivatedByDefault, mgr.GetLogger()),
+			preprocessor.NewWaitTimePreprocessor(options.waitBeforeDraining),
+			preprocessor.NewNodeReplacementPreProcessor(mgr.GetClient(), options.preprovisioningActivatedByDefault, mgr.GetLogger()),
+			preprocessor.NewPreActivitiesPreProcessor(indexer, store, mgr.GetLogger(), eventRecorderForDrainRunnerActivities, clock.RealClock{}, options.preActivityDefaultTimeout),
 		),
 		drain_runner.WithRerun(options.groupRunnerPeriod),
 		drain_runner.WithRetryWall(retryWall),

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"errors"
-
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -21,6 +19,7 @@ import (
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
+	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
@@ -49,7 +48,7 @@ type drainRunner struct {
 	drainBuffer         drainbuffer.DrainBuffer
 	suppliedConditions  []kubernetes.SuppliedCondition
 
-	preprocessors []DrainPreProcessor
+	preprocessors []preprocessor.DrainPreProcessor
 }
 
 func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
@@ -231,17 +230,16 @@ func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *co
 
 	allDone = true
 	for _, pre := range runner.preprocessors {
-		done, err := pre.IsDone(ctx, candidate)
+		done, reason, err := pre.IsDone(ctx, candidate)
 		if err != nil {
-			if errors.As(err, &PreProcessorFatalError{}) {
-				runner.logger.Error(err, "cannot finish pre-processing node, aborting", "node", candidate.Name, "preprocessor", pre.GetName())
-				shouldAbort = true
-				errRes = err
-				return
-			}
 			allDone = false
 			runner.logger.Error(err, "failed during preprocessor evaluation", "preprocessor", pre.GetName(), "node", candidate.Name)
 			continue
+		}
+		if reason != "" && reason != preprocessor.PreProcessNotDoneReasonProcessing {
+			runner.logger.Info("cannot finish pre-processing node, aborting", "node", candidate.Name, "preprocessor", pre.GetName(), "reason", reason)
+			shouldAbort = true
+			return
 		}
 		if !done {
 			runner.logger.Info("preprocessor still pending", "node", candidate.Name, "preprocessor", pre.GetName())
