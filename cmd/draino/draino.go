@@ -575,7 +575,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		candidate_runner.WithNodeSorters(sorters),
 		candidate_runner.WithDryRun(options.dryRun),
 		candidate_runner.WithRetryWall(retryWall),
-		candidate_runner.WithRateLimiter(limit.NewTypedRateLimiter(&clock.RealClock{}, options.drainRateLimitQPS, options.drainRateLimitBurst)),
+		candidate_runner.WithRateLimiter(limit.NewTypedRateLimiter(&clock.RealClock{}, kubernetes.GetRateLimitConfiguration(globalConfig.SuppliedConditions), options.drainRateLimitQPS, options.drainRateLimitBurst)),
 		candidate_runner.WithGlobalConfig(globalConfig),
 	)
 	if err != nil {

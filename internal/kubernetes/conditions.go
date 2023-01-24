@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"encoding/json"
+	"github.com/planetlabs/draino/internal/limit"
 	"strings"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 )
 
 const DefaultExpectedResolutionTime = time.Hour * 24 * 7
+const DefaultDrainRateLimitQPS = float32(50. / 60.)
+const DefaultDrainRateLimitBurst = 10
 
 // SuppliedCondition defines the condition will be watched.
 type SuppliedCondition struct {
@@ -19,8 +22,8 @@ type SuppliedCondition struct {
 	Status core.ConditionStatus   `json:"conditionStatus"`
 	// Draino starts acting on a node with this condition after Delay has elapsed.
 	// If a node has multiple conditions, the smallest Delay is applied. Default is 0.
-	Delay    string `json:"delay"`
-	Priority int    `json:"priority"` // higher value first in priority, default is 0, negative value are accepted
+	Delay    string `json:"delay,omitempty"`
+	Priority int    `json:"priority,omitempty"` // higher value first in priority, default is 0, negative value are accepted
 	// ExpectedResolutionTime is the duration given to draino and cluster-autoscaler (for
 	// in-scope nodes) or users (for out-of-scope nodes) to drain and scale down
 	// nodes with this condition. ExpectedResolutionTime and Delay start concurrently, so
@@ -28,6 +31,10 @@ type SuppliedCondition struct {
 	// attention (metric->monitor->SLO). A higher priority is typically associated
 	// with a lower time limit. Default is 7 days for now.
 	ExpectedResolutionTime string `json:"expectedResolutionTime"`
+
+	// Rate Limiting
+	RateLimitQPS   *float32 `json:"rateLimitQPS,omitempty"`
+	RateLimitBurst *int     `json:"rateLimitBurst,omitempty"`
 
 	parsedDelay                  time.Duration
 	parsedExpectedResolutionTime time.Duration
@@ -106,9 +113,19 @@ func ParseConditions(conditions []string) ([]SuppliedCondition, error) {
 		}
 
 		parsed[i] = condition
-
 	}
 	return parsed, nil
+}
+
+func GetRateLimitConfiguration(conditions []SuppliedCondition) map[string]limit.RateLimiterConfiguration {
+	m := map[string]limit.RateLimiterConfiguration{}
+	for _, c := range conditions {
+		m[string(c.Type)] = limit.RateLimiterConfiguration{
+			QPS:   c.RateLimitQPS,
+			Burst: c.RateLimitBurst,
+		}
+	}
+	return m
 }
 
 func parseConditionsFromAnnotation(n *core.Node) ([]SuppliedCondition, error) {

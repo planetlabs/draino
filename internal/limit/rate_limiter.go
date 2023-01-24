@@ -2,7 +2,6 @@ package limit
 
 import (
 	"context"
-
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/clock"
 )
@@ -36,19 +35,25 @@ type TypedRateLimiter interface {
 	Wait(ctx context.Context, t string) error
 }
 
+type RateLimiterConfiguration struct {
+	QPS   *float32
+	Burst *int
+}
+
 // typedRateLimiterImpl is a wrapper to abstract the flowcontrol rate limiter to the other interal parts of the code
 type typedRateLimiterImpl struct {
-	qps   float32
-	burst int
-	clock clock.Clock
-
+	clock        clock.Clock
+	defaultQPS   float32
+	defaultBurst int
+	rlConfigs    map[string]RateLimiterConfiguration
 	rateLimiters map[string]flowcontrol.RateLimiter
 }
 
-func NewTypedRateLimiter(clock clock.Clock, qps float32, burst int) TypedRateLimiter {
+func NewTypedRateLimiter(clock clock.Clock, configurations map[string]RateLimiterConfiguration, defaultQPS float32, defaultBurst int) TypedRateLimiter {
 	return &typedRateLimiterImpl{
-		qps:          qps,
-		burst:        burst,
+		defaultQPS:   defaultQPS,
+		defaultBurst: defaultBurst,
+		rlConfigs:    configurations,
 		clock:        clock,
 		rateLimiters: map[string]flowcontrol.RateLimiter{},
 	}
@@ -66,7 +71,18 @@ func (limit *typedRateLimiterImpl) TryAccept(t string) bool {
 
 func (limit *typedRateLimiterImpl) getRateLimiter(t string) flowcontrol.RateLimiter {
 	if _, exist := limit.rateLimiters[t]; !exist {
-		limit.rateLimiters[t] = flowcontrol.NewTokenBucketRateLimiterWithClock(limit.qps, limit.burst, limit.clock)
+		cfg, ok := limit.rlConfigs[t]
+		if !ok {
+			cfg.QPS = &limit.defaultQPS
+			cfg.Burst = &limit.defaultBurst
+		}
+		if cfg.QPS == nil {
+			cfg.QPS = &limit.defaultQPS
+		}
+		if cfg.Burst == nil {
+			cfg.Burst = &limit.defaultBurst
+		}
+		limit.rateLimiters[t] = flowcontrol.NewTokenBucketRateLimiterWithClock(*cfg.QPS, *cfg.Burst, limit.clock)
 	}
 	return limit.rateLimiters[t]
 }
