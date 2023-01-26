@@ -80,12 +80,6 @@ const (
 )
 
 func main() {
-	tracer.Start(
-		tracer.WithService("draino"),
-	)
-	defer tracer.Stop()
-	mux := httptrace.NewServeMux()
-	go http.ListenAndServe("localhost:8085", mux) // for go profiler
 
 	// Read application flags
 	cfg, fs := controllerruntime.ConfigFromFlags(false, false)
@@ -123,6 +117,8 @@ func main() {
 		drainoklog.RedirectToLogger(log)
 
 		defer log.Sync() // nolint:errcheck // no check required on program exit
+
+		go launchTracerAndProfiler()
 
 		DrainoLegacyMetrics(options, log)
 
@@ -384,6 +380,17 @@ func main() {
 		zap.L().Fatal("Program exit on error", zap.Error(err))
 	}
 
+}
+
+// launchTracerAndProfiler will initialize and run the tracer and the endpoint for the profiler
+// the function is blocking launch it in a dedicated go-routine
+func launchTracerAndProfiler() {
+	tracer.Start(
+		tracer.WithService("draino"),
+	)
+	defer tracer.Stop()
+	mux := httptrace.NewServeMux()
+	http.ListenAndServe("localhost:8085", mux) // for go profiler
 }
 
 func GetKubernetesClientSet(config *kubeclient.Config) (*client.Clientset, error) {
