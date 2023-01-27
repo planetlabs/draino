@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
+	"time"
+
 	"github.com/DataDog/compute-go/logs"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/duration"
-	"sync"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/groups"
@@ -20,9 +21,9 @@ import (
 
 // DrainBuffer will store information about the last successful drains
 type DrainBuffer interface {
-	// StoreSuccessfulDrain is adding the given group to the internal store
+	// StoreDrainAttempt is adding the given group to the internal store
 	// It will return an error in case the initialization was not executed yet
-	StoreSuccessfulDrain(groups.GroupKey, time.Duration) error
+	StoreDrainAttempt(groups.GroupKey, time.Duration) error
 	// NextDrain returns the next possible drain time for the given group
 	// It will return a zero time if the next drain can be done immediately
 	// It will return an error in case the initialization was not executed yet
@@ -128,7 +129,7 @@ func (buffer *drainBufferImpl) IsReady() bool {
 	return buffer.isInitialized
 }
 
-func (buffer *drainBufferImpl) StoreSuccessfulDrain(key groups.GroupKey, drainBuffer time.Duration) error {
+func (buffer *drainBufferImpl) StoreDrainAttempt(key groups.GroupKey, drainBuffer time.Duration) error {
 	if !buffer.IsReady() {
 		return errors.New("drain buffer is not initialized")
 	}

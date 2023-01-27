@@ -1,10 +1,11 @@
 package drainbuffer
 
 import (
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"k8s.io/client-go/tools/record"
 	"testing"
 	"time"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
@@ -64,7 +65,7 @@ func TestDrainBuffer(t *testing.T) {
 			drainBuffer.Initialize(ctx)
 
 			// create new entry
-			err := drainBuffer.StoreSuccessfulDrain("foobar", tt.DrainBuffer)
+			err := drainBuffer.StoreDrainAttempt("foobar", tt.DrainBuffer)
 			assert.NoError(t, err, "failed to store successful drain")
 			err = drainBuffer.cleanupAndPersist(ctx)
 			assert.NoError(t, err, "cannot persist drain buffer")

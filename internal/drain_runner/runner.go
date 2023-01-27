@@ -299,14 +299,14 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 	kubernetes.LogrForVerboseNode(runner.logger, candidate, "drainBuffer configuration", "drainBuffer", drainBuffer)
 
 	err = runner.drainer.Drain(drainContext, candidate)
+	// We can ignore the error as it's only fired when the drain buffer is not initialized.
+	// This cannot happen as the main loop of the drain runner will be blocked in that case.
+	_ = runner.drainBuffer.StoreDrainAttempt(info.Key, drainBuffer)
 	if err != nil {
 		return err
 	}
-	kubernetes.LogrForVerboseNode(runner.logger, candidate, "node was drained")
 
-	// We can ignore the error as it's only fired when the drain buffer is not initialized.
-	// This cannot happen as the main loop of the drain runner will be blocked in that case.
-	_ = runner.drainBuffer.StoreSuccessfulDrain(info.Key, drainBuffer)
+	kubernetes.LogrForVerboseNode(runner.logger, candidate, "node was drained")
 	return nil
 }
 
