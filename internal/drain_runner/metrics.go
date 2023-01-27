@@ -1,11 +1,12 @@
 package drain_runner
 
 import (
+	"reflect"
+	"sync"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/prometheus/client_golang/prometheus"
 	core "k8s.io/api/core/v1"
-	"reflect"
-	"sync"
 )
 
 var (
@@ -44,3 +45,7 @@ func CounterDrainedNodes(node *core.Node, result DrainNodesResult, conditions []
 		Metrics.DrainedNodes.WithLabelValues(tags...).Add(1)
 	}
 }
+
+const (
+	DrainRunnerComponent = "drain_runner"
+)

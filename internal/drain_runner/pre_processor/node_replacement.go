@@ -58,3 +58,7 @@ func (pre *NodeReplacementPreProcessor) IsDone(ctx context.Context, node *corev1
 		return false, PreProcessNotDoneReasonProcessing, nil
 	}
 }
+
+func (pre *NodeReplacementPreProcessor) Reset(ctx context.Context, node *corev1.Node) error {
+	return kubernetes.PatchDeleteNodeLabelKeyCR(ctx, pre.kclient, node, kubernetes.NodeLabelKeyReplaceRequest)
+}

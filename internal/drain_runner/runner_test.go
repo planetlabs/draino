@@ -43,6 +43,10 @@ func (p *testPreprocessor) IsDone(ctx context.Context, node *corev1.Node) (bool,
 	return p.isDone, "", nil
 }
 
+func (p *testPreprocessor) Reset(ctx context.Context, node *corev1.Node) error {
+	return nil
+}
+
 func TestDrainRunner(t *testing.T) {
 	nodeLabelsFilterFunc, err := kubernetes.NewNodeLabelFilter(fmt.Sprintf("metadata.labels['%s'] matches 'true'", kubernetes.NodeNLAEnableLabelKey), zap.NewNop())
 	assert.NoError(t, err, "cannot create node labels filter")

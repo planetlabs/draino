@@ -545,7 +545,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithPreprocessors(
 			preprocessor.NewWaitTimePreprocessor(options.waitBeforeDraining),
 			preprocessor.NewNodeReplacementPreProcessor(mgr.GetClient(), options.preprovisioningActivatedByDefault, mgr.GetLogger()),
-			preprocessor.NewPreActivitiesPreProcessor(indexer, store, mgr.GetLogger(), eventRecorderForDrainRunnerActivities, clock.RealClock{}, options.preActivityDefaultTimeout),
+			preprocessor.NewPreActivitiesPreProcessor(mgr.GetClient(), indexer, store, mgr.GetLogger(), eventRecorderForDrainRunnerActivities, clock.RealClock{}, options.preActivityDefaultTimeout),
 		),
 		drain_runner.WithRerun(options.groupRunnerPeriod),
 		drain_runner.WithRetryWall(retryWall),

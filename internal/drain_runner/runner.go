@@ -25,6 +25,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"github.com/planetlabs/draino/internal/metrics"
 )
 
 // DrainTimeout how long is it acceptable for a drain to run
@@ -106,7 +107,7 @@ func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *gro
 	}
 	// TODO add metric to track amount of nodes blocked in draining
 	for _, n := range draining {
-		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, n, "Node stuck in draining (controller restart?)")
+		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, n, "Node stuck in draining (controller restart?)", info.Key)
 		if errRetryWall != nil {
 			// we just log the error, it will come back at next iteration
 			runner.logger.Error(errRetryWall, "Failed to update retry wall", "node", n.Name)
@@ -163,10 +164,11 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 
 	// Checking pre-activities
 	kubernetes.LogrForVerboseNode(runner.logger, candidate, "Node is candidate for drain, checking pre-activities")
-	allPreprocessorsDone, shouldAbort, err := runner.checkPreprocessors(ctx, candidate)
+	allPreprocessorsDone, shouldAbort, reason := runner.checkPreprocessors(ctx, candidate, info.Key)
 	if shouldAbort {
-		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Error while waiting fro pre conditions: %v", err)
-		newNode, err := runner.updateRetryWallOnCandidate(ctx, candidate, fmt.Sprintf("pre-conditions failed %v", err))
+		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Error while waiting for pre conditions: %s", reason)
+		runner.resetPreProcessors(ctx, candidate, info.Key)
+		newNode, err := runner.updateRetryWallOnCandidate(ctx, candidate, fmt.Sprintf("pre-conditions failed %s", reason), info.Key)
 		if err != nil {
 			return err
 		}
@@ -180,7 +182,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 
 	loggerForNode.Info("start draining")
 	// Draining a node is a blocking operation. This makes sure that one drain does not affect the other by taking PDB budget.
-	candidate, err = k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDraining)
+	candidate, err := k8sclient.AddNLATaint(ctx, runner.client, candidate, runner.clock.Now(), k8sclient.TaintDraining)
 	if err != nil {
 		return err
 	}
@@ -203,7 +205,8 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 		CounterDrainedNodes(candidate, DrainedNodeResultFailed, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), string(kubernetes.GetFailureCause(err)))
 		loggerForNode.Error(err, "failed to drain node")
 		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: %v", err)
-		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, candidate, err.Error())
+		runner.resetPreProcessors(ctx, candidate, info.Key)
+		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, candidate, err.Error(), info.Key)
 		if errRetryWall != nil {
 			loggerForNode.Error(errRetryWall, "Failed to remove taint following drain failure")
 			return errRetryWall
@@ -224,7 +227,7 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 	return nil
 }
 
-func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *corev1.Node) (allDone bool, shouldAbort bool, errRes error) {
+func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *corev1.Node, groupKey groups.GroupKey) (allDone bool, shouldAbort bool, abortReason string) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "CheckDrainPreprocessors")
 	defer span.Finish()
 
@@ -234,11 +237,13 @@ func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *co
 		if err != nil {
 			allDone = false
 			runner.logger.Error(err, "failed during preprocessor evaluation", "preprocessor", pre.GetName(), "node", candidate.Name)
+			metrics.IncInternalError(DrainRunnerComponent, "check_preprocessors", candidate.Name, string(groupKey))
 			continue
 		}
 		if reason != "" && reason != preprocessor.PreProcessNotDoneReasonProcessing {
 			runner.logger.Info("cannot finish pre-processing node, aborting", "node", candidate.Name, "preprocessor", pre.GetName(), "reason", reason)
 			shouldAbort = true
+			abortReason = string(reason)
 			return
 		}
 		if !done {
@@ -247,6 +252,20 @@ func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *co
 		}
 	}
 	return
+}
+
+// resetPreProcessors will iterate over all pre processors and call the reset function.
+func (runner *drainRunner) resetPreProcessors(ctx context.Context, candidate *corev1.Node, groupKey groups.GroupKey) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ResetPreProcessors")
+	defer span.Finish()
+
+	for _, pre := range runner.preprocessors {
+		err := pre.Reset(ctx, candidate)
+		metrics.IncInternalError(DrainRunnerComponent, "reset_preprocessors", candidate.Name, string(groupKey))
+		if err != nil {
+			runner.logger.Error(err, "failed to reset preprocessor for node", "preprocessor", pre.GetName(), "node", candidate.Name)
+		}
+	}
 }
 
 func (runner *drainRunner) refreshNode(ctx context.Context, node *corev1.Node) (refreshedNode *corev1.Node, err error) {
@@ -287,12 +306,13 @@ func (runner *drainRunner) drainCandidate(ctx context.Context, info *groups.Runn
 	return nil
 }
 
-func (runner *drainRunner) updateRetryWallOnCandidate(ctx context.Context, candidate *corev1.Node, reason string) (*corev1.Node, error) {
+func (runner *drainRunner) updateRetryWallOnCandidate(ctx context.Context, candidate *corev1.Node, reason string, groupKey groups.GroupKey) (*corev1.Node, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "ResetFailedCandidate")
 	defer span.Finish()
 
 	newNode, err := runner.retryWall.SetNewRetryWallTimestamp(ctx, candidate, reason, runner.clock.Now())
 	if err != nil {
+		metrics.IncInternalError(DrainRunnerComponent, "update_retry_wall", candidate.Name, string(groupKey))
 		return nil, err
 	}
 	rw := runner.retryWall.GetRetryWallTimestamp(newNode)

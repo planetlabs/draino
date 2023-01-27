@@ -23,6 +23,8 @@ type DrainPreProcessor interface {
 	GetName() string
 	// IsDone will process the given node and returns true if the activity is done
 	IsDone(context.Context, *corev1.Node) (isDone bool, reason PreProcessNotDoneReason, err error)
+	// Reset will reset the state of the pre processor
+	Reset(context.Context, *corev1.Node) error
 }
 
 // WaitTimePreprocessor is a preprocessor used to wait for a certain amount of time before draining a node.
@@ -36,6 +38,10 @@ func NewWaitTimePreprocessor(waitFor time.Duration) DrainPreProcessor {
 
 func (_ *WaitTimePreprocessor) GetName() string {
 	return "WaitTimePreprocessor"
+}
+
+func (_ *WaitTimePreprocessor) Reset(context.Context, *corev1.Node) error {
+	return nil
 }
 
 func (pre *WaitTimePreprocessor) IsDone(ctx context.Context, node *corev1.Node) (bool, PreProcessNotDoneReason, error) {

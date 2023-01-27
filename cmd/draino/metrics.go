@@ -1,8 +1,10 @@
 package main
 
 import (
-	"github.com/planetlabs/draino/internal/drain_runner"
 	"net/http"
+
+	"github.com/planetlabs/draino/internal/drain_runner"
+	"github.com/planetlabs/draino/internal/metrics"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/planetlabs/draino/internal/groups"
@@ -96,6 +98,7 @@ func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
 
 	groups.RegisterMetrics(promOptions.Registry)
 	observability.RegisterNewMetrics(promOptions.Registry, options.scopeAnalysisPeriod)
+	metrics.RegisterMetrics(promOptions.Registry)
 
 	if options.noLegacyNodeHandler {
 		DrainoMetrics(promOptions.Registry)

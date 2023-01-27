@@ -22,15 +22,16 @@ type MetadataSearch[T any] struct {
 }
 
 type MetadataSearchResultItem[T any] struct {
-	Key          string     `json:"key"`
-	Value        T          `json:"value"`
-	errorConv    error      // this is private because it can and shouldn't be serialized for diagnostics
-	ErrorConvStr string     `json:"errorConversion,omitempty"`
-	Node         *core.Node `json:"-"`
-	NodeId       string     `json:"node,omitempty"`
-	Pod          *core.Pod  `json:"-"`
-	PodId        string     `json:"pod,omitempty"`
-	OnController bool       `json:"onController,omitempty"`
+	Key          string        `json:"key"`
+	Value        T             `json:"value"`
+	errorConv    error         // this is private because it can and shouldn't be serialized for diagnostics
+	ErrorConvStr string        `json:"errorConversion,omitempty"`
+	Node         *core.Node    `json:"-"`
+	NodeId       string        `json:"node,omitempty"`
+	Pod          *core.Pod     `json:"-"`
+	PodId        string        `json:"pod,omitempty"`
+	OnController bool          `json:"onController,omitempty"`
+	Source       metav1.Object `json:"-"`
 }
 
 type MetadataGetterResult struct {
@@ -112,6 +113,7 @@ func (a *MetadataSearch[T]) processNode(node *core.Node) {
 			item.Key = val.Key
 			item.setNode(node)
 			item.setValueAndError(a.converter(val.Value))
+			item.Source = node
 			a.Result[val.Value] = append(a.Result[val.Value], item)
 		}
 	}
@@ -124,6 +126,7 @@ func (a *MetadataSearch[T]) processPod(pod *core.Pod) {
 			item.Key = val.Key
 			item.setPod(pod)
 			item.setValueAndError(a.converter(val.Value))
+			item.Source = pod
 			a.Result[val.Value] = append(a.Result[val.Value], item)
 		}
 		if a.stopIfFoundOnPod {
@@ -138,6 +141,7 @@ func (a *MetadataSearch[T]) processPod(pod *core.Pod) {
 				item.Key = val.Key
 				item.setPod(pod)
 				item.OnController = true
+				item.Source = ctrl
 				item.setValueAndError(a.converter(val.Value))
 				a.Result[val.Value] = append(a.Result[val.Value], item)
 			}

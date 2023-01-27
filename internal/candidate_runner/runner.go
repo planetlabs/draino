@@ -242,7 +242,7 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 
 			// At this point we have a node that used to be a drain candidate, but the drain failed at some point.
 			// Now, the user want's to reset everything to start a new drain attempt, so we are also resetting the node replacement pre process.
-			_, exist := node.Annotations[kubernetes.NodeLabelKeyReplaceRequest]
+			_, exist := node.Labels[kubernetes.NodeLabelKeyReplaceRequest]
 			if exist {
 				err = kubernetes.PatchDeleteNodeLabelKeyCR(ctx, runner.client, node, kubernetes.NodeLabelKeyReplaceRequest)
 				if err != nil {
