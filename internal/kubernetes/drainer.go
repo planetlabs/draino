@@ -106,6 +106,14 @@ func (e EvictionEndpointError) Error() string {
 	return msg
 }
 
+type AudienceNotFoundError struct {
+	Audience string
+}
+
+func (e AudienceNotFoundError) Error() string {
+	return fmt.Sprintf("Emissary requested a token for the %s audience from Vault, but Vault couldn't find the audience. Audiences must be created in [vault-config](https://github.com/DataDog/vault-config/blob/main/terraform/oidc-token-provider.tf#L2-L4) for now.", e.Audience)
+}
+
 type NodePreprovisioningTimeoutError struct {
 }
 
@@ -857,6 +865,9 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 			resp, err := client.Do(req)
 			if err != nil {
 				logger.Info("custom eviction endpoint response error", zap.Error(err))
+				if tokenAudience != "" && strings.Contains(err.Error(), "unable to retrieve token from vault (http status: 400)") {
+					return AudienceNotFoundError{Audience: tokenAudience}
+				}
 				return EvictionEndpointError{}
 			}
 			defer resp.Body.Close()

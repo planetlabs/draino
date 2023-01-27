@@ -454,6 +454,7 @@ const (
 	PodDeletionTimeout              FailureCause = "pod_deletion_timeout"
 	VolumeCleanup                   FailureCause = "volume_cleanup"
 	NodePreprovisioning             FailureCause = "node_preprovisioning_timeout"
+	AudienceNotFound                FailureCause = "audience_not_found"
 )
 
 func GetFailureCause(err error) FailureCause {
@@ -480,6 +481,10 @@ func GetFailureCause(err error) FailureCause {
 		}
 		return FailureCause(cause)
 	}
+	if errors.As(err, &AudienceNotFoundError{}) {
+		return AudienceNotFound
+	}
+
 	return ""
 }
 

@@ -38,10 +38,10 @@ const (
 	DrainedNodeResultFailed    DrainNodesResult = "failed"
 )
 
-func CounterDrainedNodes(node *core.Node, result DrainNodesResult, conditions []kubernetes.SuppliedCondition, failureReason string) {
+func CounterDrainedNodes(node *core.Node, result DrainNodesResult, conditions []kubernetes.SuppliedCondition, failureReason kubernetes.FailureCause) {
 	values := kubernetes.GetNodeTagsValues(node)
 	for _, c := range kubernetes.GetConditionsTypes(conditions) {
-		tags := []string{string(result), failureReason, c, values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team}
+		tags := []string{string(result), string(failureReason), c, values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team}
 		Metrics.DrainedNodes.WithLabelValues(tags...).Add(1)
 	}
 }
