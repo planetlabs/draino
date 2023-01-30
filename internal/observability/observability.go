@@ -25,6 +25,7 @@ import (
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 const (
@@ -539,7 +540,7 @@ func (s *DrainoConfigurationObserverImpl) patchNodeLabels(nodeName string) error
 		if node.Annotations == nil {
 			node.Annotations = map[string]string{}
 		}
-		err := kubernetes.PatchNodeLabelKey(s.globalConfig.Context, s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
+		err := k8sclient.PatchNodeLabelKey(s.globalConfig.Context, s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil
@@ -568,7 +569,7 @@ func (s *DrainoConfigurationObserverImpl) Reset() {
 		if node.Labels[ConfigurationLabelKey] != "" {
 			if err := kubernetes.RetryWithTimeout(func() error {
 				time.Sleep(2 * time.Second)
-				err := kubernetes.PatchDeleteNodeLabelKey(s.globalConfig.Context, s.kclient, node.Name, ConfigurationLabelKey)
+				err := k8sclient.PatchDeleteNodeLabelKey(s.globalConfig.Context, s.kclient, node.Name, ConfigurationLabelKey)
 				if err != nil {
 					s.logger.Info("Failed attempt to reset labels", zap.String("node", node.Name),
 						zap.Error(err))

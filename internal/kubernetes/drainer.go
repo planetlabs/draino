@@ -475,14 +475,14 @@ func (d *APICordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Nod
 	defer span.Finish()
 
 	if _, ok := n.Labels[NodeLabelKeyReplaceRequest]; ok {
-		PatchDeleteNodeLabelKey(ctx, d.c, n.Name, NodeLabelKeyReplaceRequest)
+		k8sclient.PatchDeleteNodeLabelKey(ctx, d.c, n.Name, NodeLabelKeyReplaceRequest)
 	}
 
 	// Till we are done with the annotation migration to the new key we have to deal with the 2 keys. Later we can remove that first block.
 	if n.Annotations[drainRetryAnnotationKey] == drainRetryFailedAnnotationValue {
-		PatchNodeAnnotationKey(ctx, d.c, n.Name, drainRetryAnnotationKey, drainRetryAnnotationValue)
+		k8sclient.PatchNodeAnnotationKey(ctx, d.c, n.Name, drainRetryAnnotationKey, drainRetryAnnotationValue)
 	}
-	return PatchDeleteNodeAnnotationKey(ctx, d.c, n.Name, drainRetryFailedAnnotationKey)
+	return k8sclient.PatchDeleteNodeAnnotationKey(ctx, d.c, n.Name, drainRetryFailedAnnotationKey)
 }
 
 // MarkDrainDelete removes the condition on the node to mark the current drain schedule.

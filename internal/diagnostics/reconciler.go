@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
+
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/workqueue"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,7 +82,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 					r.logger.Error(errJson, "Failed to serialize diagnostics", "node", node.Name)
 					return ctrl.Result{}, errJson
 				}
-				if err := kubernetes.PatchNodeAnnotationKeyCR(ctx, r.kclient, node, nodeDiagnosticAnnotationKey, string(output)); err != nil {
+				if err := k8sclient.PatchNodeAnnotationKeyCR(ctx, r.kclient, node, nodeDiagnosticAnnotationKey, string(output)); err != nil {
 					if errors.IsNotFound(err) {
 						return ctrl.Result{}, nil // the node was deleted, no more need for update.
 					}

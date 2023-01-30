@@ -236,7 +236,7 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 					errors = append(errors, fmt.Errorf("cannot reset retry wall on node '%s': %v", node.Name, err))
 				}
 			}
-			if errAnnotation := kubernetes.PatchDeleteNodeAnnotationKeyCR(ctx, runner.client, node, drainRetryFailedAnnotationKey); errAnnotation != nil {
+			if errAnnotation := k8sclient.PatchDeleteNodeAnnotationKeyCR(ctx, runner.client, node, drainRetryFailedAnnotationKey); errAnnotation != nil {
 				errors = append(errors, fmt.Errorf("cannot remove retry wall annotation from node '%s': %v", node.Name, errAnnotation))
 			}
 
@@ -244,7 +244,7 @@ func (runner *candidateRunner) handleRetryFlagOnNodes(ctx context.Context, nodes
 			// Now, the user want's to reset everything to start a new drain attempt, so we are also resetting the node replacement pre process.
 			_, exist := node.Labels[kubernetes.NodeLabelKeyReplaceRequest]
 			if exist {
-				err = kubernetes.PatchDeleteNodeLabelKeyCR(ctx, runner.client, node, kubernetes.NodeLabelKeyReplaceRequest)
+				err = k8sclient.PatchDeleteNodeLabelKeyCR(ctx, runner.client, node, kubernetes.NodeLabelKeyReplaceRequest)
 				if err != nil {
 					errors = append(errors, err)
 				}

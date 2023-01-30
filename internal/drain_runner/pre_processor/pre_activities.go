@@ -121,7 +121,7 @@ func (pre *PreActivitiesPreProcessor) Reset(ctx context.Context, node *corev1.No
 			errors = append(errors, fmt.Errorf("cannot cast source object"))
 			continue
 		}
-		err := pre.client.Patch(ctx, converted, &k8sclient.AnnotationPatch{
+		err := pre.client.Patch(ctx, converted, &k8sclient.JSONAnnotationPatch{
 			Key:   item.annotation,
 			Value: PreActivityAnnotationNotStarted,
 		})

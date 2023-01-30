@@ -6,6 +6,7 @@ import (
 	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -42,7 +43,7 @@ func (pre *NodeReplacementPreProcessor) IsDone(ctx context.Context, node *corev1
 	state, exist := node.Labels[kubernetes.NodeLabelKeyReplaceRequest]
 	if !exist {
 		logger.Info("Attach node replacement label")
-		err := kubernetes.PatchNodeLabelKeyCR(ctx, pre.kclient, node, kubernetes.NodeLabelKeyReplaceRequest, kubernetes.NodeLabelValueReplaceRequested)
+		err := k8sclient.PatchNodeLabelKeyCR(ctx, pre.kclient, node, kubernetes.NodeLabelKeyReplaceRequest, kubernetes.NodeLabelValueReplaceRequested)
 		return false, PreProcessNotDoneReasonProcessing, err
 	}
 
@@ -60,5 +61,5 @@ func (pre *NodeReplacementPreProcessor) IsDone(ctx context.Context, node *corev1
 }
 
 func (pre *NodeReplacementPreProcessor) Reset(ctx context.Context, node *corev1.Node) error {
-	return kubernetes.PatchDeleteNodeLabelKeyCR(ctx, pre.kclient, node, kubernetes.NodeLabelKeyReplaceRequest)
+	return k8sclient.PatchDeleteNodeLabelKeyCR(ctx, pre.kclient, node, kubernetes.NodeLabelKeyReplaceRequest)
 }

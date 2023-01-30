@@ -3,12 +3,14 @@ package groups
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strings"
 )
 
 type GroupKey string
@@ -102,9 +104,9 @@ func (g *GroupKeyFromMetadata) UpdatePodGroupOverrideAnnotation(ctx context.Cont
 	}
 
 	if !podOverride && podAnnotationOverride {
-		return kubernetes.PatchDeleteNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix)
+		return k8sclient.PatchDeleteNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix)
 	}
-	return kubernetes.PatchNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix, string(podOverrideValue))
+	return k8sclient.PatchNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix, string(podOverrideValue))
 }
 
 func (g *GroupKeyFromMetadata) GetGroupKey(node *v1.Node) GroupKey {

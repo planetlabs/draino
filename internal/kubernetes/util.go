@@ -18,7 +18,6 @@ package kubernetes
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -35,14 +34,11 @@ import (
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubernetestrace "gopkg.in/DataDog/dd-trace-go.v1/contrib/k8s.io/client-go/kubernetes"
 )
@@ -278,123 +274,6 @@ func Await(rs ...Runner) error {
 		g.Add(func() error { r.Run(stop); return nil }, func(err error) { close(stop) })
 	}
 	return g.Run()
-}
-
-type AnnotationPatch struct {
-	Metadata struct {
-		Annotations map[string]string `json:"annotations"`
-	} `json:"metadata"`
-}
-
-func (a AnnotationPatch) Type() types.PatchType {
-	return types.MergePatchType
-}
-
-func (a AnnotationPatch) Data(obj client.Object) ([]byte, error) {
-	return json.Marshal(a)
-}
-
-type AnnotationDeletePatch struct {
-	Metadata struct {
-		Annotations map[string]interface{} `json:"annotations"`
-	} `json:"metadata"`
-}
-
-func (a AnnotationDeletePatch) Type() types.PatchType {
-	return types.MergePatchType
-}
-
-func (a AnnotationDeletePatch) Data(obj client.Object) ([]byte, error) {
-	return json.Marshal(a)
-}
-
-type LabelPatch struct {
-	Metadata struct {
-		Labels map[string]string `json:"labels"`
-	} `json:"metadata"`
-}
-
-func (l LabelPatch) Type() types.PatchType {
-	return types.MergePatchType
-}
-
-func (l LabelPatch) Data(obj client.Object) ([]byte, error) {
-	return json.Marshal(l)
-}
-
-type LabelDeletePatch struct {
-	Metadata struct {
-		Labels map[string]interface{} `json:"labels"`
-	} `json:"metadata"`
-}
-
-func (l LabelDeletePatch) Type() types.PatchType {
-	return types.MergePatchType
-}
-
-func (l LabelDeletePatch) Data(obj client.Object) ([]byte, error) {
-	return json.Marshal(l)
-}
-
-func PatchNode(ctx context.Context, kclient kubernetes.Interface, nodeName string, patch interface{}) error {
-	payloadBytes, _ := json.Marshal(patch)
-	_, err := kclient.
-		CoreV1().
-		Nodes().
-		Patch(ctx, nodeName, types.MergePatchType, payloadBytes, metav1.PatchOptions{})
-	return err
-}
-
-func PatchNodeCR(ctx context.Context, client client.Client, node *core.Node, patch client.Patch) error {
-	return client.Patch(ctx, node, patch)
-}
-
-func PatchNodeAnnotationKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string, value string) error {
-	var annotationPatch AnnotationPatch
-	annotationPatch.Metadata.Annotations = map[string]string{key: value}
-	return PatchNode(ctx, kclient, nodeName, annotationPatch)
-}
-
-func PatchDeleteNodeAnnotationKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string) error {
-	var annotationDeletePatch AnnotationDeletePatch
-	annotationDeletePatch.Metadata.Annotations = map[string]interface{}{key: nil}
-	return PatchNode(ctx, kclient, nodeName, annotationDeletePatch)
-}
-
-func PatchNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string, value string) error {
-	var labelPatch LabelPatch
-	labelPatch.Metadata.Labels = map[string]string{key: value}
-	return PatchNode(ctx, kclient, nodeName, labelPatch)
-}
-
-func PatchNodeLabelKeyCR(ctx context.Context, client client.Client, node *core.Node, key string, value string) error {
-	var labelPatch LabelPatch
-	labelPatch.Metadata.Labels = map[string]string{key: value}
-	return PatchNodeCR(ctx, client, node, labelPatch)
-}
-
-func PatchDeleteNodeLabelKeyCR(ctx context.Context, client client.Client, node *core.Node, key string) error {
-	var labelDeletePatch LabelDeletePatch
-	labelDeletePatch.Metadata.Labels = map[string]interface{}{key: nil}
-	return PatchNodeCR(ctx, client, node, labelDeletePatch)
-}
-
-func PatchDeleteNodeLabelKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string) error {
-	var labelDeletePatch LabelDeletePatch
-	labelDeletePatch.Metadata.Labels = map[string]interface{}{key: nil}
-	return PatchNode(ctx, kclient, nodeName, labelDeletePatch)
-}
-
-func PatchDeleteNodeAnnotationKeyCR(ctx context.Context, client client.Client, node *core.Node, key string) error {
-	var annotationDeletePatch AnnotationDeletePatch
-	annotationDeletePatch.Metadata.Annotations = map[string]interface{}{key: nil}
-	return PatchNodeCR(ctx, client, node, annotationDeletePatch)
-}
-
-func PatchNodeAnnotationKeyCR(ctx context.Context, client client.Client, node *core.Node, key string, value string) error {
-	var annotationPatch AnnotationPatch
-	annotationPatch.Metadata.Annotations = map[string]string{key: value}
-	return PatchNodeCR(ctx, client, node, annotationPatch)
 }
 
 // GetAnnotationFromPodOrController check if an annotation is present on the pod or the associated controller object

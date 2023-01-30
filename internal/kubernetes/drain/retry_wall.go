@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -196,7 +197,7 @@ func (wall *retryWallImpl) patchRetryCountOnNode(ctx context.Context, node *core
 	err := wall.
 		client.
 		Status().
-		Patch(ctx, newNode, &NodeConditionPatch{ConditionType: RetryWallConditionType})
+		Patch(ctx, newNode, &k8sclient.NodeConditionPatch{ConditionType: RetryWallConditionType})
 
 	return newNode, err
 }
