@@ -80,7 +80,7 @@ func (p *JSONAnnotationPatch) Data(obj client.Object) ([]byte, error) {
 }
 
 // --------------------------------------------
-// JSON Patches
+// Merge patches
 // --------------------------------------------
 type AnnotationPatch struct {
 	Metadata struct {
@@ -148,7 +148,11 @@ func PatchNode(ctx context.Context, kclient kubernetes.Interface, nodeName strin
 }
 
 func PatchNodeCR(ctx context.Context, client client.Client, node *corev1.Node, patch client.Patch) error {
-	return client.Patch(ctx, node, patch)
+	// The client.Patch method is automatically updating the given node.
+	// As the pointer is used in other places, it will cause concurrent map read / write panics
+	// In order to prevent this, we'll create a deep copy of the node and pass it to the client.Patch.
+	nodeCopy := node.DeepCopy()
+	return client.Patch(ctx, nodeCopy, patch)
 }
 
 func PatchNodeAnnotationKey(ctx context.Context, kclient kubernetes.Interface, nodeName string, key string, value string) error {
