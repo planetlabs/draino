@@ -92,12 +92,12 @@ func (pre *PreActivitiesPreProcessor) IsDone(ctx context.Context, node *corev1.N
 			continue
 		case PreActivityAnnotationFailed:
 			logger.Info("pre activity failed")
-			pre.eventRecorder.NodeEventf(ctx, node, eventPreActivityFailed, "pre activity '%s' failed", key)
+			pre.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventPreActivityFailed, "pre activity '%s' failed", key)
 			return false, PreProcessNotDoneReasonFailure, nil
 		default:
 			if pre.clock.Now().Sub(candidateSince) > entry.timeout {
 				logger.Info("pre activity timed out")
-				pre.eventRecorder.NodeEventf(ctx, node, eventPreActivityFailed, "pre activity '%s' timed out", key)
+				pre.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventPreActivityFailed, "pre activity '%s' timed out", key)
 				return false, PreProcessNotDoneReasonTimeout, nil
 			}
 			logger.V(logs.ZapDebug).Info("Waiting for pre activity to finish")
