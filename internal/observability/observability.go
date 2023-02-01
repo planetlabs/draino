@@ -304,7 +304,13 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 
 				overdue := map[string]bool{}
 				for _, c := range conditions {
-					overdue[string(c.Type)] = kubernetes.IsOverdue(node, c)
+					isOverdue := kubernetes.IsOverdue(node, c)
+					overdue[string(c.Type)] = isOverdue
+					// If one of the conditions is overdue, we want to count the node as overdue in the "any" condition as well.
+					// With this we are able to get a count of all unique nodes that have an overdue condition.
+					if isOverdue {
+						overdue["any"] = isOverdue
+					}
 				}
 
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
