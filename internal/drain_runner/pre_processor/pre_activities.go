@@ -173,11 +173,22 @@ func (pre *PreActivitiesPreProcessor) getActivities(ctx context.Context, node *c
 
 	result := map[string]*preActivity{}
 	for _, item := range activitySearch.Results() {
+		// It doesn't make sense to have pre-activities on controller level as the pre-activity should be executed for every single pod eviction.
+		// So we are skipping these configurations until we find a proper use-case.
+		if item.OnController {
+			pre.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventPreActivityBadConfiguration, "pre-activities on controllers are not supported and will be ignored.")
+			continue
+		}
 		key := keyFromMetadataSearchResultItem(item, PreActivityAnnotationPrefix)
 		result[key] = &preActivity{state: item.Value, timeout: pre.defaultTimeout, annotation: item.Key, sourceObject: item.Source}
 	}
 
 	for _, item := range activityTimeoutSearch.Results() {
+		// It doesn't make sense to have pre-activities on controller level as the pre-activity should be executed for every single pod eviction.
+		// So we are skipping these configurations until we find a proper use-case.
+		if item.OnController {
+			continue
+		}
 		key := keyFromMetadataSearchResultItem(item, PreActivityTimeoutAnnotationPrefix)
 		if _, exist := result[key]; !exist {
 			// TODO log event to the user
