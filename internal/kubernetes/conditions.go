@@ -3,9 +3,10 @@ package kubernetes
 import (
 	"context"
 	"encoding/json"
-	"github.com/planetlabs/draino/internal/limit"
 	"strings"
 	"time"
+
+	"github.com/planetlabs/draino/internal/limit"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
@@ -13,8 +14,8 @@ import (
 )
 
 const DefaultExpectedResolutionTime = time.Hour * 24 * 7
-const DefaultDrainRateLimitQPS = float32(50. / 60.)
-const DefaultDrainRateLimitBurst = 10
+const DefaultDrainRateLimitQPS = float32(1. / 60.)
+const DefaultDrainRateLimitBurst = 1
 
 // SuppliedCondition defines the condition will be watched.
 type SuppliedCondition struct {
