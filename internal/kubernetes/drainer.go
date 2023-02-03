@@ -130,10 +130,17 @@ func (e NodeIsNotCordonError) Error() string {
 }
 
 type PodEvictionTimeoutError struct {
+	isEvictionPP bool
 }
 
 func (e PodEvictionTimeoutError) Error() string {
-	return "timed out waiting for pod disruption to be allowed"
+	msg := "timed out waiting for eviction;"
+	if e.isEvictionPP {
+		msg += " eviction++ endpoint was not able to finish request in time."
+	} else {
+		msg += " most likely related to missing disruption budget."
+	}
+	return msg
 }
 
 type OverlappingDisruptionBudgetsError struct {
@@ -922,7 +929,8 @@ func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node
 		case <-abort:
 			return errors.New("pod eviction aborted")
 		case <-ctx.Done():
-			return PodEvictionTimeoutError{} // this one is typed because we match it to a failure cause
+			_, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, d.runtimeObjectStore)
+			return PodEvictionTimeoutError{isEvictionPP: ok} // this one is typed because we match it to a failure cause
 		default:
 			pvcs, err := d.getInScopePVCs(ctx, pod)
 			if err != nil {

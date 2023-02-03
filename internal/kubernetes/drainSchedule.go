@@ -464,8 +464,15 @@ func GetFailureCause(err error) FailureCause {
 	if errors.As(err, &OverlappingDisruptionBudgetsError{}) {
 		return OverlappingPodDisruptionBudgets
 	}
-	if errors.As(err, &PodEvictionTimeoutError{}) {
-		return PodEvictionTimeout
+	var peErr PodEvictionTimeoutError
+	if errors.As(err, &peErr) {
+		cause := PodEvictionTimeout
+		if peErr.isEvictionPP {
+			cause += "_evictionpp"
+		} else {
+			cause += "_kubeapi"
+		}
+		return cause
 	}
 	if errors.As(err, &PodDeletionTimeoutError{}) {
 		return PodDeletionTimeout
