@@ -2,9 +2,10 @@ package analyser
 
 import (
 	"context"
-	v1 "k8s.io/api/apps/v1"
 	"testing"
 	"time"
+
+	v1 "k8s.io/api/apps/v1"
 
 	"github.com/go-logr/zapr"
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -510,7 +511,9 @@ func Test_stabilityPeriodChecker_StabilityPeriodAcceptsDrain(t *testing.T) {
 			store, closeFunc := kubernetes.RunStoreForTest(context.Background(), fakeKubeClient)
 			defer closeFunc()
 
-			fakeIndexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			fakeIndexer, err := index.New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
 			assert.NoError(t, err)
 
 			ch := make(chan struct{})

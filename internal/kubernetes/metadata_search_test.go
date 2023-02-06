@@ -190,7 +190,9 @@ func TestSearcAnnotationFromNodeAndThenPodOrController(t *testing.T) {
 			store, closeFunc := RunStoreForTest(context.Background(), fakeKubeClient)
 			defer closeFunc()
 
-			fakeIndexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			fakeIndexer, err := index.New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
 			assert.NoError(t, err)
 
 			ch := make(chan struct{})
@@ -546,7 +548,9 @@ func TestMetadataSearch_WithAnnotationPrefix(t *testing.T) {
 			store, closeFunc := RunStoreForTest(context.Background(), fakeKubeClient)
 			defer closeFunc()
 
-			fakeIndexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			fakeIndexer, err := index.New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
 			assert.NoError(t, err)
 
 			ch := make(chan struct{})

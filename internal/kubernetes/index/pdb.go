@@ -83,29 +83,31 @@ func (i *Indexer) GetPDBsForPods(ctx context.Context, pods []*corev1.Pod) (map[s
 	return result, nil
 }
 
-func initPDBIndexer(client clientcr.Client, cache cachecr.Cache) error {
+type podListFunc = func(ctx context.Context, namespace string) (*corev1.PodList, error)
+
+func initPDBIndexer(cache cachecr.Cache, podListFn podListFunc) error {
 	informer, err := cache.GetInformer(context.Background(), &policyv1.PodDisruptionBudget{})
 	if err != nil {
 		return err
 	}
 
 	return informer.AddIndexers(map[string]cachek.IndexFunc{
-		PDBBlockByPodIdx: func(obj interface{}) ([]string, error) { return indexPDBBlockingPod(client, obj) },
+		PDBBlockByPodIdx: func(obj interface{}) ([]string, error) { return indexPDBBlockingPod(podListFn, obj) },
 	})
 }
 
-func indexPDBBlockingPod(client clientcr.Client, o interface{}) ([]string, error) {
+func indexPDBBlockingPod(podListFn podListFunc, o interface{}) ([]string, error) {
 	pdb, ok := o.(*policyv1.PodDisruptionBudget)
 	if !ok {
 		return nil, errors.New("cannot parse pdb object in indexer")
 	}
-	return getAssociatedPodsForPDB(client, pdb, true)
+	return getAssociatedPodsForPDB(podListFn, pdb, true)
 }
 
-func getAssociatedPodsForPDB(client clientcr.Client, pdb *policyv1.PodDisruptionBudget, onlyNotReadyPods bool) ([]string, error) {
-	var pods corev1.PodList
-	if err := client.List(context.Background(), &pods, &clientcr.ListOptions{Namespace: pdb.GetNamespace()}); err != nil {
-		return []string{}, err
+func getAssociatedPodsForPDB(podListFn podListFunc, pdb *policyv1.PodDisruptionBudget, onlyNotReadyPods bool) ([]string, error) {
+	pods, err := podListFn(context.Background(), pdb.Namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)

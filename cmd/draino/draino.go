@@ -477,7 +477,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return fmt.Errorf("error while creating manager: %v\n", err)
 	}
 
-	indexer, err := index.New(mgr.GetClient(), mgr.GetCache(), logger)
+	ctx := context.Background()
+	indexer, err := index.New(ctx, mgr.GetClient(), mgr.GetCache(), logger)
 	if err != nil {
 		return fmt.Errorf("error while initializing informer: %v\n", err)
 	}
@@ -490,8 +491,6 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	if errRW != nil {
 		return errRW
 	}
-
-	ctx := context.Background()
 
 	cs, err := GetKubernetesClientSet(&cfg.KubeClientConfig)
 	if err != nil {

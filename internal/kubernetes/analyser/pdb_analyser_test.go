@@ -2,9 +2,10 @@ package analyser
 
 import (
 	"context"
-	"k8s.io/utils/clock"
 	"testing"
 	"time"
+
+	"k8s.io/utils/clock"
 
 	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
@@ -151,7 +152,10 @@ func TestPDBAnalyser(t *testing.T) {
 		t.Run(tt.Name, func(t *testing.T) {
 			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.Objects})
 			assert.NoError(t, err)
-			indexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			indexer, err := index.New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
 			assert.NoError(t, err)
 
 			ch := make(chan struct{})

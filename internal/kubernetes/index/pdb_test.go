@@ -108,7 +108,9 @@ func Test_PDBIndexer(t *testing.T) {
 			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.Objects})
 			assert.NoError(t, err)
 
-			informer, err := New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			informer, err := New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
 			assert.NoError(t, err)
 
 			ch := make(chan struct{})

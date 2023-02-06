@@ -84,7 +84,7 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 		return nil, err
 	}
 
-	fakeIndexer, err := index.New(opts.ClientWrapper.GetManagerClient(), opts.ClientWrapper.GetCache(), *opts.Logger)
+	fakeIndexer, err := index.New(context.Background(), opts.ClientWrapper.GetManagerClient(), opts.ClientWrapper.GetCache(), *opts.Logger)
 	if err != nil {
 		return nil, err
 	}

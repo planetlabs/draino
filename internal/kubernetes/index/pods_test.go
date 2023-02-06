@@ -65,7 +65,9 @@ func Test_PodIndexer(t *testing.T) {
 			defer close(ch)
 			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.Objects})
 
-			informer, err := New(wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			informer, err := New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
 			assert.NoError(t, err)
 
 			wrapper.Start(ch)

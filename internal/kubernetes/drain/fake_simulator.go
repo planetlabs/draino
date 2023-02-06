@@ -1,6 +1,7 @@
 package drain
 
 import (
+	"context"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -47,7 +48,7 @@ func NewFakeDrainSimulator(opts *FakeSimulatorOptions) (DrainSimulator, error) {
 		return nil, err
 	}
 
-	fakeIndexer, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), logr.Discard())
+	fakeIndexer, err := index.New(context.Background(), wrapper.GetManagerClient(), wrapper.GetCache(), logr.Discard())
 	if err != nil {
 		return nil, err
 	}

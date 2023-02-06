@@ -263,12 +263,13 @@ func TestPreActivitiesPreProcessor(t *testing.T) {
 			recorder := kubernetes.NewEventRecorder(record.NewFakeRecorder(1000))
 			kclientFake := fake.NewSimpleClientset(objects...)
 
-			idx, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), logger)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			idx, err := index.New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), logger)
 			assert.NoError(t, err, "failed to craete indexer")
 
-			ctx, cancel := context.WithCancel(context.Background())
 			store, closeStore := kubernetes.RunStoreForTest(ctx, kclientFake)
-			defer cancel()
 			defer closeStore()
 
 			ch := make(chan struct{})
@@ -346,7 +347,9 @@ func TestPreActivitiesPreProcessor_Reset(t *testing.T) {
 			recorder := kubernetes.NewEventRecorder(record.NewFakeRecorder(1000))
 			kclientFake := fake.NewSimpleClientset(objects...)
 
-			idx, err := index.New(wrapper.GetManagerClient(), wrapper.GetCache(), logger)
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			idx, err := index.New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), logger)
 			assert.NoError(t, err, "failed to craete indexer")
 
 			ctx, cancel := context.WithCancel(context.Background())
