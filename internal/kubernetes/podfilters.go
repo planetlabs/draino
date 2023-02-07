@@ -18,8 +18,9 @@ package kubernetes
 
 import (
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,6 +96,17 @@ func UnprotectedPodFilter(store RuntimeObjectStore, checkController bool, annota
 			}
 		}
 		return true, "", nil
+	}
+}
+
+func PodOrControllerHasNoneOfTheAnnotations(store RuntimeObjectStore, annotations ...string) PodFilterFunc {
+	fn := PodOrControllerHasAnyOfTheAnnotations(store, annotations...)
+	return func(p core.Pod) (pass bool, reason string, err error) {
+		pass, reason, err = fn(p)
+		if err != nil {
+			return false, "", err
+		}
+		return !pass, reason, nil
 	}
 }
 
