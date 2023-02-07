@@ -18,6 +18,7 @@ package kubernetes
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -167,5 +168,36 @@ func NewPodFiltersIgnoreCompletedPods(filter PodFilterFunc) PodFilterFunc {
 			return true, "", nil
 		}
 		return filter(p)
+	}
+}
+
+// NewPodFiltersNoStatefulSetOnNodeWithoutDisk for backward compatibility with Draino v1 configurations
+// we need to exclude pods that are associated with STS and that run on a node without local-storage
+func NewPodFiltersNoStatefulSetOnNodeWithoutDisk(store RuntimeObjectStore) PodFilterFunc {
+	return func(p core.Pod) (bool, string, error) {
+		if !IsPodFromStatefulset(&p) {
+			return true, "", nil
+		}
+
+		if p.Spec.NodeName == "" {
+			return true, "", nil
+		}
+		node, err := store.Nodes().Get(p.Spec.NodeName)
+		if errors.IsNotFound(err) {
+			return true, "", nil
+		}
+		if err != nil {
+			return false, "can't check node for the pod", err
+		}
+		if node.Labels == nil {
+			return true, "", nil
+		}
+		if node.Labels["node-lifecycle.datadoghq.com/enabled"] == "true" {
+			return true, "", nil
+		}
+		if node.Labels["nodegroups.datadoghq.com/local-storage"] == "false" {
+			return false, fmt.Sprintf("StatefulSet pod %s/%s on node without local-storage", p.Namespace, p.Name), nil
+		}
+		return true, "", nil
 	}
 }

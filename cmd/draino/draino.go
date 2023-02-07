@@ -197,6 +197,11 @@ func main() {
 		}
 		podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(runtimeObjectStoreImpl, true, options.cordonProtectedPodAnnotations...))
 
+		// To maintain compatibility with draino v1 version we have to exclude pods from STS running on node without local-storage
+		if options.excludeStatefulSetOnNodeWithoutStorage {
+			podFilterCordon = append(podFilterCordon, kubernetes.NewPodFiltersNoStatefulSetOnNodeWithoutDisk(runtimeObjectStoreImpl))
+		}
+
 		// Cordon limiter
 		cordonLimiter := kubernetes.NewCordonLimiter(log)
 		cordonLimiter.SetSkipLimiterSelector(options.skipCordonLimiterNodeAnnotationSelector)

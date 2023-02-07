@@ -39,9 +39,10 @@ type Options struct {
 	drainGroupLabelKey        string
 
 	// Cordon filtering flags
-	doNotCordonPodControlledBy    []string
-	cordonLocalStoragePods        bool
-	cordonProtectedPodAnnotations []string
+	doNotCordonPodControlledBy             []string
+	cordonLocalStoragePods                 bool
+	excludeStatefulSetOnNodeWithoutStorage bool
+	cordonProtectedPodAnnotations          []string
 
 	// Cordon limiter flags
 	skipCordonLimiterNodeAnnotation         string
@@ -126,6 +127,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.BoolVar(&opt.resetScopeLabel, "reset-config-labels", false, "Reset the scope label on the nodes")
 	fs.BoolVar(&opt.noLegacyNodeHandler, "no-legacy-node-handler", false, "Deactivate draino legacy node handler")
 	fs.BoolVar(&opt.logEvents, "log-events", true, "Indicate if events sent to kubernetes should also be logged")
+	fs.BoolVar(&opt.excludeStatefulSetOnNodeWithoutStorage, "exclude-sts-on-node-without-storage", true, "To ensure backward compatibility with draino v1, we have to exclude pod of STS running on node without local-storage")
 
 	fs.DurationVar(&opt.minEvictionTimeout, "min-eviction-timeout", kubernetes.DefaultMinEvictionTimeout, "Minimum time we wait to evict a pod. The pod terminationGracePeriod will be used if it is bigger.")
 	fs.DurationVar(&opt.evictionHeadroom, "eviction-headroom", kubernetes.DefaultEvictionOverhead, "Additional time to wait after a pod's termination grace period for it to have been deleted.")

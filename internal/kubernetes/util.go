@@ -318,6 +318,15 @@ func GetControllerForPod(pod *core.Pod, store RuntimeObjectStore) (ctrl metav1.O
 	return nil, false
 }
 
+func IsPodFromStatefulset(pod *core.Pod) bool {
+	for _, r := range pod.OwnerReferences {
+		if r.Kind == "StatefulSet" {
+			return true
+		}
+	}
+	return false
+}
+
 // GetReadinessState gets readiness state for the node
 func GetReadinessState(node *core.Node) (isNodeReady bool, err error) {
 	canNodeBeReady, readyFound := true, false
