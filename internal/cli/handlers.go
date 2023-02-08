@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/go-logr/logr"
 	"github.com/gorilla/mux"
 	"github.com/planetlabs/draino/internal/candidate_runner"
@@ -56,6 +57,7 @@ func (h *CLIHandlers) handleGroupsList(writer http.ResponseWriter, request *http
 
 	data, err := json.Marshal(groups)
 	if err != nil {
+		h.logger.Error(err, "failed to marshal groups")
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -83,6 +85,7 @@ func (h *CLIHandlers) handleGroupsNodes(writer http.ResponseWriter, request *htt
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
+		h.logger.Error(err, "failed to marshal diagnostic result")
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -102,6 +105,7 @@ func (h *CLIHandlers) handleGroupsGraphLast(writer http.ResponseWriter, request 
 
 	data, err := json.Marshal(candidateRunnerInfo.GetLastNodeIteratorGraph(true))
 	if err != nil {
+		h.logger.Error(err, "failed to GetLastNodeIteratorGraph")
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -134,13 +138,13 @@ func (h *CLIHandlers) GetCandidateRunnerInfo(writer http.ResponseWriter, groupNa
 		writer.WriteHeader(http.StatusNoContent)
 		return nil, false
 	}
-
-	candidateRunnerInfo, ok := (di).(candidate_runner.CandidateRunnerInfo)
+	candidateRunnerInfo, ok := (di).(candidate_runner.DataInfo)
 	if !ok {
+		h.logger.Error(fmt.Errorf("failed to cast CandidateRunnerInfo"), "failed to GetCandidateRunnerInfo")
 		writer.WriteHeader(http.StatusInternalServerError)
 		return nil, false
 	}
-	return candidateRunnerInfo, true
+	return &candidateRunnerInfo, true
 }
 
 // handleGroupsList list all groups
@@ -152,6 +156,7 @@ func (h *CLIHandlers) handleNodesDiagnostics(writer http.ResponseWriter, request
 
 	data, err := json.Marshal(result)
 	if err != nil {
+		h.logger.Error(err, "failed to marshal diagnostic result")
 		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
