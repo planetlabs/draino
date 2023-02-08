@@ -3,8 +3,9 @@ package candidate_runner
 import (
 	"context"
 	"encoding/json"
-	"github.com/planetlabs/draino/internal/groups"
 	"time"
+
+	"github.com/planetlabs/draino/internal/groups"
 
 	"github.com/planetlabs/draino/internal/scheduler"
 	v1 "k8s.io/api/core/v1"
@@ -17,17 +18,18 @@ const (
 
 type DataInfo struct {
 	// Candidate Run
-	NodeCount                int           // initial node count in the group
-	FilteredOutCount         int           // How many nodes were filtered out
-	Slots                    int           // How many slots are available in total
-	ProcessingDuration       time.Duration // How long does the loop took to run entirely
-	LastRunTime              time.Time     // When was the runner loop launched the last time
-	LastNodeIteratorTime     time.Time     // When did the loop had to node to iterate on AFTER the filtering part
-	LastCandidates           []string      // Last candidate(s) that were tainted
-	LastCandidatesTime       time.Time     // When was the last candidate(s) tainted
-	LastSimulationRejections []string      // Nodes that were rejected by the drain simulation during the candidate evaluation
-	LastRunRateLimited       bool          // Indicates if the last run was stopped because of client side rate limiting
-	CurrentCandidates        []string      // Nodes that are currently in candidate state always: len(CurrentCandidtaes) <= Slots
+	NodeCount                        int           // initial node count in the group
+	FilteredOutCount                 int           // How many nodes were filtered out
+	Slots                            int           // How many slots are available in total
+	ProcessingDuration               time.Duration // How long does the loop took to run entirely
+	LastRunTime                      time.Time     // When was the runner loop launched the last time
+	LastNodeIteratorTime             time.Time     // When did the loop had to node to iterate on AFTER the filtering part
+	LastCandidates                   []string      // Last candidate(s) that were tainted
+	LastCandidatesTime               time.Time     // When was the last candidate(s) tainted
+	LastSimulationRejections         []string      // Nodes that were rejected by the drain simulation during the candidate evaluation
+	LastConditionRateLimitRejections []string      // Nodes that were rejected because of missing condition rate limiting budget
+	LastRunRateLimited               bool          // Indicates if the last run was stopped because of client side rate limiting
+	CurrentCandidates                []string      // Nodes that are currently in candidate state always: len(CurrentCandidtaes) <= Slots
 
 	// private filed that should not go through the serialization
 	lastNodeIterator scheduler.ItemProvider[*v1.Node] // Pointer to the last SortingTreeRepresentation as it was left by the last run.

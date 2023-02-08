@@ -359,6 +359,7 @@ func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
 		candidateRunnerFilteredOutNodesCleaner.SetAndPlanCleanup(float64(candidateDataInfo.FilteredOutCount), candidateRunnerTags, false, cleanupPeriod, false)
 		candidateRunnerTotalSlotsCleaner.SetAndPlanCleanup(float64(candidateDataInfo.Slots), candidateRunnerTags, false, cleanupPeriod, false)
 		candidateRunnerSimulationRejectionsCleaner.SetAndPlanCleanup(float64(len(candidateDataInfo.LastSimulationRejections)), candidateRunnerTags, false, cleanupPeriod, false)
+		candidateRunnerConditionRateLimitedCleaner.SetAndPlanCleanup(float64(len(candidateDataInfo.LastConditionRateLimitRejections)), candidateRunnerTags, false, cleanupPeriod, false)
 
 		var wasRateLimited float64
 		if candidateDataInfo.LastRunRateLimited {

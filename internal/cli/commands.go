@@ -268,7 +268,7 @@ func (h *CLICommands) cmdGroupList() error {
 	}
 
 	table := table.NewTable([]string{
-		"Group", "Nodes", "Slot", "Filtered", "Simulation failed", "Warn", "Last Run Aborted", "Last Candidate Run", "Candidate Duration", "Last Candidate(s)", "Last Candidate(s) At", "Last Candidates Sort", "Drain Duration", "Drain Buffer",
+		"Group", "Nodes", "Slot", "Filtered", "Simulation failed", "Cond. Rate Limited", "Warn", "Last Run Aborted", "Last Candidate Run", "Candidate Duration", "Last Candidate(s)", "Last Candidate(s) At", "Last Candidates Sort", "Drain Duration", "Drain Buffer",
 	},
 		func(obj interface{}) []string {
 			item := obj.(groups.RunnerInfo)
@@ -302,6 +302,7 @@ func (h *CLICommands) cmdGroupList() error {
 				fmt.Sprintf("%d/%d", remainingSlots, candidateDataInfo.Slots),
 				fmt.Sprintf("%v", candidateDataInfo.FilteredOutCount),
 				fmt.Sprintf("%v", candidateDataInfo.LastSimulationRejections),
+				fmt.Sprintf("%d", len(candidateDataInfo.LastConditionRateLimitRejections)),
 				fmt.Sprintf("%s", warn),
 				fmt.Sprintf("%s", lastRunAborted),
 				h.outputDurationOrTimestamp(candidateDataInfo.LastRunTime),

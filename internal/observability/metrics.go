@@ -67,6 +67,13 @@ var (
 	}, candidateRunnerTags)
 	candidateRunnerSimulationRejectionsCleaner gmetrics.GaugeCleaner
 
+	candidateRunnerConditionRateLimited = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: metrics.CandidateRunnerSubsystem,
+		Name:      "condition_rate_limited",
+		Help:      "Amount of nodes that cannot be drained because of missing rate limiting budget on conditions",
+	}, candidateRunnerTags)
+	candidateRunnerConditionRateLimitedCleaner gmetrics.GaugeCleaner
+
 	candidateRunnerRunRateLimited = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: metrics.CandidateRunnerSubsystem,
 		Name:      "run_rate_limited",
@@ -88,6 +95,7 @@ func initGaugeCleaner(cleanupPeriod time.Duration) {
 	candidateRunnerTotalSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerTotalSlots, candidateRunnerTags, cleanupPeriod)
 	candidateRunnerRemainingSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerRemainingSlots, candidateRunnerTags, cleanupPeriod)
 	candidateRunnerSimulationRejectionsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerSimulationRejections, candidateRunnerTags, cleanupPeriod)
+	candidateRunnerConditionRateLimitedCleaner = gmetrics.NewGaugeCleaner(candidateRunnerConditionRateLimited, candidateRunnerTags, cleanupPeriod)
 	candidateRunnerRunRateLimitedCleaner = gmetrics.NewGaugeCleaner(candidateRunnerRunRateLimited, candidateRunnerTags, cleanupPeriod)
 }
 
@@ -102,6 +110,6 @@ func RegisterNewMetrics(registry *prometheus.Registry, cleanupPeriod time.Durati
 		registry.MustRegister(groupRunnerLoopDuration)
 
 		// Candidate Runner Subsystem
-		registry.MustRegister(candidateRunnerTotalNodes, candidateRunnerFilteredOutNodes, candidateRunnerTotalSlots, candidateRunnerRemainingSlots, candidateRunnerSimulationRejections)
+		registry.MustRegister(candidateRunnerTotalNodes, candidateRunnerFilteredOutNodes, candidateRunnerTotalSlots, candidateRunnerRemainingSlots, candidateRunnerSimulationRejections, candidateRunnerConditionRateLimited)
 	})
 }

@@ -149,6 +149,7 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 			// Check if one of the condition rate limiters has capacity
 			if !runner.hasConditionRateLimitingCapacity(node) {
+				dataInfo.LastConditionRateLimitRejections = append(dataInfo.LastConditionRateLimitRejections, node.Name)
 				logForNode.V(logs.ZapDebug).Info("No rate limiter has capacity")
 				continue
 			}
