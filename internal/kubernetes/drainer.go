@@ -862,7 +862,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 				logger.Info("Using token-audience parameter", zap.String("token-audience", tokenAudience))
 			}
 
-			client = &http.Client{Transport: roundTripper, Timeout: 10 * time.Second}
+			client = &http.Client{Transport: roundTripper, Timeout: 20 * time.Second}
 			logger.Info("calling eviction++", zap.String("url", urlParsed.String()))
 			req, err := http.NewRequest("POST", urlParsed.String(), GetEvictionJsonPayload(evictionPayload))
 			req = req.WithContext(ctx)
