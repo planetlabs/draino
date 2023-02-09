@@ -483,6 +483,9 @@ func GetFailureCause(err error) FailureCause {
 	var eeErr EvictionEndpointError
 	if errors.As(err, &eeErr) {
 		cause := "eviction_endpoint"
+		if eeErr.IsRequestTimeout {
+			cause += "_request_timeout"
+		}
 		if eeErr.StatusCode > 0 {
 			cause += fmt.Sprintf("_%d", eeErr.StatusCode)
 		}

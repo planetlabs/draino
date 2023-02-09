@@ -25,6 +25,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	url2 "net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -93,10 +94,14 @@ type nodeMutatorFn func(*core.Node)
 type EvictionEndpointError struct {
 	StatusCode          int
 	AfterSeveralRetries bool
+	IsRequestTimeout    bool
 }
 
 func (e EvictionEndpointError) Error() string {
 	msg := "eviction endpoint error"
+	if e.IsRequestTimeout {
+		msg += ": timeout while waiting for eviction endpoint response."
+	}
 	if e.StatusCode > 0 {
 		msg += fmt.Sprintf(": code=%d", e.StatusCode)
 	}
@@ -874,6 +879,9 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 				logger.Info("custom eviction endpoint response error", zap.Error(err))
 				if tokenAudience != "" && strings.Contains(err.Error(), "unable to retrieve token from vault (http status: 400)") {
 					return AudienceNotFoundError{Audience: tokenAudience}
+				}
+				if os.IsTimeout(err) {
+					return EvictionEndpointError{IsRequestTimeout: true}
 				}
 				return EvictionEndpointError{}
 			}
