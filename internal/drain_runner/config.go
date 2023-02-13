@@ -30,12 +30,16 @@ type Config struct {
 	eventRecorder       kubernetes.EventRecorder
 	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
+	nodeReplacer        *preprocessor.NodeReplacer
 	suppliedCondition   []kubernetes.SuppliedCondition
 
 	// With defaults
 	clock         clock.Clock
 	preprocessors []preprocessor.DrainPreProcessor
 	rerunEvery    time.Duration
+
+	// Options
+	durationWithDrainedStatusBeforeReplacement time.Duration
 }
 
 // NewConfig returns a pointer to a new drain runner configuration
@@ -73,8 +77,14 @@ func (conf *Config) Validate() error {
 	if conf.drainBuffer == nil {
 		return errors.New("drain buffer should be set")
 	}
+	if conf.nodeReplacer == nil {
+		return errors.New("node replacer should be set")
+	}
 	if len(conf.suppliedCondition) == 0 {
 		return errors.New("global config is not set")
+	}
+	if conf.durationWithDrainedStatusBeforeReplacement == 0 {
+		return errors.New("options should be set")
 	}
 
 	return nil
@@ -146,8 +156,20 @@ func WithDrainBuffer(buffer drainbuffer.DrainBuffer) WithOption {
 	}
 }
 
+func WithNodeReplacer(nodeReplacer *preprocessor.NodeReplacer) WithOption {
+	return func(conf *Config) {
+		conf.nodeReplacer = nodeReplacer
+	}
+}
+
 func WithGlobalConfig(globalConfig kubernetes.GlobalConfig) WithOption {
 	return func(conf *Config) {
 		conf.suppliedCondition = globalConfig.SuppliedConditions
+	}
+}
+
+func WithOptions(durationWithDrainedStatusBeforeReplacement time.Duration) WithOption {
+	return func(conf *Config) {
+		conf.durationWithDrainedStatusBeforeReplacement = durationWithDrainedStatusBeforeReplacement
 	}
 }

@@ -30,6 +30,7 @@ type FakeOptions struct {
 	RerunEvery    time.Duration
 	Filter        filters.Filter
 	DrainBuffer   drainbuffer.DrainBuffer
+	NodeReplacer  *preprocessor.NodeReplacer
 
 	Clock clock.Clock
 
@@ -63,6 +64,9 @@ func (opts *FakeOptions) ApplyDefaults() error {
 	}
 	if opts.RetryStrategy == nil {
 		opts.RetryStrategy = &drain.StaticRetryStrategy{Delay: time.Second, AlertThreashold: 5}
+	}
+	if opts.NodeReplacer == nil {
+		opts.NodeReplacer = preprocessor.NewNodeReplacer(opts.ClientWrapper.GetManagerClient(), *opts.Logger)
 	}
 	if opts.Filter == nil {
 		opts.Filter = filters.FilterFromFunction("always_true", func(ctx context.Context, n *v1.Node) bool { return true })
@@ -114,5 +118,8 @@ func NewFakeRunner(opts *FakeOptions) (*drainRunner, error) {
 		eventRecorder:       &kubernetes.NoopEventRecorder{},
 		filter:              opts.Filter,
 		drainBuffer:         opts.DrainBuffer,
+		nodeReplacer:        opts.NodeReplacer,
+
+		durationWithDrainedStatusBeforeReplacement: time.Hour,
 	}, nil
 }

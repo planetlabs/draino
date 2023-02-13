@@ -11,17 +11,59 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type NodeReplacer struct {
+	kclient client.Client
+	logger  logr.Logger
+}
+
+func NewNodeReplacer(client client.Client, logger logr.Logger) *NodeReplacer {
+	return &NodeReplacer{
+		kclient: client,
+		logger:  logger.WithName("NodeReplacer"),
+	}
+}
+
+func (repl *NodeReplacer) TriggerNodeReplacement(ctx context.Context, node *corev1.Node) error {
+	logger := repl.logger.WithValues("node", node.Name)
+
+	_, exist := node.Labels[kubernetes.NodeLabelKeyReplaceRequest]
+	if exist {
+		return nil
+	}
+
+	logger.Info("Attach node replacement label")
+	return k8sclient.PatchNodeLabelKeyCR(ctx, repl.kclient, node, kubernetes.NodeLabelKeyReplaceRequest, kubernetes.NodeLabelValueReplaceRequested)
+}
+
+func (repl *NodeReplacer) ResetReplacement(ctx context.Context, node *corev1.Node) error {
+	return k8sclient.PatchDeleteNodeLabelKeyCR(ctx, repl.kclient, node, kubernetes.NodeLabelKeyReplaceRequest)
+}
+
+func (repl *NodeReplacer) IsDone(node *corev1.Node) (bool, PreProcessNotDoneReason) {
+	logger := repl.logger.WithValues("node", node.Name)
+	state := node.Labels[kubernetes.NodeLabelKeyReplaceRequest]
+	switch state {
+	case kubernetes.NodeLabelValueReplaceDone:
+		logger.Info("Node replacement finished successfully")
+		return true, ""
+	case kubernetes.NodeLabelValueReplaceFailed:
+		logger.Info("Failed to replace node")
+		return false, PreProcessNotDoneReasonFailure
+	default:
+		logger.V(logs.ZapDebug).Info("Waiting for node replacement")
+		return false, PreProcessNotDoneReasonProcessing
+	}
+}
+
 // NodeReplacementPreProcessor is used to spin up a replacement before draining a node
 type NodeReplacementPreProcessor struct {
-	kclient           client.Client
-	logger            logr.Logger
 	allNodesByDefault bool
+	nodeReplacer      *NodeReplacer
 }
 
 func NewNodeReplacementPreProcessor(client client.Client, replaceAllNodesByDefault bool, logger logr.Logger) DrainPreProcessor {
 	return &NodeReplacementPreProcessor{
-		kclient:           client,
-		logger:            logger.WithName("NodeReplacementPreProzessor"),
+		nodeReplacer:      NewNodeReplacer(client, logger),
 		allNodesByDefault: replaceAllNodesByDefault,
 	}
 }
@@ -35,31 +77,14 @@ func (pre *NodeReplacementPreProcessor) IsDone(ctx context.Context, node *corev1
 		return true, "", nil
 	}
 
-	logger := pre.logger.WithValues("node", node.Name)
-
-	if node.Labels == nil {
-		node.Labels = map[string]string{}
-	}
-	state, exist := node.Labels[kubernetes.NodeLabelKeyReplaceRequest]
-	if !exist {
-		logger.Info("Attach node replacement label")
-		err := k8sclient.PatchNodeLabelKeyCR(ctx, pre.kclient, node, kubernetes.NodeLabelKeyReplaceRequest, kubernetes.NodeLabelValueReplaceRequested)
-		return false, PreProcessNotDoneReasonProcessing, err
+	if err := pre.nodeReplacer.TriggerNodeReplacement(ctx, node); err != nil {
+		return false, "", err
 	}
 
-	switch state {
-	case kubernetes.NodeLabelValueReplaceDone:
-		logger.Info("Node replacement finished successfully")
-		return true, "", nil
-	case kubernetes.NodeLabelValueReplaceFailed:
-		logger.Info("Failed to replace node")
-		return false, PreProcessNotDoneReasonFailure, nil
-	default:
-		logger.V(logs.ZapDebug).Info("Waiting for node replacement")
-		return false, PreProcessNotDoneReasonProcessing, nil
-	}
+	isDone, reason := pre.nodeReplacer.IsDone(node)
+	return isDone, reason, nil
 }
 
 func (pre *NodeReplacementPreProcessor) Reset(ctx context.Context, node *corev1.Node) error {
-	return k8sclient.PatchDeleteNodeLabelKeyCR(ctx, pre.kclient, node, kubernetes.NodeLabelKeyReplaceRequest)
+	return pre.nodeReplacer.ResetReplacement(ctx, node)
 }

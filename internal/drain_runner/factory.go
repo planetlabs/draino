@@ -36,8 +36,11 @@ func (factory *DrainRunnerFactory) build() *drainRunner {
 		eventRecorder:       factory.conf.eventRecorder,
 		filter:              factory.conf.filter,
 		drainBuffer:         factory.conf.drainBuffer,
+		nodeReplacer:        factory.conf.nodeReplacer,
 		suppliedConditions:  factory.conf.suppliedCondition,
 		preprocessors:       factory.conf.preprocessors,
+
+		durationWithDrainedStatusBeforeReplacement: factory.conf.durationWithDrainedStatusBeforeReplacement,
 	}
 }
 

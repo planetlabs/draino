@@ -545,6 +545,7 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 
 	pdbAnalyser := analyser.NewPDBAnalyser(ctx, mgr.GetLogger(), indexer, clock.RealClock{}, options.podWarmupDelayExtension)
 
+	nodeReplacer := preprocessor.NewNodeReplacer(mgr.GetClient(), mgr.GetLogger())
 	drainRunnerFactory, err := drain_runner.NewFactory(
 		drain_runner.WithKubeClient(mgr.GetClient()),
 		drain_runner.WithClock(&clock.RealClock{}),
@@ -562,6 +563,8 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		drain_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 		drain_runner.WithDrainBuffer(drainBuffer),
 		drain_runner.WithGlobalConfig(globalConfig),
+		drain_runner.WithOptions(options.durationBeforeReplacement),
+		drain_runner.WithNodeReplacer(nodeReplacer),
 	)
 	if err != nil {
 		logger.Error(err, "failed to configure the drain_runner")

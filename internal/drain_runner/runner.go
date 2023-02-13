@@ -48,8 +48,11 @@ type drainRunner struct {
 	filter              filters.Filter
 	drainBuffer         drainbuffer.DrainBuffer
 	suppliedConditions  []kubernetes.SuppliedCondition
+	nodeReplacer        *preprocessor.NodeReplacer
 
 	preprocessors []preprocessor.DrainPreProcessor
+
+	durationWithDrainedStatusBeforeReplacement time.Duration
 }
 
 func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
@@ -78,6 +81,7 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 		// Can't be done asynchronously, must be done in sequence with `handleGroup/handleCandidate` because these
 		// are the function dealing with the taint lifecycle
 		runner.handleLeftOverDraining(ctx, info)
+		runner.handlePendingDrainedNodes(ctx, info)
 
 		if emptyGroup := runner.handleGroup(ctx, info); emptyGroup {
 			cancel()
@@ -115,6 +119,43 @@ func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *gro
 		if _, err = k8sclient.RemoveNLATaint(ctx, runner.client, updatedNode); err != nil {
 			runner.logger.Error(err, "Failed to remove taint on node left over in 'draining'", "node", n.Name)
 			return
+		}
+	}
+}
+
+// handlePendingDrainedNodes searches for all drained nodes and triggers a node replacement if they are drained for too long.
+// This might happen in cases where we've reached the min-size of our node group, so the CA cannot shutdown the node.
+func (runner *drainRunner) handlePendingDrainedNodes(ctx context.Context, info *groups.RunnerInfo) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "ReplacePendingDrainedNodes")
+	defer span.Finish()
+
+	drained, _, err := runner.getNodesForNLATaint(ctx, info.Key, k8sclient.TaintDrained)
+	if err != nil {
+		runner.logger.Error(err, "cannot get drained nodes for group")
+		return
+	}
+
+	if len(drained) == 0 {
+		return
+	}
+
+	for _, n := range drained {
+		taint, exist := k8sclient.GetNLATaint(n)
+		if !exist || taint.Value != k8sclient.TaintDrained {
+			continue
+		}
+		if runner.clock.Since(taint.TimeAdded.Time) < runner.durationWithDrainedStatusBeforeReplacement {
+			continue
+		}
+
+		logger := runner.logger.WithValues("node", n.Name)
+		logger.Info("pro-actively replacing too old drained node")
+		if err := runner.nodeReplacer.TriggerNodeReplacement(ctx, n); err != nil {
+			logger.Error(err, "failed to trigger node replacement")
+			continue
+		}
+		if isDone, reason := runner.nodeReplacer.IsDone(n); !isDone {
+			logger.Info("failed to replace node", "reason", reason)
 		}
 	}
 }
