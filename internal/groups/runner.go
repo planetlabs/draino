@@ -2,10 +2,11 @@ package groups
 
 import (
 	"context"
-	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -51,16 +52,17 @@ func NewGroupsRunner(ctx context.Context, factory RunnerFactory, logger logr.Log
 }
 
 func (g *GroupsRunner) RunForGroup(key GroupKey) {
-	// do nothing if it is already running for that group
-	g.RLock()
+	// On startup, draino processes all the nodes with two threads simultaneously and opens the corresponding drain groups.
+	// This means that, in the worst case, they are calling this function for the same groupKey at the same time.
+	// If using an RLock, both would read the map simultaneously and notice that there is no runner, so they will go on and create new ones,
+	// which means that we'll have two goroutines for the same group.
+	// Said this, we are using Lock at the beginning of the function to ensure that only one thread can execute this function simultaneously.
+	g.Lock()
+	defer g.Unlock()
 	if _, alReadyRunning := g.running[key]; alReadyRunning {
-		g.RUnlock()
 		return
 	}
-	g.RUnlock()
-	g.Lock()
 	g.running[key] = g.runForGroup(key)
-	g.Unlock()
 }
 
 func (g *GroupsRunner) runForGroup(key GroupKey) *RunnerInfo {
