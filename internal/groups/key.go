@@ -96,6 +96,17 @@ func (g *GroupKeyFromMetadata) getGroupOverrideAnnotation(node *v1.Node, annotat
 }
 
 func (g *GroupKeyFromMetadata) UpdatePodGroupOverrideAnnotation(ctx context.Context, node *v1.Node) error {
+	// When draining a node, we are going to evict the pod that is responsible for the group key override.
+	// This means that the reconciler will be notified about the change and attempts to remove the override annotation.
+	// As this removal will put the node into another node-group we have to forbid it after the node went into draining phase.
+	if taint, exist := k8sclient.GetNLATaint(node); exist {
+		g.logger.Info("skip pod group override update as node is in draining/drained status", "node", node.Name, "status", taint.Value, "since", taint.TimeAdded.Time)
+		switch taint.Value {
+		case k8sclient.TaintDraining, k8sclient.TaintDrained:
+			return nil
+		}
+	}
+
 	podOverrideValue, podOverride := g.getGroupOverrideFromPods(node)
 	podAnnotationOverrideValue, podAnnotationOverride := g.getGroupOverrideFromNodePodAnnotation(node)
 
