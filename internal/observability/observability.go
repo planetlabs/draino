@@ -36,7 +36,6 @@ const (
 )
 
 type DrainoConfigurationObserver interface {
-	kubernetes.Runner
 	manager.Runnable
 	IsInScope(node *v1.Node) (bool, string, error)
 	Reset()

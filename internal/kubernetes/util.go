@@ -263,15 +263,16 @@ func TracedLoggerForNode(context context.Context, n *core.Node, logger *zap.Logg
 }
 
 type Runner interface {
-	Run(stop <-chan struct{})
+	Start(context.Context)
 }
 
-func Await(rs ...Runner) error {
-	stop := make(chan struct{})
+func Await(ctx context.Context, rs ...Runner) error {
+	ctx, cancelFn := context.WithCancel(ctx)
+	defer cancelFn()
 	g := &run.Group{}
 	for i := range rs {
 		r := rs[i] // https://golang.org/doc/faq#closures_and_goroutines
-		g.Add(func() error { r.Run(stop); return nil }, func(err error) { close(stop) })
+		g.Add(func() error { r.Start(ctx); return nil }, func(err error) { cancelFn() })
 	}
 	return g.Run()
 }

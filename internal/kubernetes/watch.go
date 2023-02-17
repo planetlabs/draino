@@ -126,6 +126,10 @@ func NewNodeWatch(ctx context.Context, c kubernetes.Interface, rs ...cache.Resou
 	return &NodeWatch{i}
 }
 
+func (w *NodeWatch) Start(ctx context.Context) {
+	w.Run(ctx.Done())
+}
+
 // Get an node by name. Returns an error if the node does not exist.
 func (w *NodeWatch) Get(name string) (*core.Node, error) {
 	o, exists, err := w.GetStore().GetByKey(name)
@@ -207,6 +211,10 @@ func NewPodWatch(ctx context.Context, c kubernetes.Interface) *PodWatch {
 		},
 	})
 	return &PodWatch{i}
+}
+
+func (w *PodWatch) Start(ctx context.Context) {
+	w.Run(ctx.Done())
 }
 
 func (w *PodWatch) ListPodsForNode(nodeName string) ([]*core.Pod, error) {
@@ -308,6 +316,10 @@ func NewStatefulsetWatch(ctx context.Context, c kubernetes.Interface) *StatefulS
 	return &StatefulSetWatch{i}
 }
 
+func (w *StatefulSetWatch) Start(ctx context.Context) {
+	w.Run(ctx.Done())
+}
+
 func (s StatefulSetWatch) Get(namespace, name string) (*v1.StatefulSet, error) {
 	obj, exists, err := s.GetStore().GetByKey(namespace + "/" + name)
 	if err != nil {
@@ -351,6 +363,10 @@ func NewDeploymentWatch(ctx context.Context, c kubernetes.Interface) *Deployment
 
 	i := cache.NewSharedInformer(lw, &v1.Deployment{}, 30*time.Minute)
 	return &DeploymentWatch{i}
+}
+
+func (w *DeploymentWatch) Start(ctx context.Context) {
+	w.Run(ctx.Done())
 }
 
 func (s DeploymentWatch) Get(namespace, name string) (*v1.Deployment, error) {
@@ -410,6 +426,10 @@ func NewPersistentVolumeWatch(ctx context.Context, c kubernetes.Interface) *Pers
 	return &PersistentVolumeWatch{i}
 }
 
+func (w *PersistentVolumeWatch) Start(ctx context.Context) {
+	w.Run(ctx.Done())
+}
+
 func (p *PersistentVolumeWatch) GetPVForNode(node *core.Node) []*core.PersistentVolume {
 	hostname := node.Labels[hostNameLabelKey]
 	objects, err := p.SharedIndexInformer.GetIndexer().ByIndex(pvNodeNameIndexField, hostname)
@@ -452,6 +472,10 @@ func NewPersistentVolumeClaimWatch(ctx context.Context, c kubernetes.Interface) 
 
 	i := cache.NewSharedInformer(lw, &core.PersistentVolumeClaim{}, 30*time.Minute)
 	return &PersistentVolumeClaimWatch{i}
+}
+
+func (w *PersistentVolumeClaimWatch) Start(ctx context.Context) {
+	w.Run(ctx.Done())
 }
 
 func (p *PersistentVolumeClaimWatch) Get(namespace, name string) (*core.PersistentVolumeClaim, error) {

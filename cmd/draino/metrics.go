@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/planetlabs/draino/internal/drain_runner"
@@ -17,7 +18,7 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
+func DrainoLegacyMetrics(ctx context.Context, options *Options, logger *zap.Logger) {
 
 	var (
 		nodesCordoned = &view.View{
@@ -106,7 +107,7 @@ func DrainoLegacyMetrics(options *Options, logger *zap.Logger) {
 
 	go func() {
 		logger.Info("web server is running", zap.String("listen", options.listen))
-		kingpin.FatalIfError(kubernetes.Await(web), "error serving")
+		kingpin.FatalIfError(kubernetes.Await(ctx, web), "error serving")
 	}()
 
 }

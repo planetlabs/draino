@@ -111,16 +111,16 @@ func main() {
 
 		go launchTracerAndProfiler()
 
-		DrainoLegacyMetrics(options, log)
+		// use a Go context so we can tell the leaderelection and other pieces when we want to step down
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		DrainoLegacyMetrics(ctx, options, log)
 
 		cs, err2 := GetKubernetesClientSet(&cfg.KubeClientConfig)
 		if err2 != nil {
 			return err2
 		}
-
-		// use a Go context so we can tell the leaderelection and other pieces when we want to step down
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
 		pods := kubernetes.NewPodWatch(ctx, cs)
 		statefulSets := kubernetes.NewStatefulsetWatch(ctx, cs)
@@ -310,7 +310,15 @@ func main() {
 			drainPodFilter:  drainerSkipPodFilter,
 			nodeLabelFilter: nodeLabelFilterFunc,
 		}
-		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log, cliHandlers); err != nil {
+		watchers := watchers{
+			nodes:      nodes,
+			pods:       pods,
+			sts:        statefulSets,
+			deployment: deployments,
+			pv:         persistentVolumes,
+			pvc:        persistentVolumeClaims,
+		}
+		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log, cliHandlers, watchers); err != nil {
 			return fmt.Errorf("failed to bootstrap the controller runtime section: %v", err)
 		}
 
@@ -358,6 +366,10 @@ type httpRunner struct {
 	h       map[string]http.Handler
 }
 
+func (r *httpRunner) Start(ctx context.Context) {
+	r.Run(ctx.Done())
+}
+
 func (r *httpRunner) Run(stop <-chan struct{}) {
 	rt := httprouter.New()
 	for path, handler := range r.h {
@@ -386,6 +398,14 @@ type filtersDefinitions struct {
 
 	nodeLabelFilter kubernetes.NodeLabelFilterFunc
 }
+type watchers struct {
+	nodes      *kubernetes.NodeWatch
+	pods       *kubernetes.PodWatch
+	sts        *kubernetes.StatefulSetWatch
+	deployment *kubernetes.DeploymentWatch
+	pv         *kubernetes.PersistentVolumeWatch
+	pvc        *kubernetes.PersistentVolumeClaimWatch
+}
 
 // getInitDrainBufferRunner returns a Runnable that is responsible for initializing the drain buffer
 func getInitDrainBufferRunner(drainBuffer drainbuffer.DrainBuffer, logger *logr.Logger) manager.Runnable {
@@ -397,7 +417,7 @@ func getInitDrainBufferRunner(drainBuffer drainbuffer.DrainBuffer, logger *logr.
 }
 
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
-func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers) error {
+func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers, watchers watchers) error {
 	validationOptions := infraparameters.GetValidateAll()
 	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject, validationOptions.KubeClusterName = false, false, false, false
 	if err := cfg.InfraParam.Validate(validationOptions); err != nil {
@@ -597,6 +617,10 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 			return err
 		}
 	}
+
+	mgr.Add(&RunOnce{fn: func(ctx context.Context) error {
+		return kubernetes.Await(ctx, watchers.nodes, watchers.pods, watchers.sts, watchers.deployment, watchers.pv, watchers.pvc)
+	}})
 
 	if err := mgr.Add(globalBlocker); err != nil {
 		logger.Error(err, "failed to setup global blocker with controller runtime")
