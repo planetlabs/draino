@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -60,8 +59,6 @@ import (
 	client "k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -73,17 +70,9 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Default leader election settings.
-const (
-	DefaultLeaderElectionLeaseDuration = 15 * time.Second
-	DefaultLeaderElectionRenewDeadline = 10 * time.Second
-	DefaultLeaderElectionRetryPeriod   = 2 * time.Second
-)
-
 func main() {
-
 	// Read application flags
-	cfg, fs := controllerruntime.ConfigFromFlags(false, false)
+	cfg, fs := controllerruntime.ConfigFromFlags(true, false)
 	cliHandlers := &cli.CLIHandlers{}
 	cliCommands := &cli.CLICommands{ServerAddr: &cfg.Service.ServiceAddr}
 
@@ -102,7 +91,6 @@ func main() {
 	root.AddCommand(cliCommands.Commands()...)
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
-
 		if errOptions := options.Validate(); errOptions != nil {
 			return errOptions
 		}
@@ -229,7 +217,7 @@ func main() {
 
 		nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(options.maxNodeReplacementPerHour, time.Now())
 
-		eventRecorder, k8sEventRecorder := kubernetes.BuildEventRecorderWithAggregationOnEventType(zapr.NewLogger(log), cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
+		eventRecorder, _ := kubernetes.BuildEventRecorderWithAggregationOnEventType(zapr.NewLogger(log), cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)
 		eventRecorderForDrainerActivities, _ := kubernetes.BuildEventRecorderWithAggregationOnEventTypeAndMessage(zapr.NewLogger(log), cs, options.eventAggregationPeriod, options.logEvents)
 
 		consolidatedOptInAnnotations := append(options.optInPodAnnotations, options.shortLivedPodAnnotations...)
@@ -327,30 +315,9 @@ func main() {
 		}
 		nodes := kubernetes.NewNodeWatch(ctx, cs, nodeLabelFilter)
 		runtimeObjectStoreImpl.NodesStore = nodes
-		// storeCloserFunc := runtimeObjectStoreImpl.Run(log)
-		// defer storeCloserFunc()
+
 		cordonLimiter.SetNodeLister(nodes)
 		cordonDrainer.SetRuntimeObjectStore(runtimeObjectStoreImpl)
-
-		id, err := os.Hostname()
-		if err != nil {
-			return fmt.Errorf("failed to get hostname: %v", err)
-		}
-
-		lock, err := resourcelock.New(
-			resourcelock.EndpointsLeasesResourceLock,
-			cfg.InfraParam.Namespace,
-			options.leaderElectionTokenName,
-			cs.CoreV1(),
-			cs.CoordinationV1(),
-			resourcelock.ResourceLockConfig{
-				Identity:      id,
-				EventRecorder: k8sEventRecorder,
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create lock: %v", err)
-		}
 
 		filters := filtersDefinitions{
 			cordonPodFilter: cordonPodFilteringFunc,
@@ -361,24 +328,6 @@ func main() {
 			return fmt.Errorf("failed to bootstrap the controller runtime section: %v", err)
 		}
 
-		leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
-			Lock:          lock,
-			LeaseDuration: options.leaderElectionLeaseDuration,
-			RenewDeadline: options.leaderElectionRenewDeadline,
-			RetryPeriod:   options.leaderElectionRetryPeriod,
-			Callbacks: leaderelection.LeaderCallbacks{
-				OnStartedLeading: func(ctx context.Context) {
-					log.Info("watchers are running")
-					if errLE := kubernetes.Await(nodes, pods, statefulSets, deployments, persistentVolumes, persistentVolumeClaims); errLE != nil {
-						panic("leader election, error watching: " + errLE.Error())
-					}
-
-				},
-				OnStoppedLeading: func() {
-					panic("lost leader election")
-				},
-			},
-		})
 		return nil
 	}
 
@@ -665,17 +614,12 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 		return err
 	}
 
-	logger.Info("ControllerRuntime bootstrap done, running the manager")
-	// Starting Manager
-	go func() {
-		logger.Info("Starting manager")
-		if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-			logger.Error(err, "Controller Manager did exit with error")
-			panic("Manager finished with error: " + err.Error()) // TODO remove this that is purely for testing and identifying an early exit of the code
-		}
-		logger.Info("Manager finished without error")
-		panic("Manager finished normally") // TODO remove this that is purely for testing and identifying an early exit of the code
-	}()
+	logger.Info("Starting manager")
+	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+		logger.Error(err, "Controller Manager did exit with error")
+		return err
+	}
 
+	logger.Info("Manager finished without error")
 	return nil
 }

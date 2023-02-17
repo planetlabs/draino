@@ -26,11 +26,6 @@ type Options struct {
 	nodeLabels                  []string
 	nodeLabelsExpr              string
 
-	leaderElectionLeaseDuration time.Duration
-	leaderElectionRenewDeadline time.Duration
-	leaderElectionRetryPeriod   time.Duration
-	leaderElectionTokenName     string
-
 	// Eviction filtering flags
 	skipDrain                 bool
 	doNotEvictPodControlledBy []string
@@ -134,9 +129,6 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.drainBuffer, "drain-buffer", kubernetes.DefaultDrainBuffer, "Minimum time between starting each drain. Nodes are always cordoned immediately.")
 	fs.StringVar(&opt.drainBufferConfigMapName, "drain-buffer-configmap-name", "", "The name of the configmap used to persist the drain-buffer values. Default will be draino-<config-name>-drain-buffer.")
 	fs.DurationVar(&opt.schedulingRetryBackoffDelay, "retry-backoff-delay", kubernetes.DefaultSchedulingRetryBackoffDelay, "Additional delay to add between retry schedules.")
-	fs.DurationVar(&opt.leaderElectionLeaseDuration, "leader-election-lease-duration", DefaultLeaderElectionLeaseDuration, "Lease duration for leader election.")
-	fs.DurationVar(&opt.leaderElectionRenewDeadline, "leader-election-renew-deadline", DefaultLeaderElectionRenewDeadline, "Leader election renew deadline.")
-	fs.DurationVar(&opt.leaderElectionRetryPeriod, "leader-election-retry-period", DefaultLeaderElectionRetryPeriod, "Leader election retry period.")
 	fs.DurationVar(&opt.maxNotReadyNodesPeriod, "max-notready-nodes-period", kubernetes.DefaultMaxNotReadyNodesPeriod, "Polling period to check all nodes readiness")
 	fs.DurationVar(&opt.maxPendingPodsPeriod, "max-pending-pods-period", kubernetes.DefaultMaxPendingPodsPeriod, "Polling period to check volume of pending pods")
 	fs.DurationVar(&opt.durationBeforeReplacement, "duration-before-replacement", kubernetes.DefaultDurationBeforeReplacement, "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.")
@@ -168,7 +160,6 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.StringVar(&opt.listen, "listen", ":10002", "Address at which to expose /metrics and /healthz.")
 	fs.StringVar(&opt.kubecfg, "kubeconfig", "", "Path to kubeconfig file. Leave unset to use in-cluster config.")
 	fs.StringVar(&opt.apiserver, "master", "", "Address of Kubernetes API server. Leave unset to use in-cluster config.")
-	fs.StringVar(&opt.leaderElectionTokenName, "leader-election-token-name", kubernetes.Component, "Leader election token name.")
 	fs.StringVar(&opt.drainGroupLabelKey, "drain-group-labels", "", "Comma separated list of label keys to be used to form draining groups. KEY1,KEY2,...")
 	fs.StringVar(&opt.skipCordonLimiterNodeAnnotation, "skip-cordon-limiter-node-annotation", "", "Skip all limiter logic if node has annotation. KEY[=VALUE]")
 	fs.StringVar(&opt.configName, "config-name", "", "Name of the draino configuration")
