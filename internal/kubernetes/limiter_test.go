@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -294,7 +298,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 	maxNotReadyNodePeriod := DefaultMaxNotReadyNodesPeriod
 	tests := []struct {
 		name                 string
-		globalBlockerBuilder func(store RuntimeObjectStore) GlobalBlocker
+		globalBlockerBuilder func(idx *index.Indexer) GlobalBlocker
 		limiterfuncs         map[string]LimiterFunc
 		skipLimiterSelector  labels.Selector
 		node                 *core.Node
@@ -401,9 +405,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "limit on 15% of nodes NotReady with threshold at max=10%", // 15% = 1/7 nodes
 			node: getNodesTestMap()["D"],
-			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
-				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, store, zap.NewNop()), maxNotReadyNodePeriod)
+			globalBlockerBuilder: func(idx *index.Indexer) GlobalBlocker {
+				g := NewGlobalBlocker(logr.Discard())
+				g.AddBlocker("limiter-notReady-10%", MaxNotReadyNodesCheckFunc(10, true, idx, logr.Discard()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -413,9 +417,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "limit on 1 nodes NotReady with threshold at max=1",
 			node: getNodesTestMap()["D"],
-			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
-				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, store, zap.NewNop()), maxNotReadyNodePeriod)
+			globalBlockerBuilder: func(idx *index.Indexer) GlobalBlocker {
+				g := NewGlobalBlocker(logr.Discard())
+				g.AddBlocker("limiter-notReady-1", MaxNotReadyNodesCheckFunc(1, false, idx, logr.Discard()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -425,9 +429,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "no limit on 15% nodes NotReady with threshold max=20%",
 			node: getNodesTestMap()["D"],
-			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
-				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, store, zap.NewNop()), maxNotReadyNodePeriod)
+			globalBlockerBuilder: func(idx *index.Indexer) GlobalBlocker {
+				g := NewGlobalBlocker(logr.Discard())
+				g.AddBlocker("no-limiter-notReady-20%", MaxNotReadyNodesCheckFunc(20, true, idx, logr.Discard()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -437,9 +441,9 @@ func TestLimiter_CanCordon(t *testing.T) {
 		{
 			name: "no limit on 1 nodes NotReady with threshold max=20",
 			node: getNodesTestMap()["D"],
-			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
-				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, store, zap.NewNop()), maxNotReadyNodePeriod)
+			globalBlockerBuilder: func(idx *index.Indexer) GlobalBlocker {
+				g := NewGlobalBlocker(logr.Discard())
+				g.AddBlocker("no-limiter-notReady-20", MaxNotReadyNodesCheckFunc(20, false, idx, logr.Discard()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -453,9 +457,19 @@ func TestLimiter_CanCordon(t *testing.T) {
 			for _, n := range getNodesTestSlice() {
 				objects = append(objects, n)
 			}
+
+			ch := make(chan struct{})
+			defer close(ch)
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: objects})
+			assert.NoError(t, err)
+			idx, err := index.New(context.Background(), wrapper.GetManagerClient(), wrapper.GetCache(), logr.Discard())
+			assert.NoError(t, err)
+			wrapper.Start(ch)
+
 			kclient := fake.NewSimpleClientset(objects...)
 			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
+
 			selector := labels.NewSelector()
 			if tt.skipLimiterSelector != nil {
 				selector = tt.skipLimiterSelector
@@ -470,7 +484,7 @@ func TestLimiter_CanCordon(t *testing.T) {
 				l.AddLimiter(k, v)
 			}
 			if tt.globalBlockerBuilder != nil {
-				gl := tt.globalBlockerBuilder(store)
+				gl := tt.globalBlockerBuilder(idx)
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
 					localFunc := blockStateFunc
 					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
@@ -600,7 +614,7 @@ func TestPodLimiter(t *testing.T) {
 	maxNotReadyNodePeriod := 5 * time.Millisecond
 	tests := []struct {
 		name                 string
-		globalBlockerBuilder func(store RuntimeObjectStore) GlobalBlocker
+		globalBlockerBuilder func(idx *index.Indexer) GlobalBlocker
 		limiterfuncs         map[string]LimiterFunc
 		nodes                []*core.Node
 		pods                 []*core.Pod
@@ -618,9 +632,9 @@ func TestPodLimiter(t *testing.T) {
 			name:  "limit on 1 pending pods with threshold at max=1",
 			nodes: getNodesTestSlice(),
 			pods:  pods,
-			globalBlockerBuilder: func(store RuntimeObjectStore) GlobalBlocker {
-				g := NewGlobalBlocker(zap.NewNop())
-				g.AddBlocker("limiter-pending-pods-1", MaxPendingPodsCheckFunc(1, false, store, zap.NewNop()), maxNotReadyNodePeriod)
+			globalBlockerBuilder: func(idx *index.Indexer) GlobalBlocker {
+				g := NewGlobalBlocker(logr.Discard())
+				g.AddBlocker("limiter-pending-pods-1", MaxPendingPodsCheckFunc(1, false, idx, logr.Discard()), maxNotReadyNodePeriod)
 				g.blockers[0].updateBlockState()
 				return g
 			},
@@ -638,6 +652,16 @@ func TestPodLimiter(t *testing.T) {
 			for _, n := range tt.nodes {
 				objects = append(objects, n)
 			}
+
+			ch := make(chan struct{})
+			defer close(ch)
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: objects})
+			assert.NoError(t, err)
+			idx, err := index.New(context.Background(), wrapper.GetManagerClient(), wrapper.GetCache(), logr.Discard())
+			assert.NoError(t, err)
+
+			wrapper.Start(ch)
+
 			kclient := fake.NewSimpleClientset(objects...)
 			store, closeCh := RunStoreForTest(context.Background(), kclient)
 			defer closeCh()
@@ -652,12 +676,13 @@ func TestPodLimiter(t *testing.T) {
 				l.AddLimiter(k, v)
 			}
 			if tt.globalBlockerBuilder != nil {
-				gl := tt.globalBlockerBuilder(store)
+				gl := tt.globalBlockerBuilder(idx)
 				for name, blockStateFunc := range gl.GetBlockStateCacheAccessor() {
 					localFunc := blockStateFunc
 					l.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
 				}
 			}
+
 			time.Sleep(2 * maxNotReadyNodePeriod) // wait for the caches to update
 			gotCanCordon, gotReason := l.CanCordon(tt.nodes[0])
 			if gotCanCordon != tt.wantCanCordon {

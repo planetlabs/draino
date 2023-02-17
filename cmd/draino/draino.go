@@ -202,18 +202,6 @@ func main() {
 		for p, f := range options.maxSimultaneousCordonForTaintsFunctions {
 			cordonLimiter.AddLimiter("MaxSimultaneousCordonLimiterForTaints:"+p, f)
 		}
-		globalLocker := kubernetes.NewGlobalBlocker(log)
-		for p, f := range options.maxNotReadyNodesFunctions {
-			globalLocker.AddBlocker("MaxNotReadyNodes:"+p, f(runtimeObjectStoreImpl, log), options.maxNotReadyNodesPeriod)
-		}
-		for p, f := range options.maxPendingPodsFunctions {
-			globalLocker.AddBlocker("MaxPendingPods:"+p, f(runtimeObjectStoreImpl, log), options.maxPendingPodsPeriod)
-		}
-
-		for name, blockStateFunc := range globalLocker.GetBlockStateCacheAccessor() {
-			localFunc := blockStateFunc
-			cordonLimiter.AddLimiter(name, func(_ *core.Node, _, _ []*core.Node) (bool, error) { return !localFunc(), nil })
-		}
 
 		nodeReplacementLimiter := kubernetes.NewNodeReplacementLimiter(options.maxNodeReplacementPerHour, time.Now())
 
@@ -265,7 +253,6 @@ func main() {
 			kubernetes.WithDrainGroups(options.drainGroupLabelKey),
 			kubernetes.WithGlobalConfigHandler(globalConfig),
 			kubernetes.WithCordonPodFilter(cordonPodFilteringFunc),
-			kubernetes.WithGlobalBlocking(globalLocker),
 			kubernetes.WithPreprovisioningConfiguration(kubernetes.NodePreprovisioningConfiguration{Timeout: options.preprovisioningTimeout, CheckPeriod: options.preprovisioningCheckPeriod, AllNodesByDefault: options.preprovisioningActivatedByDefault}))
 
 		if options.dryRun {
@@ -281,7 +268,6 @@ func main() {
 					kubernetes.WithSchedulingBackoffDelay(options.schedulingRetryBackoffDelay),
 					kubernetes.WithDurationWithCompletedStatusBeforeReplacement(options.durationBeforeReplacement),
 					kubernetes.WithDrainGroups(options.drainGroupLabelKey),
-					kubernetes.WithGlobalBlocking(globalLocker),
 					kubernetes.WithGlobalConfigHandler(globalConfig)),
 			}
 		}
@@ -324,7 +310,7 @@ func main() {
 			drainPodFilter:  drainerSkipPodFilter,
 			nodeLabelFilter: nodeLabelFilterFunc,
 		}
-		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log, cliHandlers, globalLocker); err != nil {
+		if err = controllerRuntimeBootstrap(options, cfg, cordonDrainer, filters, runtimeObjectStoreImpl, globalConfig, log, cliHandlers); err != nil {
 			return fmt.Errorf("failed to bootstrap the controller runtime section: %v", err)
 		}
 
@@ -411,7 +397,7 @@ func getInitDrainBufferRunner(drainBuffer drainbuffer.DrainBuffer, logger *logr.
 }
 
 // controllerRuntimeBootstrap This function is not called, it is just there to prepare the ground in terms of dependencies for next step where we will include ControllerRuntime library
-func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers, globalBlocker kubernetes.GlobalBlocker) error {
+func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config, drainer kubernetes.Drainer, filtersDef filtersDefinitions, store kubernetes.RuntimeObjectStore, globalConfig kubernetes.GlobalConfig, zlog *zap.Logger, cliHandlers *cli.CLIHandlers) error {
 	validationOptions := infraparameters.GetValidateAll()
 	validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject, validationOptions.KubeClusterName = false, false, false, false
 	if err := cfg.InfraParam.Validate(validationOptions); err != nil {
@@ -454,6 +440,14 @@ func controllerRuntimeBootstrap(options *Options, cfg *controllerruntime.Config,
 	kubeVersion, err := cs.ServerVersion()
 	if err != nil {
 		return err
+	}
+
+	globalBlocker := kubernetes.NewGlobalBlocker(logger)
+	for p, f := range options.maxNotReadyNodesFunctions {
+		globalBlocker.AddBlocker("MaxNotReadyNodes:"+p, f(indexer, logger), options.maxNotReadyNodesPeriod)
+	}
+	for p, f := range options.maxPendingPodsFunctions {
+		globalBlocker.AddBlocker("MaxPendingPods:"+p, f(indexer, logger), options.maxPendingPodsPeriod)
 	}
 
 	eventRecorder, _ := kubernetes.BuildEventRecorderWithAggregationOnEventType(logger, cs, options.eventAggregationPeriod, options.excludedPodsPerNodeEstimation, options.logEvents)

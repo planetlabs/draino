@@ -17,8 +17,9 @@ import (
 
 // Make sure that the Informer is implementing all the required interfaces
 var (
-	_ PDBIndexer = &Indexer{}
-	_ PodIndexer = &Indexer{}
+	_ PDBIndexer  = &Indexer{}
+	_ PodIndexer  = &Indexer{}
+	_ NodeIndexer = &Indexer{}
 
 	_ GetSharedIndexInformer = &Indexer{}
 )

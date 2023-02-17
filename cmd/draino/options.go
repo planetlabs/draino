@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/spf13/pflag"
-	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
@@ -223,8 +224,8 @@ func (o *Options) Validate() error {
 
 	// NotReady Nodes and NotReady Pods
 	factoryComputeBlockStateForNodes := func(max int, percent bool) kubernetes.ComputeBlockStateFunctionFactory {
-		return func(s kubernetes.RuntimeObjectStore, l *zap.Logger) kubernetes.ComputeBlockStateFunction {
-			return kubernetes.MaxNotReadyNodesCheckFunc(max, percent, s, l)
+		return func(idx *index.Indexer, l logr.Logger) kubernetes.ComputeBlockStateFunction {
+			return kubernetes.MaxNotReadyNodesCheckFunc(max, percent, idx, l)
 		}
 	}
 	o.maxNotReadyNodesFunctions = map[string]kubernetes.ComputeBlockStateFunctionFactory{}
@@ -236,8 +237,8 @@ func (o *Options) Validate() error {
 		o.maxNotReadyNodesFunctions[p] = factoryComputeBlockStateForNodes(max, percent)
 	}
 	factoryComputeBlockStateForPods := func(max int, percent bool) kubernetes.ComputeBlockStateFunctionFactory {
-		return func(s kubernetes.RuntimeObjectStore, l *zap.Logger) kubernetes.ComputeBlockStateFunction {
-			return kubernetes.MaxPendingPodsCheckFunc(max, percent, s, l)
+		return func(idx *index.Indexer, l logr.Logger) kubernetes.ComputeBlockStateFunction {
+			return kubernetes.MaxPendingPodsCheckFunc(max, percent, idx, l)
 		}
 	}
 	o.maxPendingPodsFunctions = map[string]kubernetes.ComputeBlockStateFunctionFactory{}

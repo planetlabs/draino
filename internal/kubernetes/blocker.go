@@ -3,16 +3,18 @@ package kubernetes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"github.com/go-logr/logr"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+	corev1 "k8s.io/api/core/v1"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
-	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -26,7 +28,7 @@ type GlobalBlocker interface {
 
 // ComputeBlockStateFunction a function that would analyse the system state and return true if we should lock draino to prevent any cordon/drain activity
 type ComputeBlockStateFunction func() bool
-type ComputeBlockStateFunctionFactory func(store RuntimeObjectStore, logger *zap.Logger) ComputeBlockStateFunction
+type ComputeBlockStateFunctionFactory func(idx *index.Indexer, logger logr.Logger) ComputeBlockStateFunction
 
 // GetBlockStateFunction a function that would return the current state of the lock using the cached value (no analysis) true=blocked
 type GetBlockStateFunction func() bool
@@ -48,10 +50,10 @@ type GlobalBlocksRunner struct {
 	sync.Mutex
 	blockers []*blocker
 	started  bool
-	logger   *zap.Logger
+	logger   logr.Logger
 }
 
-func NewGlobalBlocker(logger *zap.Logger) *GlobalBlocksRunner {
+func NewGlobalBlocker(logger logr.Logger) *GlobalBlocksRunner {
 	return &GlobalBlocksRunner{
 		logger: logger,
 	}
@@ -68,7 +70,7 @@ func (g *GlobalBlocksRunner) Start(ctx context.Context) error {
 
 func (g *GlobalBlocksRunner) Run(stopCh <-chan struct{}) {
 	if g.started {
-		g.logger.Error("GlobalBlocker run twice")
+		g.logger.Info("GlobalBlocker run twice")
 		<-stopCh
 		return
 	}
@@ -151,25 +153,23 @@ func (g *GlobalBlocksRunner) IsBlocked() (bool, string) {
 	return false, ""
 }
 
-func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore, logger *zap.Logger) ComputeBlockStateFunction {
+func MaxNotReadyNodesCheckFunc(max int, percent bool, idx *index.Indexer, logger logr.Logger) ComputeBlockStateFunction {
 	return func() bool {
-		if !store.HasSynced() {
-			logger.Warn("MaxNotReadyNodesCheckFunc: blocking due to informer not synched")
-			return true // better block till we know exactly the state of the system
-		}
-		if store.Nodes() == nil {
+		nodes, err := idx.GetAllNodes()
+		if err != nil {
 			return false
 		}
+
+		fmt.Println("daniel", len(nodes))
 		notReadyCount := 0
-		nodeList := store.Nodes().ListNodes()
-		for _, n := range nodeList {
+		for _, n := range nodes {
 			if ready, _ := GetReadinessState(n); !ready {
 				notReadyCount++
 			}
 		}
 		blocked := false
 		if percent {
-			blocked = math.Ceil(100*float64(notReadyCount)/float64(len(nodeList))) > float64(max)
+			blocked = math.Ceil(100*float64(notReadyCount)/float64(len(nodes))) > float64(max)
 		} else {
 			blocked = notReadyCount >= max
 		}
@@ -177,31 +177,23 @@ func MaxNotReadyNodesCheckFunc(max int, percent bool, store RuntimeObjectStore, 
 	}
 }
 
-func MaxPendingPodsCheckFunc(max int, percent bool, store RuntimeObjectStore, logger *zap.Logger) ComputeBlockStateFunction {
+func MaxPendingPodsCheckFunc(max int, percent bool, idx *index.Indexer, logger logr.Logger) ComputeBlockStateFunction {
 	return func() bool {
-		if !store.HasSynced() {
-			logger.Warn("MaxPendingPodsCheckFunc: blocking due to informer not synched")
-			return true // better block till we know exactly the state of the system
-		}
-		if store.Pods() == nil {
-			return false
-		}
-
-		podCount, err := store.Pods().GetPodCount()
+		totalPodCount, err := idx.GetPodCount(context.Background())
 		if err != nil {
 			return false
 		}
 
-		pendingPodList, err := store.Pods().ListPodsByStatus(string(v1.PodPending))
+		pendingPods, err := idx.GetPodsByPhase(context.Background(), corev1.PodPending)
 		if err != nil {
 			return false
 		}
 
-		pendingCount := len(pendingPodList)
+		pendingCount := len(pendingPods)
 
 		blocked := false
 		if percent {
-			blocked = math.Ceil(100*float64(pendingCount)/float64(podCount)) > float64(max)
+			blocked = math.Ceil(100*float64(pendingCount)/float64(totalPodCount)) > float64(max)
 		} else {
 			blocked = pendingCount >= max
 		}
