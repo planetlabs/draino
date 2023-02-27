@@ -246,9 +246,10 @@ func (runner *drainRunner) handleCandidate(ctx context.Context, info *groups.Run
 		failureCause := kubernetes.GetFailureCause(err)
 		if failureCause == "" {
 			loggerForNode.Error(err, "error doesn't map to a failure cause")
+			failureCause = "undefined"
 		}
 		CounterDrainedNodes(candidate, DrainedNodeResultFailed, kubernetes.GetNodeOffendingConditions(candidate, runner.suppliedConditions), failureCause)
-		loggerForNode.Error(err, "failed to drain node")
+		loggerForNode.Error(err, "failed to drain node", "failure_cause", failureCause)
 		runner.eventRecorder.NodeEventf(ctx, candidate, core.EventTypeWarning, kubernetes.EventReasonDrainFailed, "Drain failed: %v", err)
 		runner.resetPreProcessors(ctx, candidate, info.Key)
 		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, candidate, err.Error(), info.Key)

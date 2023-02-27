@@ -966,6 +966,7 @@ func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node
 			// cannot currently be evicted, for example due to a pod
 			// disruption budget.
 			case apierrors.IsTooManyRequests(err):
+				d.l.Info("received 429 while evicting pod", zap.String("node", node.Name), zap.String("pod", pod.Name), zap.String("pod_namespace", pod.Namespace), zap.Error(err))
 				d.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod %s/%s failed: %v", pod.Namespace, pod.Name, err)
 				d.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, eventReasonEvictionAttemptFailed, "Attempt to evict pod from node %s failed: %v", node.Name, err)
 				waitTime := backoff.Step()
