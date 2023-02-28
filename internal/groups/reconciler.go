@@ -133,8 +133,13 @@ func (r *GroupRegistry) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		r.logger.Info(eventGroupOverrideMisconfiguration+": default applies, no group override", "node", node.Name)
 	}
 
-	r.groupDrainRunner.RunForGroup(r.keyGetter.GetGroupKey(node))
-	r.groupDrainCandidateRunner.RunForGroup(r.keyGetter.GetGroupKey(node))
+	groupKey, err := r.keyGetter.UpdateGroupKeyOnNode(ctx, node)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	r.groupDrainRunner.RunForGroup(groupKey)
+	r.groupDrainCandidateRunner.RunForGroup(groupKey)
 
 	return ctrl.Result{}, nil
 }

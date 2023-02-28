@@ -13,6 +13,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -117,6 +118,108 @@ func TestGroupKeyFromMetadata_GetGroupKey(t *testing.T) {
 				}
 			})
 		}()
+	}
+}
+
+func TestGroupKeyFromMetadata_UpdateGroupKeyOnNode(t *testing.T) {
+	groupOverrideAnnotationKey := "group-override"
+	drainGroupLabelKey := "group"
+	tests := []struct {
+		name string
+		node *v1.Node
+		want GroupKey
+	}{
+		{
+			name: "should add drain group even without labels",
+			node: &v1.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name: "test-node",
+				},
+			},
+			want: "#",
+		},
+		{
+			name: "should add drain group with label",
+			node: &v1.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   "test-node",
+					Labels: map[string]string{drainGroupLabelKey: "foo"},
+				},
+			},
+			want: "foo#",
+		},
+		{
+			name: "should add use group override",
+			node: &v1.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        "test-node",
+					Labels:      map[string]string{drainGroupLabelKey: "foo"},
+					Annotations: map[string]string{groupOverrideAnnotationKey: "annotation"},
+				},
+			},
+			want: "annotation",
+		},
+		{
+			name: "should add use pod group override",
+			node: &v1.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        "test-node",
+					Labels:      map[string]string{drainGroupLabelKey: "foo"},
+					Annotations: map[string]string{groupOverrideAnnotationKey + podOverrideAnnotationSuffix: "pod-annotation"},
+				},
+			},
+			want: "pod-annotation",
+		},
+		{
+			name: "should add use node group override if evything is given",
+			node: &v1.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:   "test-node",
+					Labels: map[string]string{drainGroupLabelKey: "foo"},
+					Annotations: map[string]string{
+						groupOverrideAnnotationKey:                               "node-annotation",
+						groupOverrideAnnotationKey + podOverrideAnnotationSuffix: "pod-annotation",
+					},
+				},
+			},
+			want: "node-annotation",
+		},
+	}
+	testLogger := zapr.NewLogger(zap.NewNop())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objects := []runtime.Object{tt.node}
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: objects})
+			assert.NoError(t, err)
+
+			fakeKubeClient := fakeclient.NewSimpleClientset(objects...)
+			store, closeFunc := kubernetes.RunStoreForTest(context.Background(), fakeKubeClient)
+			defer closeFunc()
+
+			ctx, cancelFn := context.WithCancel(context.Background())
+			defer cancelFn()
+			fakeIndexer, err := index.New(ctx, wrapper.GetManagerClient(), wrapper.GetCache(), testLogger)
+			assert.NoError(t, err)
+
+			ch := make(chan struct{})
+			defer close(ch)
+			wrapper.Start(ch)
+
+			g := NewGroupKeyFromNodeMetadata(wrapper.GetManagerClient(), testLogger, kubernetes.NoopEventRecorder{}, fakeIndexer, store, []string{drainGroupLabelKey}, []string{kubernetes.DrainGroupAnnotation}, groupOverrideAnnotationKey)
+			got, err := g.UpdateGroupKeyOnNode(ctx, tt.node)
+			assert.NoError(t, err, "cannot update node group key")
+			if got != tt.want {
+				t.Errorf("GetGroupKey() = %v, want %v", got, tt.want)
+			}
+
+			var node v1.Node
+			err = wrapper.GetManagerClient().Get(ctx, types.NamespacedName{Name: tt.node.Name}, &node)
+			assert.NoError(t, err)
+
+			drainGroup, exist := node.Annotations[DrainGroupAnnotationKey]
+			assert.True(t, exist, "expect to find drain group annotation on node")
+			assert.Equal(t, string(tt.want), drainGroup, "drain group on node doesn't meet expectaion")
+		})
 	}
 }
 

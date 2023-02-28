@@ -13,10 +13,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const DrainGroupAnnotationKey = "node-lifecycle.datadoghq.com/drain-group"
+
 type GroupKey string
 
 type GroupKeyGetter interface {
 	GetGroupKey(node *v1.Node) GroupKey
+	UpdateGroupKeyOnNode(context.Context, *v1.Node) (GroupKey, error)
 	UpdatePodGroupOverrideAnnotation(ctx context.Context, node *v1.Node) error
 	ValidateGroupKey(node *v1.Node) (valid bool, reason string)
 }
@@ -115,9 +118,28 @@ func (g *GroupKeyFromMetadata) UpdatePodGroupOverrideAnnotation(ctx context.Cont
 	}
 
 	if !podOverride && podAnnotationOverride {
-		return k8sclient.PatchDeleteNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix)
+		if err := k8sclient.PatchDeleteNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix); err != nil {
+			return err
+		}
+	} else {
+		if err := k8sclient.PatchNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix, string(podOverrideValue)); err != nil {
+			return err
+		}
 	}
-	return k8sclient.PatchNodeAnnotationKeyCR(ctx, g.kclient, node, g.groupOverrideAnnotationKey+podOverrideAnnotationSuffix, string(podOverrideValue))
+
+	_, err := g.UpdateGroupKeyOnNode(ctx, node)
+	return err
+}
+
+func (g *GroupKeyFromMetadata) UpdateGroupKeyOnNode(ctx context.Context, node *v1.Node) (GroupKey, error) {
+	groupKey := g.GetGroupKey(node)
+	nodeKey, exist := node.Annotations[DrainGroupAnnotationKey]
+
+	if exist && nodeKey == string(groupKey) {
+		return groupKey, nil
+	}
+
+	return groupKey, k8sclient.PatchNodeAnnotationKeyCR(ctx, g.kclient, node, DrainGroupAnnotationKey, string(groupKey))
 }
 
 func (g *GroupKeyFromMetadata) GetGroupKey(node *v1.Node) GroupKey {

@@ -2,12 +2,14 @@ package groups
 
 import (
 	"context"
-	"github.com/go-logr/zapr"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"go.uber.org/zap"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-logr/zapr"
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"go.uber.org/zap"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -16,7 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func NewTestRunnerFactory() *TestRunnerFactory {
@@ -58,7 +60,7 @@ func TestNewGroupRegistry(t *testing.T) {
 		name                  string
 		drainFactory          RunnerFactory
 		drainCandidateFactory RunnerFactory
-		keyGetter             GroupKeyGetter
+		keyGetterFactory      func(client.Client) GroupKeyGetter
 		nodes                 []runtime.Object
 		runCount              map[GroupKey]int
 	}{
@@ -66,7 +68,9 @@ func TestNewGroupRegistry(t *testing.T) {
 			name:                  "test1",
 			drainFactory:          NewTestRunnerFactory(),
 			drainCandidateFactory: NewTestRunnerFactory(),
-			keyGetter:             NewGroupKeyFromNodeMetadata(nil, testLogger, kubernetes.NoopEventRecorder{}, nil, nil, []string{"key"}, nil, ""),
+			keyGetterFactory: func(client client.Client) GroupKeyGetter {
+				return NewGroupKeyFromNodeMetadata(client, testLogger, kubernetes.NoopEventRecorder{}, nil, nil, []string{"key"}, nil, "")
+			},
 			runCount: map[GroupKey]int{
 				"g1": 1,
 				"g2": 1,
@@ -102,8 +106,15 @@ func TestNewGroupRegistry(t *testing.T) {
 			nodeFilter := func(o interface{}) bool {
 				return true
 			}
-			fakeClient := fake.NewClientBuilder().WithRuntimeObjects(tt.nodes...).Build()
-			gr := NewGroupRegistry(context.Background(), fakeClient, testLogger, nil, tt.keyGetter, tt.drainFactory, tt.drainCandidateFactory, nodeFilter, func() bool { return true }, 0)
+			wrapper, err := k8sclient.NewFakeClient(k8sclient.FakeConf{Objects: tt.nodes})
+			assert.NoError(t, err, "cannot initialize client wrapper")
+
+			ch := make(chan struct{})
+			defer close(ch)
+			wrapper.Start(ch)
+
+			keyGetter := tt.keyGetterFactory(wrapper.GetManagerClient())
+			gr := NewGroupRegistry(context.Background(), wrapper.GetManagerClient(), testLogger, nil, keyGetter, tt.drainFactory, tt.drainCandidateFactory, nodeFilter, func() bool { return true }, 0)
 
 			// inject all the objects
 			for _, o := range tt.nodes {
