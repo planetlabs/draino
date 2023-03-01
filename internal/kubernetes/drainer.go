@@ -282,9 +282,7 @@ type APICordonDrainer struct {
 	eventRecorder      EventRecorder
 	runtimeObjectStore RuntimeObjectStore
 
-	filter                 PodFilterFunc
-	cordonLimiter          CordonLimiter
-	nodeReplacementLimiter NodeReplacementLimiter
+	filter PodFilterFunc
 
 	minEvictionTimeout         time.Duration
 	evictionHeadroom           time.Duration
@@ -339,20 +337,6 @@ func WithAPICordonDrainerLogger(l *zap.Logger) APICordonDrainerOption {
 	}
 }
 
-// WithCordonLimiter configures an APICordonDrainer to limit cordon activity
-func WithCordonLimiter(limiter CordonLimiter) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
-		d.cordonLimiter = limiter
-	}
-}
-
-// WithNodeReplacementLimiter configures an APICordonDrainer to limit node replacement activity
-func WithNodeReplacementLimiter(limiter NodeReplacementLimiter) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
-		d.nodeReplacementLimiter = limiter
-	}
-}
-
 // WithStorageClassesAllowingDeletion configures an APICordonDrainer to allow deletion of PV/PVC for some storage classes only
 func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
@@ -367,6 +351,13 @@ func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDraine
 func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.maxDrainAttemptsBeforeFail = int32(maxDrainAttemptsBeforeFail)
+	}
+}
+
+// WithRuntimeObjectStore configures the runtime object store
+func WithRuntimeObjectStore(store RuntimeObjectStore) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.runtimeObjectStore = store
 	}
 }
 
@@ -393,10 +384,6 @@ func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder EventRecorder, ao
 		o(d)
 	}
 	return d
-}
-
-func (d *APICordonDrainer) SetRuntimeObjectStore(store RuntimeObjectStore) {
-	d.runtimeObjectStore = store
 }
 
 func GetNodeRetryMaxAttempt(n *core.Node) (customValue int32, usedDefault bool, err error) {
@@ -433,12 +420,6 @@ func (d *APICordonDrainer) Cordon(ctx context.Context, n *core.Node, mutators ..
 	span, ctx := tracer.StartSpanFromContext(ctx, "Cordon")
 	defer span.Finish()
 
-	if d.cordonLimiter != nil {
-		canCordon, reason := d.cordonLimiter.CanCordon(n)
-		if !canCordon {
-			return NewLimiterError(reason)
-		}
-	}
 	if n.Spec.Unschedulable {
 		return nil
 	}
@@ -1299,10 +1280,6 @@ func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.N
 func (d *APICordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "ReplaceNode")
 	defer span.Finish()
-	if !d.nodeReplacementLimiter.CanAskForNodeReplacement() {
-		d.eventRecorder.NodeEventf(ctx, n, core.EventTypeNormal, "NodeReplacementLimited", "Node replacement is currently blocked by global rate limiter")
-		return false, nil
-	}
 	err := d.performNodeReplacement(ctx, n, newNodeRequestReasonReplacement)
 	return err != nil, err
 }

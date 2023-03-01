@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -160,7 +159,6 @@ func MaxNotReadyNodesCheckFunc(max int, percent bool, idx *index.Indexer, logger
 			return false
 		}
 
-		fmt.Println("daniel", len(nodes))
 		notReadyCount := 0
 		for _, n := range nodes {
 			if ready, _ := GetReadinessState(n); !ready {

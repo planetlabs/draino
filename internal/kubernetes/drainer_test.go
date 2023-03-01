@@ -30,7 +30,6 @@ import (
 	policy "k8s.io/api/policy/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -87,15 +86,6 @@ func newFakeClientSet(objects []runtime.Object, rs ...reactor) kubernetes.Interf
 	}
 	return cs
 }
-
-type fakeLimiter struct{}
-
-func (f fakeLimiter) CanCordon(node *core.Node) (bool, string)        { return true, "" }
-func (f fakeLimiter) SetNodeLister(lister NodeLister)                 {}
-func (f fakeLimiter) SetSkipLimiterSelector(selector labels.Selector) {}
-func (f fakeLimiter) AddLimiter(s string, limiterFunc LimiterFunc)    {}
-
-var _ CordonLimiter = &fakeLimiter{}
 
 func newFakeDynamicClient(objects ...runtime.Object) dynamic.Interface {
 	scheme := runtime.NewScheme()
@@ -181,7 +171,7 @@ func TestCordon(t *testing.T) {
 			for _, r := range tc.reactions {
 				c.PrependReactor(r.verb, r.resource, r.Fn())
 			}
-			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}), WithCordonLimiter(&fakeLimiter{}))
+			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
 			if err := d.Cordon(ctx, tc.node, tc.mutators...); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {

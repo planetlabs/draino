@@ -595,15 +595,6 @@ func (h *DrainingResourceEventHandler) cordon(ctx context.Context, n *core.Node,
 	tags, _ := tag.New(context.Background(), tag.Upsert(TagNodeName, n.GetName())) // nolint:gosec
 
 	if err := h.cordonDrainer.Cordon(ctx, n, conditionAnnotationMutator(badConditions)); err != nil {
-		if IsLimiterError(err) {
-			reason := err.Error()
-			tags, _ = tag.New(context.Background(), tag.Upsert(TagReason, reason))
-			StatRecordForEachCondition(tags, n, badConditions, MeasureLimitedCordon.M(1))
-			h.eventRecorder.NodeEventf(ctx, n, core.EventTypeWarning, eventReasonCordonBlockedByLimit, reason)
-			log.Debug("cordon limiter", zap.String("node", n.Name), zap.String("reason", reason))
-			return false, nil
-		}
-
 		log.Error("Failed to cordon", zap.Error(err))
 		tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultFailed)) // nolint:gosec
 		StatRecordForEachCondition(tags, n, badConditions, MeasureNodesCordoned.M(1))

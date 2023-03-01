@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/planetlabs/draino/internal/groups"
@@ -14,12 +16,10 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
-	"go.uber.org/zap"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-func DrainoLegacyMetrics(ctx context.Context, options *Options, logger *zap.Logger) {
-
+func DrainoLegacyMetrics(ctx context.Context, options *Options, logger logr.Logger) manager.Runnable {
 	var (
 		nodesCordoned = &view.View{
 			Name:        "cordoned_nodes_total",
@@ -92,7 +92,7 @@ func DrainoLegacyMetrics(ctx context.Context, options *Options, logger *zap.Logg
 	kingpin.FatalIfError(err, "cannot export metrics")
 	view.RegisterExporter(p)
 
-	web := &httpRunner{address: options.listen, logger: logger, h: map[string]http.Handler{
+	web := &HttpRunner{address: options.listen, logger: logger, h: map[string]http.Handler{
 		"/metrics": p,
 		"/healthz": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { r.Body.Close() }), // nolint:errcheck // no err management in health check
 	}}
@@ -105,11 +105,7 @@ func DrainoLegacyMetrics(ctx context.Context, options *Options, logger *zap.Logg
 		DrainoMetrics(promOptions.Registry)
 	}
 
-	go func() {
-		logger.Info("web server is running", zap.String("listen", options.listen))
-		kingpin.FatalIfError(kubernetes.Await(ctx, web), "error serving")
-	}()
-
+	return web
 }
 
 func DrainoMetrics(promExporter prom.Registerer) {
