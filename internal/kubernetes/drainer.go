@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/DataDog/go-service-authn/pkg/serviceauthentication/authnclient"
 	"go.opencensus.io/tag"
@@ -47,6 +48,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	runtimejson "k8s.io/apimachinery/pkg/runtime/serializer/json"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 )
@@ -277,6 +279,7 @@ var _ CordonDrainer = &APICordonDrainer{}
 
 // APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
 type APICordonDrainer struct {
+	crClient           client.Client
 	c                  kubernetes.Interface
 	l                  *zap.Logger
 	eventRecorder      EventRecorder
@@ -365,6 +368,12 @@ func WithRuntimeObjectStore(store RuntimeObjectStore) APICordonDrainerOption {
 func WithGlobalConfig(globalConfig GlobalConfig) APICordonDrainerOption {
 	return func(d *APICordonDrainer) {
 		d.globalConfig = globalConfig
+	}
+}
+
+func WithContainerRuntimeClient(client client.Client) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.crClient = client
 	}
 }
 
@@ -1001,7 +1010,8 @@ func (d *APICordonDrainer) awaitDeletion(ctx context.Context, pod *core.Pod, tim
 	polls := 0
 	err := wait.PollImmediate(pollPeriod, timeout, func() (bool, error) {
 		polls += 1
-		got, err := d.c.CoreV1().Pods(pod.GetNamespace()).Get(ctx, pod.GetName(), meta.GetOptions{})
+		var got core.Pod
+		err := d.crClient.Get(ctx, types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, &got)
 		if apierrors.IsNotFound(err) {
 			return true, nil
 		}
@@ -1085,13 +1095,14 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context,
 		if claim.Spec.VolumeName == "" {
 			continue
 		}
-		pv, err := d.c.CoreV1().PersistentVolumes().Get(ctx, claim.Spec.VolumeName, meta.GetOptions{})
+		var pv core.PersistentVolume
+		err := d.crClient.Get(ctx, types.NamespacedName{Name: claim.Spec.VolumeName}, &pv)
 		if apierrors.IsNotFound(err) {
 			d.l.Info("GET: PV not found", zap.String("name", claim.Spec.VolumeName), zap.String("claim", claim.Name), zap.String("claimNamespace", claim.Namespace))
 			continue // This PV was already deleted
 		}
 
-		d.eventRecorder.PersistentVolumeEventf(ctx, pv, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pvc %s/%s and pod %s/%s", claim.Namespace, claim.Name, pod.Namespace, pod.Name))
+		d.eventRecorder.PersistentVolumeEventf(ctx, &pv, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion requested due to association with evicted pvc %s/%s and pod %s/%s", claim.Namespace, claim.Name, pod.Namespace, pod.Name))
 		d.eventRecorder.PodEventf(ctx, pod, core.EventTypeNormal, "Eviction", fmt.Sprintf("Deletion of associated PV %s", pv.Name))
 
 		err = d.c.CoreV1().PersistentVolumes().Delete(ctx, pv.Name, meta.DeleteOptions{})
@@ -1100,14 +1111,14 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context,
 			continue // This PV was already deleted
 		}
 		if err != nil {
-			d.eventRecorder.PersistentVolumeEventf(ctx, pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV: %v", err))
+			d.eventRecorder.PersistentVolumeEventf(ctx, &pv, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV: %v", err))
 			d.eventRecorder.PodEventf(ctx, pod, core.EventTypeWarning, "EvictionFailure", fmt.Sprintf("Could not delete PV %s: %v", pv.Name, err))
 			return fmt.Errorf("cannot delete pv %s: %w", pv.Name, err)
 		}
 		d.l.Info("deleting pv", zap.String("pv", pv.Name))
 
 		// wait for PVC complete deletion
-		if err := d.awaitPVDeletion(ctx, pv, time.Minute); err != nil {
+		if err := d.awaitPVDeletion(ctx, &pv, time.Minute); err != nil {
 			return fmt.Errorf("pv deletion timeout %s: %w", pv.Name, err)
 		}
 	}
@@ -1125,7 +1136,8 @@ func (d *APICordonDrainer) awaitPVDeletion(ctx context.Context, pv *core.Persist
 	}
 
 	return wait.PollImmediate(pollPeriod, timeout, func() (bool, error) {
-		got, err := d.c.CoreV1().PersistentVolumes().Get(ctx, pv.GetName(), meta.GetOptions{})
+		var got core.PersistentVolume
+		err := d.crClient.Get(ctx, types.NamespacedName{Name: pv.Name}, &got)
 		if apierrors.IsNotFound(err) {
 			return true, nil
 		}
@@ -1206,7 +1218,8 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(ctx context.Conte
 
 	deletedPVCs := []*core.PersistentVolumeClaim{}
 	for _, pvc := range pvcs {
-		freshPvc, err := d.c.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(ctx, pvc.Name, meta.GetOptions{})
+		var freshPvc core.PersistentVolumeClaim
+		err := d.crClient.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, &freshPvc)
 		if apierrors.IsNotFound(err) {
 			d.l.Info("DELETE: PVC not found", zap.String("claim", pvc.Name))
 			continue // This PVC was already deleted
@@ -1243,7 +1256,8 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(ctx context.Conte
 func (d *APICordonDrainer) awaitPVCDeletion(ctx context.Context, pvc *core.PersistentVolumeClaim, timeout time.Duration) error {
 	return wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
 		d.l.Info("waiting for pvc complete deletion", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
-		got, err := d.c.CoreV1().PersistentVolumeClaims(pvc.GetNamespace()).Get(ctx, pvc.GetName(), meta.GetOptions{})
+		var got core.PersistentVolumeClaim
+		err := d.crClient.Get(ctx, types.NamespacedName{Namespace: pvc.Namespace, Name: pvc.Name}, &got)
 		if apierrors.IsNotFound(err) {
 			d.l.Info("pvc not found. It is deleted.", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
 			return true, nil
