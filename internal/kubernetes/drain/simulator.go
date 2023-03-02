@@ -131,7 +131,7 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 			return false, nil, []error{err}
 		}
 		if !canEvict {
-			reasons = append(reasons, fmt.Sprintf("Cannot drain pod '%s', because: %v", pod.GetName(), reason))
+			reasons = append(reasons, fmt.Sprintf("Cannot drain pod '%s/%s', because: %v", pod.GetNamespace(), pod.GetName(), reason))
 		}
 	}
 

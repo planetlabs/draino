@@ -74,7 +74,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain with pods that are blocked by PDBs with missing budget",
 			IsDrainable: false,
-			Reason:      []string{"Cannot drain pod 'foo-pod', because: PDB 'foo-pdb' does not allow any disruptions"},
+			Reason:      []string{"Cannot drain pod 'default/foo-pod', because: PDB 'foo-pdb' does not allow any disruptions"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -85,7 +85,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain if PDB is blocked (lockness)",
 			IsDrainable: false,
-			Reason:      []string{"Cannot drain pod 'foo-pod1', because: PDB 'foo-pdb' does not allow any disruptions", "Cannot drain pod 'foo-pod2', because: PDB 'foo-pdb' does not allow any disruptions"},
+			Reason:      []string{"Cannot drain pod 'default/foo-pod1', because: PDB 'foo-pdb' does not allow any disruptions", "Cannot drain pod 'default/foo-pod2', because: PDB 'foo-pdb' does not allow any disruptions"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
@@ -119,7 +119,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain if one pod has multiple PDBs",
 			IsDrainable: false,
-			Reason:      []string{"Cannot drain pod 'foo-pod', because: Pod has more than one associated PDB: foo-pdb1;foo-pdb2"},
+			Reason:      []string{"Cannot drain pod 'default/foo-pod', because: Pod has more than one associated PDB: foo-pdb1;foo-pdb2"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
