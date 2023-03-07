@@ -358,7 +358,7 @@ func main() {
 		simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, simulationPodFilter, kubeVersion, eventRecorder, simulationRateLimiter, logger)
 		pdbAnalyser := analyser.NewPDBAnalyser(ctx, mgr.GetLogger(), indexer, clock.RealClock{}, options.podWarmupDelayExtension)
 		sorters := candidate_runner.NodeSorters{
-			sorters.CompareNodeAnnotationDrainPriority,
+			sorters.NewAnnotationPrioritizer(store, indexer, eventRecorder, logger),
 			sorters.NewConditionComparator(globalConfig.SuppliedConditions),
 			pdbAnalyser.CompareNode,
 		}

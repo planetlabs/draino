@@ -7,6 +7,11 @@ func DurationPtr(dur time.Duration) *time.Duration {
 	return &dur
 }
 
+// StrPtr returns a pointer to the given string
+func StrPtr(str string) *string {
+	return &str
+}
+
 func AsInterfaces[T any](errs []T) []interface{} {
 	if len(errs) == 0 {
 		return nil
