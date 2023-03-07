@@ -26,6 +26,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/metrics"
+	"github.com/planetlabs/draino/internal/protector"
 )
 
 // DrainTimeout how long is it acceptable for a drain to run
@@ -49,8 +50,8 @@ type drainRunner struct {
 	drainBuffer         drainbuffer.DrainBuffer
 	suppliedConditions  []kubernetes.SuppliedCondition
 	nodeReplacer        *preprocessor.NodeReplacer
-
-	preprocessors []preprocessor.DrainPreProcessor
+	pvcProtector        protector.PVCProtector
+	preprocessors       []preprocessor.DrainPreProcessor
 
 	durationWithDrainedStatusBeforeReplacement time.Duration
 }
@@ -82,6 +83,7 @@ func (runner *drainRunner) Run(info *groups.RunnerInfo) error {
 		// are the function dealing with the taint lifecycle
 		runner.handleLeftOverDraining(ctx, info)
 		runner.handlePendingDrainedNodes(ctx, info)
+		runner.handlePVCProtection(ctx, info)
 
 		if emptyGroup := runner.handleGroup(ctx, info); emptyGroup {
 			cancel()
@@ -100,7 +102,7 @@ func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *gro
 	span, ctx := tracer.StartSpanFromContext(ctx, "ResetStuckDrainAttempts")
 	defer span.Finish()
 
-	draining, _, err := runner.getNodesForNLATaint(ctx, info.Key, k8sclient.TaintDraining)
+	draining, _, err := runner.getNodesForNLATaint(ctx, info.Key, []k8sclient.DrainTaintValue{k8sclient.TaintDraining})
 	if err != nil {
 		runner.logger.Error(err, "cannot get draining nodes for group")
 		return
@@ -109,7 +111,6 @@ func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *gro
 	if len(draining) > 0 {
 		runner.logger.Info("Found some nodes that were stuck in draining", "count", len(draining))
 	}
-	// TODO add metric to track amount of nodes blocked in draining
 	for _, n := range draining {
 		updatedNode, errRetryWall := runner.updateRetryWallOnCandidate(ctx, n, "Node stuck in draining (controller restart?)", info.Key)
 		if errRetryWall != nil {
@@ -120,6 +121,7 @@ func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *gro
 			runner.logger.Error(err, "Failed to remove taint on node left over in 'draining'", "node", n.Name)
 			return
 		}
+		CounterDrainedNodes(n, DrainedNodeResultFailed, runner.suppliedConditions, "stuck_in_draining")
 	}
 }
 
@@ -129,7 +131,7 @@ func (runner *drainRunner) handlePendingDrainedNodes(ctx context.Context, info *
 	span, ctx := tracer.StartSpanFromContext(ctx, "ReplacePendingDrainedNodes")
 	defer span.Finish()
 
-	drained, _, err := runner.getNodesForNLATaint(ctx, info.Key, k8sclient.TaintDrained)
+	drained, _, err := runner.getNodesForNLATaint(ctx, info.Key, []k8sclient.DrainTaintValue{k8sclient.TaintDrained})
 	if err != nil {
 		runner.logger.Error(err, "cannot get drained nodes for group")
 		return
@@ -161,7 +163,7 @@ func (runner *drainRunner) handlePendingDrainedNodes(ctx context.Context, info *
 }
 
 func (runner *drainRunner) handleGroup(ctx context.Context, info *groups.RunnerInfo) (emptyGroup bool) {
-	candidates, groupHasAtLeastOneNode, err := runner.getNodesForNLATaint(ctx, info.Key, k8sclient.TaintDrainCandidate)
+	candidates, groupHasAtLeastOneNode, err := runner.getNodesForNLATaint(ctx, info.Key, []k8sclient.DrainTaintValue{k8sclient.TaintDrainCandidate})
 	// in case of an error we'll just try it again
 	if err != nil {
 		runner.logger.Error(err, "cannot get drain candidates for group")
@@ -370,7 +372,7 @@ func (runner *drainRunner) updateRetryWallOnCandidate(ctx context.Context, candi
 }
 
 // getNodesForNLATaint return nodes that match the taint. The boolean is set to true if some nodes are still present in the group, regardless of the taint.
-func (runner *drainRunner) getNodesForNLATaint(ctx context.Context, key groups.GroupKey, taintValue k8sclient.DrainTaintValue) ([]*corev1.Node, bool, error) {
+func (runner *drainRunner) getNodesForNLATaint(ctx context.Context, key groups.GroupKey, taintValues []k8sclient.DrainTaintValue) ([]*corev1.Node, bool, error) {
 	nodes, err := index.GetFromIndex[corev1.Node](ctx, runner.sharedIndexInformer, groups.SchedulingGroupIdx, string(key))
 	if err != nil {
 		return nil, false, err
@@ -383,10 +385,39 @@ func (runner *drainRunner) getNodesForNLATaint(ctx context.Context, key groups.G
 		if !exist {
 			continue
 		}
-		if taint.Value != taintValue {
-			continue
+		for _, taintValue := range taintValues {
+			if taintValue == taint.Value {
+				candidates = append(candidates, node)
+				break
+			}
 		}
-		candidates = append(candidates, node)
 	}
 	return candidates, len(nodes) > 0, nil
+}
+
+func (runner *drainRunner) handlePVCProtection(ctx context.Context, info *groups.RunnerInfo) {
+	// not taking `draining` on purpose because this is not a "stable" state.
+	// not taking `drainCandidate` because the case is already tackled in at filtering time in this runner (filtering + taint removal)
+	taintedNodes, _, err := runner.getNodesForNLATaint(ctx, info.Key, []k8sclient.DrainTaintValue{k8sclient.TaintDrained})
+	if err != nil {
+		runner.logger.Error(err, "failed to get draining nodes for group")
+		return
+	}
+
+	for _, node := range taintedNodes {
+		pods, errPvc := runner.pvcProtector.GetUnscheduledPodsBoundToNodeByPV(node)
+		if errPvc != nil {
+			runner.logger.Error(err, "failed to check pvc/pod", "node", node.Name)
+			continue
+		}
+		if len(pods) > 0 {
+			runner.logger.Info("Pod needs to be scheduled on node", "pod", pods[0].Name)
+			if _, err = k8sclient.RemoveNLATaint(ctx, runner.client, node); err != nil {
+				runner.logger.Error(err, "failed to remove taint", "node", node.Name)
+				continue
+			}
+			runner.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, kubernetes.EventReasonPendingPodWithLocalPV, "Pod "+pods[0].Namespace+"/"+pods[0].Name+" needs that node due to local PV, removing taint from the node")
+			CounterDrainedNodes(node, DrainedNodeResultFailed, runner.suppliedConditions, "pvc_protection")
+		}
+	}
 }

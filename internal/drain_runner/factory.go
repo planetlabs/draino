@@ -39,6 +39,7 @@ func (factory *DrainRunnerFactory) build() *drainRunner {
 		nodeReplacer:        factory.conf.nodeReplacer,
 		suppliedConditions:  factory.conf.suppliedCondition,
 		preprocessors:       factory.conf.preprocessors,
+		pvcProtector:        factory.conf.pvcProtector,
 
 		durationWithDrainedStatusBeforeReplacement: factory.conf.durationWithDrainedStatusBeforeReplacement,
 	}

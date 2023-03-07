@@ -4,9 +4,10 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/prometheus/client_golang/prometheus"
 	core "k8s.io/api/core/v1"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
 var (

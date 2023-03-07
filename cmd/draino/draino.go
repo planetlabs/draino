@@ -344,8 +344,9 @@ func main() {
 			drain_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 			drain_runner.WithDrainBuffer(drainBuffer),
 			drain_runner.WithGlobalConfig(globalConfig),
-			drain_runner.WithOptions(options.durationBeforeReplacement),
+			drain_runner.WithBeforeReplacementDuration(options.durationBeforeReplacement),
 			drain_runner.WithNodeReplacer(nodeReplacer),
+			drain_runner.WithPVCProtector(pvcProtector),
 		)
 		if err != nil {
 			logger.Error(err, "failed to configure the drain_runner")

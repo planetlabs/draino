@@ -6,14 +6,16 @@ import (
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
+	"github.com/planetlabs/draino/internal/protector"
 
 	"github.com/go-logr/logr"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // WithOption is used to pass an option to the factory
@@ -32,6 +34,7 @@ type Config struct {
 	drainBuffer         drainbuffer.DrainBuffer
 	nodeReplacer        *preprocessor.NodeReplacer
 	suppliedCondition   []kubernetes.SuppliedCondition
+	pvcProtector        protector.PVCProtector
 
 	// With defaults
 	clock         clock.Clock
@@ -82,6 +85,9 @@ func (conf *Config) Validate() error {
 	}
 	if len(conf.suppliedCondition) == 0 {
 		return errors.New("global config is not set")
+	}
+	if conf.pvcProtector == nil {
+		return errors.New("pvcProtector should be set")
 	}
 	if conf.durationWithDrainedStatusBeforeReplacement == 0 {
 		return errors.New("options should be set")
@@ -168,8 +174,14 @@ func WithGlobalConfig(globalConfig kubernetes.GlobalConfig) WithOption {
 	}
 }
 
-func WithOptions(durationWithDrainedStatusBeforeReplacement time.Duration) WithOption {
+func WithBeforeReplacementDuration(durationWithDrainedStatusBeforeReplacement time.Duration) WithOption {
 	return func(conf *Config) {
 		conf.durationWithDrainedStatusBeforeReplacement = durationWithDrainedStatusBeforeReplacement
+	}
+}
+
+func WithPVCProtector(pvcProtector protector.PVCProtector) WithOption {
+	return func(conf *Config) {
+		conf.pvcProtector = pvcProtector
 	}
 }
