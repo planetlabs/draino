@@ -121,7 +121,7 @@ func (runner *drainRunner) handleLeftOverDraining(ctx context.Context, info *gro
 			runner.logger.Error(err, "Failed to remove taint on node left over in 'draining'", "node", n.Name)
 			return
 		}
-		CounterDrainedNodes(n, DrainedNodeResultFailed, runner.suppliedConditions, "stuck_in_draining")
+		CounterDrainedNodes(n, DrainedNodeResultFailed, kubernetes.GetNodeOffendingConditions(n, runner.suppliedConditions), "stuck_in_draining")
 	}
 }
 
@@ -417,7 +417,7 @@ func (runner *drainRunner) handlePVCProtection(ctx context.Context, info *groups
 				continue
 			}
 			runner.eventRecorder.NodeEventf(ctx, node, core.EventTypeWarning, kubernetes.EventReasonPendingPodWithLocalPV, "Pod "+pods[0].Namespace+"/"+pods[0].Name+" needs that node due to local PV, removing taint from the node")
-			CounterDrainedNodes(node, DrainedNodeResultFailed, runner.suppliedConditions, "pvc_protection")
+			CounterDrainedNodes(node, DrainedNodeResultFailed, kubernetes.GetNodeOffendingConditions(node, runner.suppliedConditions), "pvc_protection")
 		}
 	}
 }
