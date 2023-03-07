@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 type PreProcessNotDoneReason string
@@ -53,6 +54,10 @@ func (pre *WaitTimePreprocessor) IsDone(ctx context.Context, node *corev1.Node) 
 	if taint.Value != k8sclient.TaintDrainCandidate {
 		// TODO should we return an error in case a node has a weird state here?
 		return true, "", nil
+	}
+
+	if taint.TimeAdded == nil {
+		return false, PreProcessNotDoneReasonProcessing, fmt.Errorf("found 'drain-candidate' taint without timeAdded field set")
 	}
 
 	waitUntil := taint.TimeAdded.Add(pre.waitFor)

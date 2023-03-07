@@ -10,14 +10,15 @@ import (
 
 	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
 )
 
 const (
@@ -82,7 +83,6 @@ func (pre *PreActivitiesPreProcessor) IsDone(ctx context.Context, node *corev1.N
 		return false, PreProcessNotDoneReasonNotCandidate, nil
 	}
 
-	candidateSince := taint.TimeAdded.Time
 	for key, entry := range activities {
 		logger := pre.logger.WithValues("node", node.Name, "annotation", key, "state", entry.state, "timeout", entry.timeout)
 
@@ -95,6 +95,10 @@ func (pre *PreActivitiesPreProcessor) IsDone(ctx context.Context, node *corev1.N
 			pre.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventPreActivityFailed, "pre activity '%s' failed", key)
 			return false, PreProcessNotDoneReasonFailure, nil
 		default:
+			if taint.TimeAdded == nil {
+				return false, PreProcessNotDoneReasonProcessing, fmt.Errorf("found 'drain-candidate' taint without timeAdded field set")
+			}
+			candidateSince := taint.TimeAdded.Time
 			if pre.clock.Now().Sub(candidateSince) > entry.timeout {
 				logger.Info("pre activity timed out")
 				pre.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventPreActivityFailed, "pre activity '%s' timed out", key)

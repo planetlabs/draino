@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
+	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	v1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const DrainGroupAnnotationKey = "node-lifecycle.datadoghq.com/drain-group"
@@ -103,7 +105,11 @@ func (g *GroupKeyFromMetadata) UpdatePodGroupOverrideAnnotation(ctx context.Cont
 	// This means that the reconciler will be notified about the change and attempts to remove the override annotation.
 	// As this removal will put the node into another node-group we have to forbid it after the node went into draining phase.
 	if taint, exist := k8sclient.GetNLATaint(node); exist {
-		g.logger.Info("skip pod group override update as node is in draining/drained status", "node", node.Name, "status", taint.Value, "since", taint.TimeAdded.Time)
+		var sinceValue time.Time
+		if taint.TimeAdded != nil {
+			sinceValue = taint.TimeAdded.Time
+		}
+		g.logger.Info("skip pod group override update as node is in draining/drained status", "node", node.Name, "status", taint.Value, "since", sinceValue)
 		switch taint.Value {
 		case k8sclient.TaintDraining, k8sclient.TaintDrained:
 			return nil

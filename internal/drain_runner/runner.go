@@ -146,6 +146,10 @@ func (runner *drainRunner) handlePendingDrainedNodes(ctx context.Context, info *
 		if !exist || taint.Value != k8sclient.TaintDrained {
 			continue
 		}
+		if taint.TimeAdded == nil {
+			runner.logger.Error(fmt.Errorf("found 'drained' taint without timeAdded field set"), "missing timeAdded on taint", "node", n.Name)
+			continue
+		}
 		if runner.clock.Since(taint.TimeAdded.Time) < runner.durationWithDrainedStatusBeforeReplacement {
 			continue
 		}
