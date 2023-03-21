@@ -171,8 +171,8 @@ func main() {
 	fs.AddFlagSet(optFlags)
 
 	root := &cobra.Command{
-		Short:        "disruption-budget-manager",
-		Long:         "disruption-budget-manager",
+		Short:        "draino",
+		Long:         "draino",
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().AddFlagSet(fs)

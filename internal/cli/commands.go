@@ -15,11 +15,12 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/DataDog/compute-go/table"
+	"k8s.io/apimachinery/pkg/util/duration"
+
 	"github.com/planetlabs/draino/internal/candidate_runner"
 	"github.com/planetlabs/draino/internal/diagnostics"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
-	"k8s.io/apimachinery/pkg/util/duration"
 )
 
 type CLICommands struct {
@@ -28,7 +29,7 @@ type CLICommands struct {
 	groupName string
 
 	tableOutputParams table.OutputParameters
-	outputFormat      outputFormatType
+	outputFormat      OutputFormatType
 	perferDuration    bool
 	nodeName          string
 }
@@ -39,14 +40,18 @@ func (h *CLICommands) Commands() []*cobra.Command {
 
 func (h *CLICommands) setTableFlags(f *pflag.FlagSet) {
 	f.VarP(&h.outputFormat, "output", "o", "output format (table|json)")
-	f.BoolVarP(&h.tableOutputParams.NoHeader, "no-header", "", false, "do not display table header")
 	f.BoolVarP(&h.perferDuration, "prefer-duration", "", true, "display duration instead of timestamp where it makes sense")
-	f.StringVarP(&h.tableOutputParams.Separator, "separator", "s", "\t|", "column Separator in table output")
-	f.IntVarP(&h.tableOutputParams.Padding, "padding", "", 3, "Padding in table output")
-	f.StringArrayVarP(&h.tableOutputParams.Sort, "sort", "", []string{"group"}, "comma separated list of columns for sorting table output")
-	f.StringArrayVarP(&h.tableOutputParams.ColumnsVisible, "visible", "", nil, "comma separated list of visible columns for table output")
-	f.StringArrayVarP(&h.tableOutputParams.ColumnsHide, "hidden", "", nil, "comma separated list of hidden columns for table output")
-	f.StringArrayVarP(&h.tableOutputParams.Filter, "filter", "", nil, "filtering expression for table output")
+	SetTableOutputParameters(&h.tableOutputParams, f)
+}
+
+func SetTableOutputParameters(t *table.OutputParameters, f *pflag.FlagSet) {
+	f.BoolVarP(&t.NoHeader, "no-header", "", false, "do not display table header")
+	f.StringVarP(&t.Separator, "separator", "s", "\t|", "column Separator in table output")
+	f.IntVarP(&t.Padding, "padding", "", 3, "Padding in table output")
+	f.StringArrayVarP(&t.Sort, "sort", "", []string{"group"}, "comma separated list of columns for sorting table output")
+	f.StringArrayVarP(&t.ColumnsVisible, "visible", "", nil, "comma separated list of visible columns for table output")
+	f.StringArrayVarP(&t.ColumnsHide, "hidden", "", nil, "comma separated list of hidden columns for table output")
+	f.StringArrayVarP(&t.Filter, "filter", "", nil, "filtering expression for table output")
 }
 
 func (h *CLICommands) buildGroupCmd() *cobra.Command {
@@ -193,7 +198,7 @@ func (h *CLICommands) cmdGroupNodes() error {
 		return err
 	}
 
-	if h.outputFormat == formatJSON {
+	if h.outputFormat == FormatJSON {
 		fmt.Printf("%s", string(b))
 		return nil
 	}
@@ -257,7 +262,7 @@ func (h *CLICommands) cmdGroupList() error {
 		return err
 	}
 
-	if h.outputFormat == formatJSON {
+	if h.outputFormat == FormatJSON {
 		fmt.Printf("%s", string(b))
 		return nil
 	}

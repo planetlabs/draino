@@ -1,18 +1,18 @@
 package cli
 
-type outputFormatType string
+type OutputFormatType string
 
-func (o *outputFormatType) String() string {
+func (o *OutputFormatType) String() string {
 	if *o != "" {
 		return string(*o)
 	} else {
-		return string(formatTable)
+		return string(FormatTable)
 	}
 }
-func (o *outputFormatType) Set(s string) error { *o = outputFormatType(s); return nil }
-func (o *outputFormatType) Type() string       { return "outputFormatType" }
+func (o *OutputFormatType) Set(s string) error { *o = OutputFormatType(s); return nil }
+func (o *OutputFormatType) Type() string       { return "outputFormatType" }
 
 const (
-	formatJSON  outputFormatType = "json"
-	formatTable outputFormatType = "table"
+	FormatJSON  OutputFormatType = "json"
+	FormatTable OutputFormatType = "table"
 )
