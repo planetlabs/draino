@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/DataDog/compute-go/kubeclient"
 	"github.com/DataDog/compute-go/table"
 	"github.com/spf13/cobra"
 	v1 "k8s.io/api/core/v1"
@@ -30,7 +31,7 @@ type taintCommandFlags struct {
 
 var taintCmdFlags taintCommandFlags
 
-func TaintCmd(kclient client.Client) *cobra.Command {
+func TaintCmd(kubecfg *kubeclient.Config) *cobra.Command {
 	taintCmd := &cobra.Command{
 		Use:     "taint",
 		Aliases: []string{"taint", "taints"},
@@ -48,6 +49,10 @@ func TaintCmd(kclient client.Client) *cobra.Command {
 		SuggestFor: []string{"list"},
 		Args:       cobra.MaximumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			kclient, err := GetKubeClient(kubecfg)
+			if err != nil {
+				return err
+			}
 			nodes, err := listNodeFilter(kclient, taintCmdFlags.nodeName, taintCmdFlags.nodegroupName, taintCmdFlags.nodegroupNamespace)
 			if err != nil {
 				return err
@@ -66,6 +71,10 @@ func TaintCmd(kclient client.Client) *cobra.Command {
 		SuggestFor: []string{"delete"},
 		Args:       cobra.MaximumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			kclient, err := GetKubeClient(kubecfg)
+			if err != nil {
+				return err
+			}
 			nodes, err := listNodeFilter(kclient, taintCmdFlags.nodeName, taintCmdFlags.nodegroupName, taintCmdFlags.nodegroupNamespace)
 			if err != nil {
 				return err
@@ -122,6 +131,11 @@ func TaintCmd(kclient client.Client) *cobra.Command {
 				taintValue = k8sclient.TaintDrainCandidate
 			default:
 				return fmt.Errorf("unknown NLA taint value")
+			}
+
+			kclient, err := GetKubeClient(kubecfg)
+			if err != nil {
+				return err
 			}
 
 			var node v1.Node
