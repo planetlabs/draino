@@ -13,4 +13,5 @@ const (
 	TagRunnerName    = "runner_name"
 	TagComponentName = "component"
 	TagReason        = "reason"
+	TagDryRun        = "dry_run"
 )

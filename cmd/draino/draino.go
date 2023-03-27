@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/planetlabs/draino/internal/diagnostics"
+	"github.com/planetlabs/draino/internal/metrics"
 
 	"github.com/DataDog/compute-go/controllerruntime"
 	"github.com/DataDog/compute-go/infraparameters"
@@ -451,6 +452,8 @@ func main() {
 			logger.Error(err, "failed to setup scope observer with controller runtime")
 			return err
 		}
+
+		metrics.DrainoRunning(kubernetes.Component, options.dryRun)
 
 		logger.Info("Starting manager")
 		if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
