@@ -429,7 +429,7 @@ func main() {
 		scopeObserver := observability.NewScopeObserver(cs, globalConfig, store, options.scopeAnalysisPeriod, filtersDef.cordonPodFilter,
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.optInPodAnnotations...),
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.cordonProtectedPodAnnotations...),
-			filtersDef.nodeLabelFilter, zlog, retryWall, keyGetter, groupRegistry)
+			filtersDef.nodeLabelFilter, zlog, retryWall, keyGetter, groupRegistry, filterFactory.BuildCandidateFilter())
 
 		if options.resetScopeLabel == true {
 			err = mgr.Add(&RunOnce{fn: func(context.Context) error { scopeObserver.Reset(); return nil }})

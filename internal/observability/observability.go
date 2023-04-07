@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/planetlabs/draino/internal/candidate_runner"
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -163,12 +164,14 @@ type DrainoConfigurationObserverImpl struct {
 	groupKeyGetter      groups.GroupKeyGetter
 	runnerInfoGetter    groups.RunnerInfoGetter
 
+	candidateFilter filters.Filter
+
 	metricsObjects metricsObjectsForObserver
 }
 
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
-func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalConfig, runtimeObjectStore kubernetes.RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter kubernetes.PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger, retryWall drain.RetryWall, groupKeyGetter groups.GroupKeyGetter, runnerInfoGetter groups.RunnerInfoGetter) DrainoConfigurationObserver {
+func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalConfig, runtimeObjectStore kubernetes.RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter kubernetes.PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger, retryWall drain.RetryWall, groupKeyGetter groups.GroupKeyGetter, runnerInfoGetter groups.RunnerInfoGetter, candidateFilter filters.Filter) DrainoConfigurationObserver {
 
 	// We are not adding a BucketRateLimiter to that list because the same nodes are going to be appended periodically if the update fails
 	// Failing nodes will already be in the queue with a retry. Added a BucketRL proved to be a problem here is the client side is not able to dequeue
@@ -196,10 +199,17 @@ func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalCon
 		retryWall:            retryWall,
 		groupKeyGetter:       groupKeyGetter,
 		runnerInfoGetter:     runnerInfoGetter,
+		candidateFilter:      candidateFilter,
 	}
 	scopeObserver.metricsObjects.initializeQueueMetrics()
 
 	return scopeObserver
+}
+
+type filteredNodeTags struct {
+	kubernetes.NodeTagsValues
+	filter string
+	group  string
 }
 
 type inScopeTags struct {
@@ -225,6 +235,7 @@ type inScopeCPUTags struct {
 	Condition string
 }
 
+type filteredNodeMetrics map[filteredNodeTags]int64
 type inScopeMetrics map[inScopeTags]int64
 type inScopeCPUMetrics map[inScopeCPUTags]int64
 
@@ -262,6 +273,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					s.addNodeToQueue(node)
 				}
 			}
+			newMetricsFilterValue := filteredNodeMetrics{}
 			newMetricsValue := inScopeMetrics{}
 			newMetricsCPUValue := inScopeCPUMetrics{}
 			// Let's update the metrics
@@ -272,7 +284,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				}
 
 				s.ProduceNodeMetrics(node)
-
+				group := s.groupKeyGetter.GetGroupKey(node) // TODO once we have cleanup legacy code, check how to integrate 'group' directly in GetNodeTagsValues
 				nodeTags := kubernetes.GetNodeTagsValues(node)
 				conditions := kubernetes.GetNodeOffendingConditions(node, s.globalConfig.SuppliedConditions)
 				if node.Annotations == nil {
@@ -322,8 +334,27 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					tCPU.Condition = c
 					newMetricsCPUValue[tCPU] = newMetricsCPUValue[tCPU] + node.Status.Capacity.Cpu().Value()
 				}
+
+				//filter tags
+				filterTags := filteredNodeTags{
+					NodeTagsValues: nodeTags,
+					group:          string(group),
+				}
+				filterOutputs := s.candidateFilter.FilterNode(context.Background(), node)
+				if !filterOutputs.Keep {
+					for _, check := range filterOutputs.Checks {
+						if check.Keep {
+							continue
+						}
+						ftags := filterTags
+						ftags.filter = check.FilterName
+						newMetricsFilterValue[ftags] = newMetricsFilterValue[ftags] + 1
+					}
+				}
+
 			}
 			s.updateGauges(newMetricsValue, newMetricsCPUValue)
+			s.updateAutoCleanupGauges(newMetricsFilterValue)
 		}
 	}
 }
@@ -424,6 +455,13 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 			tag.Upsert(kubernetes.TagConditions, tagsValues.Condition),
 			tag.Upsert(kubernetes.TagInScope, strconv.FormatBool(tagsValues.InScope)))
 		stats.Record(allTags, s.metricsObjects.MeasureCPUsWithNodeOptions.M(count))
+	}
+}
+
+func (s *DrainoConfigurationObserverImpl) updateAutoCleanupGauges(filterNodes filteredNodeMetrics) {
+	for tagsValues, count := range filterNodes {
+		tags := []string{tagsValues.NgName, tagsValues.NgNamespace, tagsValues.group, tagsValues.filter}
+		nodeFilterCleaner.SetAndPlanCleanup(float64(count), tags, false, s.analysisPeriod, false)
 	}
 }
 

@@ -5,12 +5,22 @@ import (
 	"time"
 
 	gmetrics "github.com/DataDog/compute-go/metrics"
-	"github.com/planetlabs/draino/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/planetlabs/draino/internal/metrics"
 )
 
 var (
 	registerMetricsOnce sync.Once
+
+	// Filters Subsystem
+	nodeFiltersTags = []string{metrics.TagNodegroupName, metrics.TagNodegroupNamespace, metrics.TagGroupKey, metrics.TagFilter}
+	nodeFilters     = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: metrics.FiltersSubsystem,
+		Name:      "node_filters",
+		Help:      "Number of node filtered",
+	}, nodeFiltersTags)
+	nodeFilterCleaner gmetrics.GaugeCleaner
 
 	// Retry Wall Subsystem
 	nodeRetriesTags = []string{metrics.TagNodeName, metrics.TagGroupKey}
@@ -83,6 +93,9 @@ var (
 )
 
 func initGaugeCleaner(cleanupPeriod time.Duration) {
+	// Filter Subsystem
+	nodeFilterCleaner = gmetrics.NewGaugeCleaner(nodeFilters, nodeFiltersTags, cleanupPeriod)
+
 	// Retry Wall Subsystem
 	nodeRetriesCleaner = gmetrics.NewGaugeCleaner(nodeRetries, nodeRetriesTags, cleanupPeriod)
 
@@ -102,6 +115,8 @@ func initGaugeCleaner(cleanupPeriod time.Duration) {
 func RegisterNewMetrics(registry *prometheus.Registry, cleanupPeriod time.Duration) {
 	registerMetricsOnce.Do(func() {
 		initGaugeCleaner(cleanupPeriod)
+		// Filter Subsystem
+		registry.MustRegister(nodeFilters)
 
 		// Retry Wall Subsystem
 		registry.MustRegister(nodeRetries)
