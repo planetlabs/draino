@@ -294,6 +294,7 @@ func (runner *drainRunner) checkPreprocessors(ctx context.Context, candidate *co
 			continue
 		}
 		if reason != "" && reason != preprocessor.PreProcessNotDoneReasonProcessing {
+			CounterPreProcessorFailures(candidate, pre.GetName(), string(reason), string(groupKey))
 			runner.logger.Info("cannot finish pre-processing node, aborting", "node", candidate.Name, "preprocessor", pre.GetName(), "reason", reason)
 			shouldAbort = true
 			abortReason = string(reason)

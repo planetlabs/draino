@@ -34,7 +34,6 @@ func (factory *FilterFactory) BuildCandidateFilter() Filter {
 		NewDrainBufferFilter(factory.conf.drainBuffer, factory.conf.clock, factory.conf.groupKeyGetter),
 		NewGlobalBlockerFilter(factory.conf.globalBlocker),
 		NewPVCBoundFilter(factory.conf.pvcProtector, factory.conf.eventRecorder),
-		NewFailedNodeReplacementFilter(),
 	}
 	return f
 }

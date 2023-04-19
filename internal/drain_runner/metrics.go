@@ -8,16 +8,22 @@ import (
 	core "k8s.io/api/core/v1"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/metrics"
 )
 
 var (
 	Metrics = struct {
-		DrainedNodes *prometheus.CounterVec
+		DrainedNodes         *prometheus.CounterVec
+		PreProcessorFailures *prometheus.CounterVec
 	}{
 		DrainedNodes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "draino_drained_nodes_total",
 			Help: "Number of nodes drained.",
 		}, []string{kubernetes.TagResult.Name(), kubernetes.TagFailureCause.Name(), kubernetes.TagConditions.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name()}),
+		PreProcessorFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "pre_processor_failures",
+			Help: "Number of failures per nodegroup",
+		}, []string{metrics.TagPreProcessor, metrics.TagReason, metrics.TagNodegroupName, metrics.TagNodegroupNamespace, metrics.TagGroupKey}),
 	}
 	registerOnce sync.Once
 )
@@ -45,6 +51,11 @@ func CounterDrainedNodes(node *core.Node, result DrainNodesResult, conditions []
 		tags := []string{string(result), string(failureReason), c, values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team}
 		Metrics.DrainedNodes.WithLabelValues(tags...).Add(1)
 	}
+}
+
+func CounterPreProcessorFailures(node *core.Node, preProcName, reason, drainGroup string) {
+	values := kubernetes.GetNodeTagsValues(node)
+	Metrics.PreProcessorFailures.WithLabelValues(preProcName, reason, values.NgName, values.NgNamespace, drainGroup).Add(1)
 }
 
 const (

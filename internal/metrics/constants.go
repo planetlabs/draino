@@ -18,4 +18,5 @@ const (
 	TagReason             = "reason"
 	TagDryRun             = "dry_run"
 	TagFilter             = "filter"
+	TagPreProcessor       = "pre_processor"
 )
