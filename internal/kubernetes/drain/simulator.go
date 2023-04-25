@@ -15,14 +15,11 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"github.com/planetlabs/draino/internal/limit"
-	"golang.org/x/mod/semver"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
-	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/version"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -32,10 +29,6 @@ const (
 
 	eventDrainSimulationFailed    = "DrainSimulationFailed"
 	eventEvictionSimulationFailed = "EvictionSimulationFailed"
-
-	// Starting at v1.22, we should use policy/v1 instead of policy/v1beta1 for evictions
-	// https://kubernetes.io/docs/concepts/scheduling-eviction/api-eviction/#calling-the-eviction-api
-	KubeMinVersionEvictionPolicyV1 = "v1.22.0"
 )
 
 type DrainSimulator interface {
@@ -55,9 +48,8 @@ type drainSimulatorImpl struct {
 	rateLimiter   limit.RateLimiter
 	logger        logr.Logger
 	// skipPodFilter will be used to evaluate if pods running on a node should go through the eviction simulation
-	skipPodFilter          kubernetes.PodFilterFunc
-	podResultCache         utils.TTLCache[simulationResult]
-	usePolicyV1ForEviction bool
+	skipPodFilter  kubernetes.PodFilterFunc
+	podResultCache utils.TTLCache[simulationResult]
 }
 
 type simulationResult struct {
@@ -73,21 +65,18 @@ func NewDrainSimulator(
 	client client.Client,
 	indexer *index.Indexer,
 	skipPodFilter kubernetes.PodFilterFunc,
-	kubeVersion *version.Info,
 	eventRecorder kubernetes.EventRecorder,
 	rateLimiter limit.RateLimiter,
 	logger logr.Logger,
 ) DrainSimulator {
-	usePolicyV1 := semver.Compare(kubeVersion.String(), KubeMinVersionEvictionPolicyV1) >= 0
 	simulator := &drainSimulatorImpl{
-		podIndexer:             indexer,
-		pdbIndexer:             indexer,
-		client:                 client,
-		skipPodFilter:          skipPodFilter,
-		usePolicyV1ForEviction: usePolicyV1,
-		eventRecorder:          eventRecorder,
-		rateLimiter:            rateLimiter,
-		logger:                 logger.WithName("EvictionSimulator"),
+		podIndexer:    indexer,
+		pdbIndexer:    indexer,
+		client:        client,
+		skipPodFilter: skipPodFilter,
+		eventRecorder: eventRecorder,
+		rateLimiter:   rateLimiter,
+		logger:        logger.WithName("EvictionSimulator"),
 
 		// TODO think about using alternative solutions like a MRU cache
 		podResultCache: utils.NewTTLCache[simulationResult](3*time.Minute, 10*time.Second),
@@ -217,28 +206,14 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodEviction")
 	defer span.Finish()
 
-	var eviction client.Object
-
-	if sim.usePolicyV1ForEviction {
-		eviction = &policyv1.Eviction{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      pod.GetName(),
-				Namespace: pod.GetNamespace(),
-			},
-			DeleteOptions: &metav1.DeleteOptions{
-				DryRun: []string{"All"},
-			},
-		}
-	} else {
-		eviction = &policyv1beta1.Eviction{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      pod.GetName(),
-				Namespace: pod.GetNamespace(),
-			},
-			DeleteOptions: &metav1.DeleteOptions{
-				DryRun: []string{"All"},
-			},
-		}
+	eviction := &policyv1.Eviction{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pod.GetName(),
+			Namespace: pod.GetNamespace(),
+		},
+		DeleteOptions: &metav1.DeleteOptions{
+			DryRun: []string{"All"},
+		},
 	}
 	err := sim.client.SubResource("eviction").Create(ctx, pod, eviction)
 	if err != nil {

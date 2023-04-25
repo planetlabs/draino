@@ -40,7 +40,7 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	policy "k8s.io/api/policy/v1beta1"
+	policy "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -781,7 +781,7 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(ctx context.Context, node *cor
 	return d.evictionSequence(ctx, node, pod, abort,
 		// eviction function
 		func() error {
-			return d.c.CoreV1().Pods(pod.GetNamespace()).Evict(ctx, &policy.Eviction{
+			return d.c.CoreV1().Pods(pod.GetNamespace()).EvictV1(ctx, &policy.Eviction{
 				ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
 			})
 		},

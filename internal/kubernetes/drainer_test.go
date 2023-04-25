@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
-	policy "k8s.io/api/policy/v1beta1"
+	policy "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -787,7 +787,7 @@ func TestSerializePolicy(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName()},
 	}
 
-	assert.Equal(t, "{\"kind\":\"Eviction\",\"apiVersion\":\"policy/v1beta1\",\"metadata\":{\"name\":\"test-pod\",\"namespace\":\"test-namespace\",\"creationTimestamp\":null}}\n", string(GetEvictionJsonPayload(evictionPayload).Bytes()))
+	assert.Equal(t, "{\"kind\":\"Eviction\",\"apiVersion\":\"policy/v1\",\"metadata\":{\"name\":\"test-pod\",\"namespace\":\"test-namespace\",\"creationTimestamp\":null}}\n", string(GetEvictionJsonPayload(evictionPayload).Bytes()))
 }
 
 func TestAPICordonDrainer_MarkDrainDelete(t *testing.T) {

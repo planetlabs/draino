@@ -233,11 +233,6 @@ func main() {
 			return err2
 		}
 
-		kubeVersion, err := cs.ServerVersion()
-		if err != nil {
-			return err
-		}
-
 		pods := kubernetes.NewPodWatch(ctx, cs)
 		statefulSets := kubernetes.NewStatefulsetWatch(ctx, cs)
 		deployments := kubernetes.NewDeploymentWatch(ctx, cs)
@@ -356,7 +351,7 @@ func main() {
 
 		simulationPodFilter := kubernetes.NewPodFilters(filtersDef.drainPodFilter, kubernetes.PodOrControllerHasNoneOfTheAnnotations(store, kubernetes.EvictionAPIURLAnnotationKey))
 		simulationRateLimiter := limit.NewRateLimiter(clock.RealClock{}, cfg.KubeClientConfig.QPS*options.simulationRateLimitingRatio, int(float32(cfg.KubeClientConfig.Burst)*options.simulationRateLimitingRatio))
-		simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, simulationPodFilter, kubeVersion, eventRecorder, simulationRateLimiter, logger)
+		simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, simulationPodFilter, eventRecorder, simulationRateLimiter, logger)
 		pdbAnalyser := analyser.NewPDBAnalyser(ctx, mgr.GetLogger(), indexer, clock.RealClock{}, options.podWarmupDelayExtension)
 		sorters := candidate_runner.NodeSorters{
 			sorters.NewAnnotationPrioritizer(store, indexer, eventRecorder, logger),
