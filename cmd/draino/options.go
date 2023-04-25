@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/spf13/pflag"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/spf13/pflag"
 )
 
 // Options collects the program options/parameters
@@ -114,7 +115,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 
 	fs.DurationVar(&opt.minEvictionTimeout, "min-eviction-timeout", kubernetes.DefaultMinEvictionTimeout, "Minimum time we wait to evict a pod. The pod terminationGracePeriod will be used if it is bigger.")
 	fs.DurationVar(&opt.evictionHeadroom, "eviction-headroom", kubernetes.DefaultEvictionOverhead, "Additional time to wait after a pod's termination grace period for it to have been deleted.")
-	fs.DurationVar(&opt.drainBuffer, "drain-buffer", kubernetes.DefaultDrainBuffer, "Minimum time between starting each drain. Nodes are always cordoned immediately.")
+	fs.DurationVar(&opt.drainBuffer, "drain-buffer", kubernetes.DefaultDrainBuffer, "Delay to respect between end of previous drain (success or error) and a new attempt within a drain-group.")
 	fs.StringVar(&opt.drainBufferConfigMapName, "drain-buffer-configmap-name", "", "The name of the configmap used to persist the drain-buffer values. Default will be draino-<config-name>-drain-buffer.")
 	fs.DurationVar(&opt.schedulingRetryBackoffDelay, "retry-backoff-delay", kubernetes.DefaultSchedulingRetryBackoffDelay, "Additional delay to add between retry schedules.")
 	fs.DurationVar(&opt.maxNotReadyNodesPeriod, "max-notready-nodes-period", kubernetes.DefaultMaxNotReadyNodesPeriod, "Polling period to check all nodes readiness")

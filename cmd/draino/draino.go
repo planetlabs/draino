@@ -296,7 +296,8 @@ func main() {
 		keyGetter := groups.NewGroupKeyFromNodeMetadata(mgr.GetClient(), mgr.GetLogger(), eventRecorder, indexer, store, strings.Split(options.drainGroupLabelKey, ","), []string{kubernetes.DrainGroupAnnotation}, kubernetes.DrainGroupOverrideAnnotation)
 
 		staticRetryStrategy := &drain.StaticRetryStrategy{AlertThreashold: 7, Delay: options.schedulingRetryBackoffDelay}
-		retryWall, errRW := drain.NewRetryWall(mgr.GetClient(), mgr.GetLogger(), staticRetryStrategy)
+		exponentialRetryStrategy := &drain.ExponentialRetryStrategy{AlertThreashold: 7, Delay: options.schedulingRetryBackoffDelay}
+		retryWall, errRW := drain.NewRetryWall(mgr.GetClient(), mgr.GetLogger(), staticRetryStrategy, exponentialRetryStrategy)
 		if errRW != nil {
 			return errRW
 		}

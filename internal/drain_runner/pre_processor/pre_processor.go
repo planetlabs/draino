@@ -15,7 +15,7 @@ type PreProcessNotDoneReason string
 const (
 	PreProcessNotDoneReasonProcessing PreProcessNotDoneReason = "processing"
 	PreProcessNotDoneReasonTimeout    PreProcessNotDoneReason = "timeout"
-	PreProcessNotDoneReasonFailure    PreProcessNotDoneReason = "pre_prcessing_failure"
+	PreProcessNotDoneReasonFailure    PreProcessNotDoneReason = "pre_processing_failure"
 )
 
 // DrainPreProcessor is used to execute pre-drain activities.
