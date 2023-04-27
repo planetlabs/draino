@@ -30,8 +30,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 
 	"github.com/DataDog/go-service-authn/pkg/serviceauthentication/authnclient"
 	"go.opencensus.io/tag"
@@ -55,6 +56,11 @@ import (
 
 // Default pod eviction settings.
 const (
+	SetConditionTimeout     = 10 * time.Second
+	SetConditionRetryPeriod = 50 * time.Millisecond
+
+	CustomRetryMaxAttemptAnnotation = "draino/retry-max-attempt"
+
 	DefaultMinEvictionTimeout           = 8 * time.Minute
 	DefaultEvictionOverhead             = 30 * time.Second
 	DefaultPVCRecreateTimeout           = 3 * time.Minute

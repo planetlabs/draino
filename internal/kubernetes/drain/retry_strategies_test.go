@@ -4,10 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
 func TestExponentialRetryStrategy(t *testing.T) {
@@ -76,7 +77,7 @@ func TestNodeAnnotationRetryStrategy(t *testing.T) {
 		},
 		{
 			Name:            "Shloud use retry delay from node",
-			Node:            &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{kubernetes.CustomRetryBackoffDelayAnnotation: "10s"}}},
+			Node:            &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{CustomRetryBackoffDelayAnnotation: "10s"}}},
 			DefaultStrategy: &StaticRetryStrategy{Delay: time.Minute, AlertThreashold: 10},
 			ExpectedRetries: 10,
 			ExpectedDelay:   10 * time.Second,
@@ -84,8 +85,8 @@ func TestNodeAnnotationRetryStrategy(t *testing.T) {
 		{
 			Name: "Shloud use retry delay & max retries from node",
 			Node: &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{
-				kubernetes.CustomRetryBackoffDelayAnnotation: "10s",
-				kubernetes.CustomRetryMaxAttemptAnnotation:   "5",
+				CustomRetryBackoffDelayAnnotation:          "10s",
+				kubernetes.CustomRetryMaxAttemptAnnotation: "5",
 			}}},
 			DefaultStrategy: &StaticRetryStrategy{Delay: time.Minute, AlertThreashold: 10},
 			ExpectedRetries: 5,
@@ -93,7 +94,7 @@ func TestNodeAnnotationRetryStrategy(t *testing.T) {
 		},
 		{
 			Name:              "Shloud use default retry delay if node annotation is not parsable",
-			Node:              &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{kubernetes.CustomRetryBackoffDelayAnnotation: "10seconds"}}},
+			Node:              &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{CustomRetryBackoffDelayAnnotation: "10seconds"}}},
 			DefaultStrategy:   &StaticRetryStrategy{Delay: time.Minute, AlertThreashold: 10},
 			ShouldReturnError: true,
 			ExpectedRetries:   10,
@@ -110,8 +111,8 @@ func TestNodeAnnotationRetryStrategy(t *testing.T) {
 		{
 			Name: "Shloud use node annotation retry even if one of the settings is not parsable",
 			Node: &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{
-				kubernetes.CustomRetryBackoffDelayAnnotation: "10seconds",
-				kubernetes.CustomRetryMaxAttemptAnnotation:   "5",
+				CustomRetryBackoffDelayAnnotation:          "10seconds",
+				kubernetes.CustomRetryMaxAttemptAnnotation: "5",
 			}}},
 			DefaultStrategy:   &StaticRetryStrategy{Delay: time.Minute, AlertThreashold: 10},
 			ShouldReturnError: true,

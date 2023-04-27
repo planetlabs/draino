@@ -5,10 +5,17 @@ import (
 
 	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+)
+
+const (
+	PreprovisioningAnnotationKey        = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
+	PreprovisioningAnnotationValue      = "true"
+	PreprovisioningFalseAnnotationValue = "false"
 )
 
 type NodeReplacer struct {
@@ -73,7 +80,7 @@ func (_ *NodeReplacementPreProcessor) GetName() string {
 }
 
 func (pre *NodeReplacementPreProcessor) IsDone(ctx context.Context, node *corev1.Node) (bool, PreProcessNotDoneReason, error) {
-	if !kubernetes.HasPreprovisioningAnnotation(node, pre.allNodesByDefault) {
+	if !HasPreprovisioningAnnotation(node, pre.allNodesByDefault) {
 		return true, "", nil
 	}
 
@@ -87,4 +94,11 @@ func (pre *NodeReplacementPreProcessor) IsDone(ctx context.Context, node *corev1
 
 func (pre *NodeReplacementPreProcessor) Reset(ctx context.Context, node *corev1.Node) error {
 	return pre.nodeReplacer.ResetReplacement(ctx, node)
+}
+
+func HasPreprovisioningAnnotation(node *corev1.Node, allNodesByDefault bool) bool {
+	if node.Annotations == nil {
+		return allNodesByDefault
+	}
+	return node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningAnnotationValue || (allNodesByDefault && !(node.Annotations[PreprovisioningAnnotationKey] == PreprovisioningFalseAnnotationValue))
 }

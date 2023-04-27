@@ -12,6 +12,12 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 )
 
+const (
+	DefaultPreprovisioningTimeout      = 1*time.Hour + 20*time.Minute
+	DefaultPreprovisioningCheckPeriod  = 30 * time.Second
+	DefaultSchedulingRetryBackoffDelay = 23 * time.Minute
+)
+
 // Options collects the program options/parameters
 type Options struct {
 	noLegacyNodeHandler         bool
@@ -117,12 +123,12 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.evictionHeadroom, "eviction-headroom", kubernetes.DefaultEvictionOverhead, "Additional time to wait after a pod's termination grace period for it to have been deleted.")
 	fs.DurationVar(&opt.drainBuffer, "drain-buffer", kubernetes.DefaultDrainBuffer, "Delay to respect between end of previous drain (success or error) and a new attempt within a drain-group.")
 	fs.StringVar(&opt.drainBufferConfigMapName, "drain-buffer-configmap-name", "", "The name of the configmap used to persist the drain-buffer values. Default will be draino-<config-name>-drain-buffer.")
-	fs.DurationVar(&opt.schedulingRetryBackoffDelay, "retry-backoff-delay", kubernetes.DefaultSchedulingRetryBackoffDelay, "Additional delay to add between retry schedules.")
+	fs.DurationVar(&opt.schedulingRetryBackoffDelay, "retry-backoff-delay", DefaultSchedulingRetryBackoffDelay, "Additional delay to add between retry schedules.")
 	fs.DurationVar(&opt.maxNotReadyNodesPeriod, "max-notready-nodes-period", kubernetes.DefaultMaxNotReadyNodesPeriod, "Polling period to check all nodes readiness")
 	fs.DurationVar(&opt.maxPendingPodsPeriod, "max-pending-pods-period", kubernetes.DefaultMaxPendingPodsPeriod, "Polling period to check volume of pending pods")
 	fs.DurationVar(&opt.durationBeforeReplacement, "duration-before-replacement", kubernetes.DefaultDurationBeforeReplacement, "Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.")
-	fs.DurationVar(&opt.preprovisioningTimeout, "preprovisioning-timeout", kubernetes.DefaultPreprovisioningTimeout, "Timeout for a node to be preprovisioned before draining")
-	fs.DurationVar(&opt.preprovisioningCheckPeriod, "preprovisioning-check-period", kubernetes.DefaultPreprovisioningCheckPeriod, "Period to check if a node has been preprovisioned")
+	fs.DurationVar(&opt.preprovisioningTimeout, "preprovisioning-timeout", DefaultPreprovisioningTimeout, "Timeout for a node to be preprovisioned before draining")
+	fs.DurationVar(&opt.preprovisioningCheckPeriod, "preprovisioning-check-period", DefaultPreprovisioningCheckPeriod, "Period to check if a node has been preprovisioned")
 	fs.DurationVar(&opt.scopeAnalysisPeriod, "scope-analysis-period", 5*time.Minute, "Period to run the scope analysis and generate metric")
 	fs.DurationVar(&opt.groupRunnerPeriod, "group-runner-period", 10*time.Second, "Period for running the group runner")
 	fs.DurationVar(&opt.podWarmupDelayExtension, "pod-warmup-delay-extension", 30*time.Second, "Extra delay given to the pod to complete is warmup phase (all containers have passed their startProbes)")

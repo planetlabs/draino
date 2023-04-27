@@ -23,6 +23,7 @@ import (
 	"github.com/planetlabs/draino/internal/candidate_runner"
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	"github.com/planetlabs/draino/internal/drain_runner"
+	"github.com/planetlabs/draino/internal/drain_runner/pre_processor"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
@@ -218,8 +219,6 @@ type inScopeTags struct {
 	InScope                         bool
 	PreprovisioningEnabled          bool
 	PVCManagementEnabled            bool
-	DrainRetry                      bool
-	DrainRetryFailed                bool
 	DrainRetryCustomMaxAttempts     bool
 	UserOptOutViaPodAnnotation      bool
 	UserOptInViaPodAnnotation       bool
@@ -297,10 +296,8 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					NodeTagsValues:                  nodeTags,
 					DrainStatus:                     getDrainStatusStr(node),
 					InScope:                         NodeInScopeWithConditionCheck(conditions, node),
-					PreprovisioningEnabled:          node.Annotations[kubernetes.PreprovisioningAnnotationKey] == kubernetes.PreprovisioningAnnotationValue,
+					PreprovisioningEnabled:          node.Annotations[pre_processor.PreprovisioningAnnotationKey] == pre_processor.PreprovisioningAnnotationValue,
 					PVCManagementEnabled:            s.HasPodWithPVCManagementEnabled(node),
-					DrainRetry:                      kubernetes.DrainRetryEnabled(node),
-					DrainRetryFailed:                kubernetes.HasDrainRetryFailedAnnotation(node),
 					DrainRetryCustomMaxAttempts:     !useDefaultRetryMaxAttempt,
 					UserOptOutViaPodAnnotation:      s.HasPodWithUserOptOutAnnotation(node),
 					UserOptInViaPodAnnotation:       s.HasPodWithUserOptInAnnotation(node),
@@ -436,8 +433,6 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 			tag.Upsert(kubernetes.TagInScope, strconv.FormatBool(tagsValues.InScope)),
 			tag.Upsert(kubernetes.TagPreprovisioning, strconv.FormatBool(tagsValues.PreprovisioningEnabled)),
 			tag.Upsert(kubernetes.TagPVCManagement, strconv.FormatBool(tagsValues.PVCManagementEnabled)),
-			tag.Upsert(kubernetes.TagDrainRetry, strconv.FormatBool(tagsValues.DrainRetry)),
-			tag.Upsert(kubernetes.TagDrainRetryFailed, strconv.FormatBool(tagsValues.DrainRetryFailed)),
 			tag.Upsert(kubernetes.TagDrainRetryCustomMaxAttempt, strconv.FormatBool(tagsValues.DrainRetryCustomMaxAttempts)),
 			tag.Upsert(kubernetes.TagUserEvictionURL, strconv.FormatBool(tagsValues.TagUserEvictionURLViaAnnotation)),
 			tag.Upsert(kubernetes.TagUserOptInViaPodAnnotation, strconv.FormatBool(tagsValues.UserOptInViaPodAnnotation)),
@@ -500,13 +495,32 @@ func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string,
 	return valueDesired, valueDesired != valueOriginal, nil
 }
 
+func IsNodeNLAEnableByLabel(n *v1.Node) (hasLabel, enabled bool) {
+	if n.Labels == nil {
+		return false, true
+	}
+	v, ok := n.Labels[kubernetes.NodeNLAEnableLabelKey]
+	if !ok {
+		return false, true
+	}
+
+	switch v {
+	case "true":
+		return true, true
+	case "false":
+		return true, false
+	}
+
+	return false, true // unknown label value is just like if the label does not exist
+}
+
 // IsInScope return if the node is in scope of the running configuration. If not it also return the reason for not being in scope.
 func (s *DrainoConfigurationObserverImpl) IsInScope(node *v1.Node) (inScope bool, reasonIfnOtInScope string, err error) {
 	if !s.nodeFilterFunc(node) {
 		return false, "labelSelection", nil
 	}
 
-	if hasLabel, enabled := kubernetes.IsNodeNLAEnableByLabel(node); hasLabel {
+	if hasLabel, enabled := IsNodeNLAEnableByLabel(node); hasLabel {
 		if !enabled {
 			return false, "Node label explicit opt-out", nil
 		}

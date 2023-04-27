@@ -5,18 +5,19 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
 func TestNodeReplacementPreProcessor(t *testing.T) {
-	trueVal := kubernetes.PreprovisioningAnnotationValue
-	falseVal := kubernetes.PreprovisioningFalseAnnotationValue
+	trueVal := PreprovisioningAnnotationValue
+	falseVal := PreprovisioningFalseAnnotationValue
 
 	requestedVal := kubernetes.NodeLabelKeyReplaceRequest
 	doneVal := kubernetes.NodeLabelValueReplaceDone
@@ -115,7 +116,7 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 func createNodeToReplace(annotationVal *string, labelVal *string) corev1.Node {
 	annotaions := map[string]string{}
 	if annotationVal != nil {
-		annotaions[kubernetes.PreprovisioningAnnotationKey] = *annotationVal
+		annotaions[PreprovisioningAnnotationKey] = *annotationVal
 	}
 	labels := map[string]string{}
 	if labelVal != nil {

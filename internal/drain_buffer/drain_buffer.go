@@ -8,15 +8,17 @@ import (
 	"time"
 
 	"github.com/DataDog/compute-go/logs"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/duration"
 
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/groups"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/clock"
+
+	"github.com/planetlabs/draino/internal/groups"
 )
 
 // DrainBuffer will store information about the last successful drains
@@ -68,11 +70,13 @@ type drainBufferImpl struct {
 
 const (
 	eventDrainBufferBadConfiguration = "DrainBufferBadConfiguration"
+
+	CustomDrainBufferAnnotation = "draino/drain-buffer"
 )
 
 // GetDrainBufferConfigurationDetails retrieve all the drain configuration details
 func (buffer *drainBufferImpl) GetDrainBufferConfigurationDetails(ctx context.Context, node *v1.Node) (*kubernetes.MetadataSearch[time.Duration], error) {
-	return kubernetes.SearchAnnotationFromNodeAndThenPodOrController(ctx, buffer.podIndexer, buffer.store, time.ParseDuration, kubernetes.CustomDrainBufferAnnotation, node, false, false)
+	return kubernetes.SearchAnnotationFromNodeAndThenPodOrController(ctx, buffer.podIndexer, buffer.store, time.ParseDuration, CustomDrainBufferAnnotation, node, false, false)
 }
 
 // GetDrainBufferConfiguration does a best effort to find a valid configuration and always return a value. The error can be non nil if something went wrong during the processing, still the value can be used. Worst case you get the default value.

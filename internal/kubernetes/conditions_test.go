@@ -7,8 +7,6 @@ import (
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
 )
 
 func TestOffendingConditions(t *testing.T) {
@@ -144,8 +142,8 @@ func TestOffendingConditions(t *testing.T) {
 				t.Errorf(err.Error())
 				return
 			}
-			h := NewDrainingResourceEventHandler(fake.NewSimpleClientset(), &NoopCordonDrainer{}, nil, NewEventRecorder(&record.FakeRecorder{}), WithGlobalConfigHandler(GlobalConfig{SuppliedConditions: suppliedConditions}))
-			badConditions := GetNodeOffendingConditions(tc.obj, h.globalConfig.SuppliedConditions)
+
+			badConditions := GetNodeOffendingConditions(tc.obj, suppliedConditions)
 			if !reflect.DeepEqual(badConditions, tc.expected) {
 				t.Errorf("offendingConditions(tc.obj): want %#v, got %#v", tc.expected, badConditions)
 			}

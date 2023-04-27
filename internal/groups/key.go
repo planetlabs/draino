@@ -17,6 +17,11 @@ import (
 
 const DrainGroupAnnotationKey = "node-lifecycle.datadoghq.com/drain-group"
 
+const (
+	DrainGroupAnnotation         = "draino/drain-group"          // this one adds subgroup to the default group (subgroup creation)
+	DrainGroupOverrideAnnotation = "draino/drain-group-override" // this one completely overrides the default group
+)
+
 type GroupKey string
 
 type GroupKeyGetter interface {

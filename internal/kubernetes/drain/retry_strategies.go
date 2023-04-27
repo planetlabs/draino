@@ -4,8 +4,13 @@ import (
 	"math"
 	"time"
 
-	"github.com/planetlabs/draino/internal/kubernetes"
 	v1 "k8s.io/api/core/v1"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+)
+
+const (
+	CustomRetryBackoffDelayAnnotation = "draino/retry-delay"
 )
 
 type RetryStrategy interface {
@@ -90,7 +95,7 @@ func buildNodeAnnotationRetryStrategy(node *v1.Node, defaultStrategy RetryStrate
 		nodeRetryStrategy.AlertThreashold = &alertThreashold
 	}
 
-	if val, exist := node.Annotations[kubernetes.CustomRetryBackoffDelayAnnotation]; exist {
+	if val, exist := node.Annotations[CustomRetryBackoffDelayAnnotation]; exist {
 		durationValue, err := time.ParseDuration(val)
 		if err != nil {
 			funcErr = err

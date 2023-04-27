@@ -5,9 +5,6 @@ import (
 	"testing"
 
 	"github.com/go-logr/zapr"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
@@ -15,6 +12,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 func TestGroupKeyFromMetadata_GetGroupKey(t *testing.T) {
@@ -205,7 +206,7 @@ func TestGroupKeyFromMetadata_UpdateGroupKeyOnNode(t *testing.T) {
 			defer close(ch)
 			wrapper.Start(ch)
 
-			g := NewGroupKeyFromNodeMetadata(wrapper.GetManagerClient(), testLogger, kubernetes.NoopEventRecorder{}, fakeIndexer, store, []string{drainGroupLabelKey}, []string{kubernetes.DrainGroupAnnotation}, groupOverrideAnnotationKey)
+			g := NewGroupKeyFromNodeMetadata(wrapper.GetManagerClient(), testLogger, kubernetes.NoopEventRecorder{}, fakeIndexer, store, []string{drainGroupLabelKey}, []string{DrainGroupAnnotation}, groupOverrideAnnotationKey)
 			got, err := g.UpdateGroupKeyOnNode(ctx, tt.node)
 			assert.NoError(t, err, "cannot update node group key")
 			if got != tt.want {
