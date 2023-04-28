@@ -9,11 +9,6 @@ import (
 
 	"github.com/go-logr/zapr"
 
-	"github.com/planetlabs/draino/internal/candidate_runner/filters"
-	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
-	"github.com/planetlabs/draino/internal/groups"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -23,10 +18,16 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	cachecr "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
+	"github.com/planetlabs/draino/internal/groups"
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 type failDrainer struct {
-	kubernetes.NoopCordonDrainer
+	kubernetes.NoopDrainer
 }
 
 func (d *failDrainer) Drain(ctx context.Context, n *v1.Node) error { return errors.New("myerr") }
@@ -66,7 +67,7 @@ func TestDrainRunner(t *testing.T) {
 			Name:            "Should drain the node",
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
-			Drainer:         &kubernetes.NoopCordonDrainer{},
+			Drainer:         &kubernetes.NoopDrainer{},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrained,
 			ExpectedRetries: 0,
@@ -100,7 +101,7 @@ func TestDrainRunner(t *testing.T) {
 			Name:            "Should wait for preprocessor to finish",
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
-			Drainer:         &kubernetes.NoopCordonDrainer{},
+			Drainer:         &kubernetes.NoopDrainer{},
 			Preprocessors:   []preprocessor.DrainPreProcessor{&testPreprocessor{isDone: false}},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrainCandidate,
@@ -110,7 +111,7 @@ func TestDrainRunner(t *testing.T) {
 			Name:            "Can finish if preprocessors are done",
 			Key:             "my-key",
 			Node:            createNode("my-key", k8sclient.TaintDrainCandidate),
-			Drainer:         &kubernetes.NoopCordonDrainer{},
+			Drainer:         &kubernetes.NoopDrainer{},
 			Preprocessors:   []preprocessor.DrainPreProcessor{&testPreprocessor{isDone: true}},
 			ShoulHaveTaint:  true,
 			ExpectedTaint:   k8sclient.TaintDrained,
@@ -130,7 +131,7 @@ func TestDrainRunner(t *testing.T) {
 				},
 			},
 			Filter:         filters.NewNodeWithLabelFilter(nodeLabelsFilterFunc),
-			Drainer:        &kubernetes.NoopCordonDrainer{},
+			Drainer:        &kubernetes.NoopDrainer{},
 			Preprocessors:  []preprocessor.DrainPreProcessor{&testPreprocessor{isDone: true}},
 			ShoulHaveTaint: false,
 		},

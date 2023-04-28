@@ -10,6 +10,9 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/go-logr/logr"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
+
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	preprocessor "github.com/planetlabs/draino/internal/drain_runner/pre_processor"
@@ -17,8 +20,6 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/utils/clock"
 )
 
 type FakeOptions struct {
@@ -60,7 +61,7 @@ func (opts *FakeOptions) ApplyDefaults() error {
 		opts.Clock = clock.RealClock{}
 	}
 	if opts.Drainer == nil {
-		opts.Drainer = &kubernetes.NoopCordonDrainer{}
+		opts.Drainer = &kubernetes.NoopDrainer{}
 	}
 	if opts.RetryStrategy == nil {
 		opts.RetryStrategy = &drain.StaticRetryStrategy{Delay: time.Second, AlertThreashold: 5}

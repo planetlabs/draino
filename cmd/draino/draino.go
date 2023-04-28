@@ -66,8 +66,8 @@ import (
 )
 
 type filtersDefinitions struct {
-	cordonPodFilter kubernetes.PodFilterFunc
-	drainPodFilter  kubernetes.PodFilterFunc
+	candidatePodFilter kubernetes.PodFilterFunc
+	drainPodFilter     kubernetes.PodFilterFunc
 
 	nodeLabelFilter kubernetes.NodeLabelFilterFunc
 }
@@ -98,30 +98,30 @@ func generateFilters(cs *client.Clientset, store kubernetes.RuntimeObjectStore, 
 	}
 	pf = append(pf, kubernetes.UnprotectedPodFilter(store, false, append(systemKnownAnnotations, options.protectedPodAnnotations...)...))
 
-	// Cordon Filtering
-	podFilterCordon := []kubernetes.PodFilterFunc{}
-	if !options.cordonLocalStoragePods {
-		podFilterCordon = append(podFilterCordon, kubernetes.LocalStoragePodFilter)
+	// Candidate Filtering
+	podFilterCandidate := []kubernetes.PodFilterFunc{}
+	if !options.candidateLocalStoragePods {
+		podFilterCandidate = append(podFilterCandidate, kubernetes.LocalStoragePodFilter)
 	}
-	apiResourcesCordon, err := kubernetes.GetAPIResourcesForGVK(cs, options.doNotCordonPodControlledBy, log)
+	apiResourcesPodControllerBy, err := kubernetes.GetAPIResourcesForGVK(cs, options.doNotCandidatePodControlledBy, log)
 	if err != nil {
-		return filtersDefinitions{}, fmt.Errorf("failed to get resources for 'controlledBy' filtering for cordon: %v", err)
+		return filtersDefinitions{}, fmt.Errorf("failed to get resources for 'controlledBy' filtering for being candidate: %v", err)
 	}
-	if len(apiResourcesCordon) > 0 {
-		for _, apiResource := range apiResourcesCordon {
+	if len(apiResourcesPodControllerBy) > 0 {
+		for _, apiResource := range apiResourcesPodControllerBy {
 			if apiResource == nil {
-				log.Info("Filtering pods that are uncontrolled for cordon")
+				log.Info("Filtering pods that are uncontrolled for being candidate")
 			} else {
-				log.Info("Filtering pods controlled by apiresource for cordon", zap.Any("apiresource", *apiResource))
+				log.Info("Filtering pods controlled by apiresource for being candidate", zap.Any("apiresource", *apiResource))
 			}
 		}
-		podFilterCordon = append(podFilterCordon, kubernetes.NewPodControlledByFilter(apiResourcesCordon))
+		podFilterCandidate = append(podFilterCandidate, kubernetes.NewPodControlledByFilter(apiResourcesPodControllerBy))
 	}
-	podFilterCordon = append(podFilterCordon, kubernetes.UnprotectedPodFilter(store, true, options.cordonProtectedPodAnnotations...))
+	podFilterCandidate = append(podFilterCandidate, kubernetes.UnprotectedPodFilter(store, true, options.candidateProtectedPodAnnotations...))
 
 	// To maintain compatibility with draino v1 version we have to exclude pods from STS running on node without local-storage
 	if options.excludeStatefulSetOnNodeWithoutStorage {
-		podFilterCordon = append(podFilterCordon, kubernetes.NewPodFiltersNoStatefulSetOnNodeWithoutDisk(store))
+		podFilterCandidate = append(podFilterCandidate, kubernetes.NewPodFiltersNoStatefulSetOnNodeWithoutDisk(store))
 	}
 
 	consolidatedOptInAnnotations := append(options.optInPodAnnotations, options.shortLivedPodAnnotations...)
@@ -130,10 +130,9 @@ func generateFilters(cs *client.Clientset, store kubernetes.RuntimeObjectStore, 
 			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)),
 			store, options.shortLivedPodAnnotations...))
 
-	// TODO do analysis and check if   drainerSkipPodFilter = NewPodFiltersIgnoreShortLivedPods(cordonPodFilteringFunc) ?
-	cordonPodFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
+	podFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
 		kubernetes.NewPodFiltersWithOptInFirst(
-			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(podFilterCordon...)))
+			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(podFilterCandidate...)))
 
 	// Node filtering
 	if len(options.nodeLabels) > 0 {
@@ -155,9 +154,9 @@ func generateFilters(cs *client.Clientset, store kubernetes.RuntimeObjectStore, 
 
 	return filtersDefinitions{
 		// TODO renmae
-		cordonPodFilter: cordonPodFilteringFunc,
-		drainPodFilter:  drainerSkipPodFilter,
-		nodeLabelFilter: nodeLabelFilterFunc,
+		candidatePodFilter: podFilteringFunc,
+		drainPodFilter:     drainerSkipPodFilter,
+		nodeLabelFilter:    nodeLabelFilterFunc,
 	}, nil
 }
 
@@ -254,7 +253,7 @@ func main() {
 		}
 
 		eventRecorderForDrainerActivities, _ := kubernetes.BuildEventRecorderWithAggregationOnEventTypeAndMessage(zapr.NewLogger(zlog), cs, options.eventAggregationPeriod, options.logEvents)
-		cordonDrainer := kubernetes.NewAPICordonDrainer(cs,
+		drainerAPI := kubernetes.NewAPIDrainer(cs,
 			eventRecorderForDrainerActivities,
 			kubernetes.MaxGracePeriod(options.minEvictionTimeout),
 			kubernetes.EvictionHeadroom(options.evictionHeadroom),
@@ -263,7 +262,7 @@ func main() {
 			kubernetes.WithStorageClassesAllowingDeletion(options.storageClassesAllowingVolumeDeletion),
 			kubernetes.WithMaxDrainAttemptsBeforeFail(options.maxDrainAttemptsBeforeFail),
 			kubernetes.WithGlobalConfig(globalConfig),
-			kubernetes.WithAPICordonDrainerLogger(zlog),
+			kubernetes.WithAPIDrainerLogger(zlog),
 			kubernetes.WithRuntimeObjectStore(store),
 			kubernetes.WithContainerRuntimeClient(mgr.GetClient()),
 		)
@@ -308,7 +307,7 @@ func main() {
 			filters.WithLogger(mgr.GetLogger()),
 			filters.WithRetryWall(retryWall),
 			filters.WithRuntimeObjectStore(store),
-			filters.WithCordonPodFilter(filtersDef.cordonPodFilter),
+			filters.WithPodFilterFunc(filtersDef.candidatePodFilter),
 			filters.WithNodeLabelsFilterFunction(filtersDef.nodeLabelFilter),
 			filters.WithGlobalConfig(globalConfig),
 			filters.WithStabilityPeriodChecker(stabilityPeriodChecker),
@@ -327,7 +326,7 @@ func main() {
 		drainRunnerFactory, err := drain_runner.NewFactory(
 			drain_runner.WithKubeClient(mgr.GetClient()),
 			drain_runner.WithClock(&clock.RealClock{}),
-			drain_runner.WithDrainer(cordonDrainer),
+			drain_runner.WithDrainer(drainerAPI),
 			drain_runner.WithPreprocessors(
 				preprocessor.NewWaitTimePreprocessor(options.waitBeforeDraining),
 				preprocessor.NewNodeReplacementPreProcessor(mgr.GetClient(), options.preprovisioningActivatedByDefault, mgr.GetLogger()),
@@ -422,9 +421,9 @@ func main() {
 			return errCli
 		}
 
-		scopeObserver := observability.NewScopeObserver(cs, globalConfig, store, options.scopeAnalysisPeriod, filtersDef.cordonPodFilter,
+		scopeObserver := observability.NewScopeObserver(cs, globalConfig, store, options.scopeAnalysisPeriod, filtersDef.candidatePodFilter,
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.optInPodAnnotations...),
-			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.cordonProtectedPodAnnotations...),
+			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.candidateProtectedPodAnnotations...),
 			filtersDef.nodeLabelFilter, zlog, retryWall, keyGetter, groupRegistry, filterFactory.BuildCandidateFilter())
 
 		if options.resetScopeLabel == true {

@@ -21,8 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	core "k8s.io/api/core/v1"
 )
 
 const (
@@ -30,14 +28,11 @@ const (
 	DefaultMaxPendingPodsPeriod   = 60 * time.Second
 )
 
-// A PodFilterFunc returns true if the supplied pod passes the filter.
-type LimiterFunc func(n *core.Node, cordonNodes, allNodes []*core.Node) (bool, error)
-
-func ParseCordonMax(param string) (max int, isPercent bool, err error) {
+func ParseMaxInParameter(param string) (max int, isPercent bool, err error) {
 	percent := strings.HasSuffix(param, "%")
 	max, err = strconv.Atoi(strings.TrimSuffix(param, "%"))
 	if err != nil {
-		return -1, percent, errors.New("can't Parse argument for cordon limiter value")
+		return -1, percent, errors.New("can't Parse argument for limiter")
 	}
 	return max, percent, nil
 }

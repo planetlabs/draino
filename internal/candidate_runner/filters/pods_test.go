@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"github.com/go-logr/zapr"
-	"github.com/planetlabs/draino/internal/kubernetes"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
 func TestNewPodFilter(t *testing.T) {
@@ -57,7 +58,7 @@ func TestNewPodFilter(t *testing.T) {
 		want          []*corev1.Node
 	}{
 		{
-			name:          "test cordon filter",
+			name:          "test pod filter",
 			podFilterFunc: podFilterFuncBasedOnNodeName,
 			objects:       []runtime.Object{n1ok, n2Notok, p1, p2},
 			nodes:         []*corev1.Node{n1ok, n2Notok},
@@ -70,7 +71,7 @@ func TestNewPodFilter(t *testing.T) {
 			defer closingFunc()
 			f := NewPodFilter(zapr.NewLogger(zap.NewNop()), tt.podFilterFunc, store)
 			if got := f.Filter(context.Background(), tt.nodes); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("checkCordonFilters() = %v, want %v", got, tt.want)
+				t.Errorf("checkPodFilters() = %v, want %v", got, tt.want)
 			}
 		})
 	}

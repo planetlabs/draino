@@ -27,7 +27,7 @@ func (factory *FilterFactory) BuildCandidateFilter() Filter {
 	f.filters = []Filter{
 		NewNodeWithConditionFilter(factory.conf.globalConfig.SuppliedConditions),
 		NewNodeWithLabelFilter(factory.conf.nodeLabelFilterFunc),
-		NewPodFilter(*factory.conf.logger, factory.conf.cordonFilter, factory.conf.objectsStore),
+		NewPodFilter(*factory.conf.logger, factory.conf.podFilterFunc, factory.conf.objectsStore),
 		NewRetryWallFilter(factory.conf.clock, factory.conf.retryWall),
 		NewNodeTerminatingFilter(),
 		NewStabilityPeriodFilter(factory.conf.stabilityPeriodChecker, factory.conf.clock),

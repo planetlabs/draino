@@ -41,11 +41,11 @@ type Options struct {
 	protectedPodAnnotations   []string
 	drainGroupLabelKey        string
 
-	// Cordon filtering flags
-	doNotCordonPodControlledBy             []string
-	cordonLocalStoragePods                 bool
+	// Candidate filtering flags
+	doNotCandidatePodControlledBy          []string
+	candidateLocalStoragePods              bool
 	excludeStatefulSetOnNodeWithoutStorage bool
-	cordonProtectedPodAnnotations          []string
+	candidateProtectedPodAnnotations       []string
 
 	maxNotReadyNodes          []string
 	maxNotReadyNodesFunctions map[string]kubernetes.ComputeBlockStateFunctionFactory
@@ -108,10 +108,10 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 		opt Options
 	)
 	fs.BoolVar(&opt.debug, "debug", false, "Run with debug logging.")
-	fs.BoolVar(&opt.dryRun, "dry-run", false, "Emit an event without cordoning or draining matching nodes.")
-	fs.BoolVar(&opt.skipDrain, "skip-drain", false, "Whether to skip draining nodes after cordoning.")
+	fs.BoolVar(&opt.dryRun, "dry-run", false, "Emit an event without tainting or draining matching nodes.")
+	fs.BoolVar(&opt.skipDrain, "skip-drain", false, "Whether to skip draining nodes after tainting.")
 	fs.BoolVar(&opt.evictLocalStoragePods, "evict-emptydir-pods", false, "Evict pods with local storage, i.e. with emptyDir volumes.")
-	fs.BoolVar(&opt.cordonLocalStoragePods, "cordon-emptydir-pods", true, "Evict pods with local storage, i.e. with emptyDir volumes.")
+	fs.BoolVar(&opt.candidateLocalStoragePods, "candidate-emptydir-pods", true, "Evict pods with local storage, i.e. with emptyDir volumes.")
 	fs.BoolVar(&opt.preprovisioningActivatedByDefault, "preprovisioning-by-default", false, "Set this flag to activate pre-provisioning by default for all nodes")
 	fs.BoolVar(&opt.pvcManagementByDefault, "pvc-management-by-default", false, "PVC management is automatically activated for a workload that do not use eviction++")
 	fs.BoolVar(&opt.resetScopeLabel, "reset-config-labels", false, "Reset the scope label on the nodes")
@@ -136,19 +136,19 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.waitBeforeDraining, "wait-before-draining", 30*time.Second, "Time to wait between moving a node in candidate status and starting the actual drain.")
 	fs.DurationVar(&opt.preActivityDefaultTimeout, "pre-activity-default-timeout", 10*time.Minute, "Default duration to wait, for a pre activity to finish, before aborting the drain. This can be overridden by an annotation.")
 
-	fs.StringSliceVar(&opt.nodeLabels, "node-label", []string{}, "(Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times")
+	fs.StringSliceVar(&opt.nodeLabels, "node-label", []string{}, "(Deprecated) Nodes with this label will be eligible for tainting and draining. May be specified multiple times")
 	fs.StringSliceVar(&opt.doNotEvictPodControlledBy, "do-not-evict-pod-controlled-by", []string{"", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet},
 		"Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times: kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1")
 	fs.StringSliceVar(&opt.protectedPodAnnotations, "protected-pod-annotation", []string{}, "Protect pods with this annotation from eviction. May be specified multiple times. KEY[=VALUE]")
-	fs.StringSliceVar(&opt.doNotCordonPodControlledBy, "do-not-cordon-pod-controlled-by", []string{"", kubernetes.KindStatefulSet}, "Do not cordon nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times. kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1")
-	fs.StringSliceVar(&opt.cordonProtectedPodAnnotations, "cordon-protected-pod-annotation", []string{}, "Protect nodes hosting pods with this annotation from cordon. May be specified multiple times. KEY[=VALUE]")
+	fs.StringSliceVar(&opt.doNotCandidatePodControlledBy, "do-not-cordon-pod-controlled-by", []string{"", kubernetes.KindStatefulSet}, "Do not make candidate nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times. kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1")
+	fs.StringSliceVar(&opt.candidateProtectedPodAnnotations, "cordon-protected-pod-annotation", []string{}, "Protect nodes hosting pods with this annotation from being candidate. May be specified multiple times. KEY[=VALUE]")
 	fs.StringSliceVar(&opt.maxNotReadyNodes, "max-notready-nodes", []string{}, "Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions. (Value|Value%)")
 	fs.StringSliceVar(&opt.maxPendingPods, "max-pending-pods", []string{}, "Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions. (Value|Value%)")
 	fs.StringSliceVar(&opt.optInPodAnnotations, "opt-in-pod-annotation", []string{}, "Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times. KEY[=VALUE]")
 	fs.StringSliceVar(&opt.shortLivedPodAnnotations, "short-lived-pod-annotation", []string{}, "Pod that have a short live, just like job; we prefer let them run till the end instead of evicting them; node is cordon. May be specified multiple times. KEY[=VALUE]")
 	fs.StringSliceVar(&opt.storageClassesAllowingVolumeDeletion, "storage-class-allows-pv-deletion", []string{}, "Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.")
 
-	fs.StringVar(&opt.nodeLabelsExpr, "node-label-expr", "", "Nodes that match this expression will be eligible for cordoning and draining.")
+	fs.StringVar(&opt.nodeLabelsExpr, "node-label-expr", "", "Nodes that match this expression will be eligible for tainting and draining.")
 	fs.StringVar(&opt.listen, "listen", ":10002", "Address at which to expose /metrics and /healthz.")
 	fs.StringVar(&opt.kubecfg, "kubeconfig", "", "Path to kubeconfig file. Leave unset to use in-cluster config.")
 	fs.StringVar(&opt.apiserver, "master", "", "Address of Kubernetes API server. Leave unset to use in-cluster config.")
@@ -156,7 +156,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.StringVar(&opt.configName, "config-name", "", "Name of the draino configuration")
 
 	// We are using some values with json content, so don't use StringSlice: https://github.com/spf13/pflag/issues/370
-	fs.StringArrayVar(&opt.conditions, "node-conditions", nil, "Nodes for which any of these conditions are true will be cordoned and drained.")
+	fs.StringArrayVar(&opt.conditions, "node-conditions", nil, "Nodes for which any of these conditions are true will be tainted and drained.")
 
 	fs.IntVar(&opt.maxDrainAttemptsBeforeFail, "max-drain-attempts-before-fail", 8, "Maximum number of failed drain attempts before giving-up on draining the node.")
 	fs.IntVar(&opt.maxNodeReplacementPerHour, "max-node-replacement-per-hour", 2, "Maximum number of nodes per hour for which draino can ask replacement.")
@@ -189,7 +189,7 @@ func (o *Options) Validate() error {
 	}
 	o.maxNotReadyNodesFunctions = map[string]kubernetes.ComputeBlockStateFunctionFactory{}
 	for _, p := range o.maxNotReadyNodes {
-		max, percent, parseErr := kubernetes.ParseCordonMax(p)
+		max, percent, parseErr := kubernetes.ParseMaxInParameter(p)
 		if parseErr != nil {
 			return fmt.Errorf("cannot parse 'max-notready-nodes' argument, %#v", parseErr)
 		}
@@ -202,7 +202,7 @@ func (o *Options) Validate() error {
 	}
 	o.maxPendingPodsFunctions = map[string]kubernetes.ComputeBlockStateFunctionFactory{}
 	for _, p := range o.maxPendingPods {
-		max, percent, parseErr := kubernetes.ParseCordonMax(p)
+		max, percent, parseErr := kubernetes.ParseMaxInParameter(p)
 		if parseErr != nil {
 			return fmt.Errorf("cannot parse 'max-pending-pods' argument, %#v", parseErr)
 		}

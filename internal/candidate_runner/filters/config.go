@@ -23,7 +23,7 @@ type Config struct {
 	logger                 *logr.Logger
 	retryWall              drain.RetryWall
 	objectsStore           kubernetes.RuntimeObjectStore
-	cordonFilter           kubernetes.PodFilterFunc
+	podFilterFunc          kubernetes.PodFilterFunc
 	nodeLabelFilterFunc    kubernetes.NodeLabelFilterFunc
 	globalConfig           kubernetes.GlobalConfig
 	stabilityPeriodChecker analyser.StabilityPeriodChecker
@@ -61,8 +61,8 @@ func (conf *Config) Validate() error {
 	if conf.nodeLabelFilterFunc == nil {
 		return errors.New("node labels filtering function is not set")
 	}
-	if conf.cordonFilter == nil {
-		return errors.New("node cordon filtering function is not set")
+	if conf.podFilterFunc == nil {
+		return errors.New("pod filtering function is not set")
 	}
 	if conf.globalConfig.ConfigName == "" {
 		return errors.New("globalConfig.ConfigName is not set")
@@ -125,11 +125,11 @@ func WithGlobalConfig(gc kubernetes.GlobalConfig) WithOption {
 	}
 }
 
-// WithCordonPodFilter configures a filter that may prevent to cordon nodes
+// WithPodFilterFunc configures a filter that may prevent to taint nodes
 // to avoid further impossible eviction when draining.
-func WithCordonPodFilter(f kubernetes.PodFilterFunc) WithOption {
+func WithPodFilterFunc(f kubernetes.PodFilterFunc) WithOption {
 	return func(conf *Config) {
-		conf.cordonFilter = f
+		conf.podFilterFunc = f
 	}
 }
 

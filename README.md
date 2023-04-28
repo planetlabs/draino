@@ -5,7 +5,7 @@ This is a fork of `planetlabs/draino`. This fork is public because our primary i
 # draino [![Docker Pulls](https://img.shields.io/docker/pulls/planetlabs/draino.svg)](https://hub.docker.com/r/planetlabs/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/planetlabs/draino) [![Travis](https://img.shields.io/travis/com/planetlabs/draino.svg?maxAge=300)](https://travis-ci.com/planetlabs/draino/) [![Codecov](https://img.shields.io/codecov/c/github/planetlabs/draino.svg?maxAge=3600)](https://codecov.io/gh/planetlabs/draino/)
 Draino automatically drains Kubernetes nodes based on labels and node
 conditions. Nodes that match _all_ of the supplied labels and _any_ of the
-supplied node conditions will be cordoned immediately and drained after a
+supplied node conditions will be tainted immediately and drained after a
 configurable `drain-buffer` time.
 
 Draino is intended for use alongside the Kubernetes [Node Problem Detector](https://github.com/kubernetes/node-problem-detector)
@@ -17,7 +17,7 @@ Adding Draino to the mix enables autoremediation:
 
 1. The Node Problem Detector detects a permanent node problem and sets the
    corresponding node condition.
-2. Draino notices the node condition. It immediately cordons the node to prevent
+2. Draino notices the node condition. When the node is eligible (priorities/filters) it taints the node to prevent
    new pods being scheduled there, and schedules a drain of the node.
 3. Once the node has been drained the Cluster Autoscaler will consider it
    underutilised. It will be eligible for scale down (i.e. termination) by the
@@ -25,62 +25,101 @@ Adding Draino to the mix enables autoremediation:
 
 ## Usage
 ```
-usage: draino [<flags>] <node-conditions>...
+Usage:
+   [flags]
+   [command]
 
-Automatically cordons and drains nodes that match the supplied conditions.
+Available Commands:
+  completion  Generate the autocompletion script for the specified shell
+  group       
+  help        Help about any command
+  log         
+  node        
+  version     
 
 Flags:
-      --help                     Show context-sensitive help (also try --help-long and --help-man).
-  -d, --debug                    Run with debug logging.
-      --listen=":10002"          Address at which to expose /metrics and /healthz.
-      --kubeconfig=KUBECONFIG    Path to kubeconfig file. Leave unset to use in-cluster config.
-      --master=MASTER            Address of Kubernetes API server. Leave unset to use in-cluster config.
-      --dry-run                  Emit an event without cordoning or draining matching nodes.
-      --max-grace-period=8m0s    Maximum time evicted pods will be given to terminate gracefully.
-      --eviction-headroom=30s    Additional time to wait after a pod's termination grace period for it to have been deleted.
-      --drain-buffer=10m0s       Minimum time between starting each drain. Nodes are always cordoned immediately.
-      --duration-before-replacement=1h0m0s  
-                                 Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement.
-      --node-label=NODE-LABEL ...  
-                                 (Deprecated) Nodes with this label will be eligible for cordoning and draining. May be specified multiple times
-      --node-label-expr=NODE-LABEL-EXPR  
-                                 Nodes that match this expression will be eligible for cordoning and draining.
-      --namespace="kube-system"  Namespace used to create leader election lock object.
-      --leader-election-lease-duration=15s  
-                                 Lease duration for leader election.
-      --leader-election-renew-deadline=10s  
-                                 Leader election renew deadline.
-      --leader-election-retry-period=2s  
-                                 Leader election retry period.
-      --leader-election-token-name="draino"  
-                                 Leader election token name.
-      --skip-drain               Whether to skip draining nodes after cordoning.
-      --do-not-evict-pod-controlled-by=kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1 ...  
-                                 Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.
-      --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
-      --protected-pod-annotation=KEY[=VALUE] ...  
-                                 Protect pods with this annotation from eviction. May be specified multiple times.
-      --drain-group-labels=KEY1,KEY2,...  
-                                 Comma separated list of label keys to be used to form draining groups.
-      --do-not-cordon-pod-controlled-by=kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1 ...  
-                                 Do not cordon nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times.
-      --cordon-emptydir-pods     Evict pods with local storage, i.e. with emptyDir volumes.
-      --cordon-protected-pod-annotation=KEY[=VALUE] ...  
-                                 Protect nodes hosting pods with this annotation from cordon. May be specified multiple times.
-      --max-simultaneous-cordon=(Value|Value%) ...  
-                                 Maximum number of cordoned nodes in the cluster.
-      --max-simultaneous-cordon-for-labels=(Value|Value%),keys... ...  
-                                 Maximum number of cordoned nodes in the cluster for given labels. Example: '2,app,shard'
-      --max-simultaneous-cordon-for-taints=(Value|Value%),keys... ...  
-                                 Maximum number of cordoned nodes in the cluster for given taints. Example: '33%,node'
-      --max-node-replacement-per-hour=2  
-                                 Maximum number of nodes per hour for which draino can ask replacement.
-      --storage-class-allows-pv-deletion=storageClassName ...  
-                                 Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.
-
-
-Args:
-  <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.
+      --candidate-emptydir-pods                    Evict pods with local storage, i.e. with emptyDir volumes. (default true)
+      --cloud-provider string                      cloud provider where the application/controller is running
+      --cloud-provider-project string              cloud provider project where the application/controller is running. Only make sense for gcp
+      --config-name string                         Name of the draino configuration
+      --context string                             kubernetes context
+      --cordon-protected-pod-annotation strings    Protect nodes hosting pods with this annotation from being candidate. May be specified multiple times. KEY[=VALUE]
+      --datacenter string                          datacenter where the application/controller is running
+      --debug                                      Run with debug logging.
+      --do-not-cordon-pod-controlled-by strings    Do not make candidate nodes hosting pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times. kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1 (default [,StatefulSet])
+      --do-not-evict-pod-controlled-by strings     Do not evict pods that are controlled by the designated kind, empty VALUE for uncontrolled pods, May be specified multiple times: kind[[.version].group]] examples: StatefulSets StatefulSets.apps StatefulSets.apps.v1 (default [,StatefulSet,DaemonSet])
+      --drain-buffer duration                      Delay to respect between end of previous drain (success or error) and a new attempt within a drain-group. (default 10m0s)
+      --drain-buffer-configmap-name string         The name of the configmap used to persist the drain-buffer values. Default will be draino-<config-name>-drain-buffer.
+      --drain-group-labels string                  Comma separated list of label keys to be used to form draining groups. KEY1,KEY2,...
+      --drain-rate-limit-burst int                 Maximum number of parallel drains within a timeframe (default 1)
+      --drain-rate-limit-qps float32               Maximum number of node drains per seconds per condition (default 0.016666668)
+      --drain-sim-rate-limit-ratio float32         Which ratio of the overall kube client rate limiting should be used by the drain simulation. 1.0 means that it will use the same. (default 0.7)
+      --dry-run                                    Emit an event without tainting or draining matching nodes.
+      --duration-before-replacement duration       Max duration we are waiting for a node with Completed drain status to be removed before asking for replacement. (default 1h0m0s)
+      --encoding string                            output logs; one of json, json-kube, console (default "json-kube")
+      --event-aggregation-period duration          Period for event generation on kubernetes object. (default 15m0s)
+      --evict-emptydir-pods                        Evict pods with local storage, i.e. with emptyDir volumes.
+      --eviction-headroom duration                 Additional time to wait after a pod's termination grace period for it to have been deleted. (default 30s)
+      --exclude-sts-on-node-without-storage        To ensure backward compatibility with draino v1, we have to exclude pod of STS running on node without local-storage (default true)
+      --excluded-pod-per-node-estimation int       Estimation of the number of pods that should be excluded from nodes. Used to compute some event cache size. (default 5)
+      --group-runner-period duration               Period for running the group runner (default 10s)
+  -h, --help                                       help for this command
+      --informer-namespace string                  restricts the manager's cache to watch objects in the desired namespace Defaults to all namespaces
+      --informer-sync-period duration              minimum frequency at which watched resources are reconciled (default 1h0m0s)
+      --klog-verbosity int32                       Verbosity to run klog at (default 4)
+      --kube-address string                        kube apiserver address (optional)
+      --kube-client-burst int                      Burst to use in kube client (default 10)
+      --kube-client-qps float32                    QPS to use in kube client (default 5)
+      --kube-cluster-name string                   name of the kubernetes cluster where the application/controller is running
+      --kube-config string                         kubeconfig file; empty defaults to in-cluster config
+      --kubeconfig string                          Path to kubeconfig file. Leave unset to use in-cluster config.
+      --leader-elect                               whether or not to use leader election when starting the manager (default true)
+      --leader-elect-id string                     name of the configmap that leader election will use for holding the leader lock
+      --leader-elect-lease duration                non-leader candidates will wait to force acquire leadership. This is measured against time of last observed ack (default 15s)
+      --leader-elect-namespace string              namespace in which the leader election configmap will be created
+      --leader-elect-renew duration                acting master will retry refreshing leadership before giving up (default 10s)
+      --leader-elect-retry duration                clients should wait between tries of actions (default 2s)
+      --leader-resource-lock string                type of resource that leader election will use for holding the leader lock (default "configmaps")
+      --listen string                              Address at which to expose /metrics and /healthz. (default ":10002")
+      --log-development                            development mode for logs. This disables the sampling and allows for negative level (beyond Debug that is (-1))
+      --log-events                                 Indicate if events sent to kubernetes should also be logged (default true)
+      --log-level string                           log level; one of debug, info, warn, error, dpanic, panic, fatal (default "info")
+      --log-stacktrace string                      log stacktrace; one of debug, info, warn, error, dpanic, panic, fatal (default "dpanic")
+      --master string                              Address of Kubernetes API server. Leave unset to use in-cluster config.
+      --max-drain-attempts-before-fail int         Maximum number of failed drain attempts before giving-up on draining the node. (default 8)
+      --max-node-replacement-per-hour int          Maximum number of nodes per hour for which draino can ask replacement. (default 2)
+      --max-notready-nodes strings                 Maximum number of NotReady nodes in the cluster. When exceeding this value draino stop taking actions. (Value|Value%)
+      --max-notready-nodes-period duration         Polling period to check all nodes readiness (default 1m0s)
+      --max-pending-pods strings                   Maximum number of Pending Pods in the cluster. When exceeding this value draino stop taking actions. (Value|Value%)
+      --max-pending-pods-period duration           Polling period to check volume of pending pods (default 1m0s)
+      --min-eviction-timeout duration              Minimum time we wait to evict a pod. The pod terminationGracePeriod will be used if it is bigger. (default 8m0s)
+      --namespace string                           namespace where the application/controller is running
+      --no-legacy-node-handler                     Deactivate draino legacy node handler
+      --node-conditions stringArray                Nodes for which any of these conditions are true will be tainted and drained.
+      --node-label strings                         (Deprecated) Nodes with this label will be eligible for tainting and draining. May be specified multiple times
+      --node-label-expr string                     Nodes that match this expression will be eligible for tainting and draining.
+      --opt-in-pod-annotation strings              Pod filtering out is ignored if the pod holds one of these annotations. In a way, this makes the pod directly eligible for draino eviction. May be specified multiple times. KEY[=VALUE]
+      --pod-warmup-delay-extension duration        Extra delay given to the pod to complete is warmup phase (all containers have passed their startProbes) (default 30s)
+      --pre-activity-default-timeout duration      Default duration to wait, for a pre activity to finish, before aborting the drain. This can be overridden by an annotation. (default 10m0s)
+      --preprovisioning-by-default                 Set this flag to activate pre-provisioning by default for all nodes
+      --preprovisioning-check-period duration      Period to check if a node has been preprovisioned (default 30s)
+      --preprovisioning-timeout duration           Timeout for a node to be preprovisioned before draining (default 1h20m0s)
+      --protected-pod-annotation strings           Protect pods with this annotation from eviction. May be specified multiple times. KEY[=VALUE]
+      --pvc-management-by-default                  PVC management is automatically activated for a workload that do not use eviction++
+      --reset-config-labels                        Reset the scope label on the nodes
+      --retry-backoff-delay duration               Additional delay to add between retry schedules. (default 23m0s)
+      --scope-analysis-period duration             Period to run the scope analysis and generate metric (default 5m0s)
+      --service-addr string                        http endpoint for the services (default "0.0.0.0:8484")
+      --service-shutdown-timeout duration          shutdown timeout for service (default 15s)
+      --service-with-healthcheck                   Activate the healthcheck handlers (default true)
+      --service-with-metrics                       Activate the metrics handler (default true)
+      --service-with-profiling                     Activate the profiling handler (default true)
+      --short-lived-pod-annotation strings         Pod that have a short live, just like job; we prefer let them run till the end instead of evicting them; node is cordon. May be specified multiple times. KEY[=VALUE]
+      --skip-drain                                 Whether to skip draining nodes after tainting.
+      --storage-class-allows-pv-deletion strings   Storage class for which persistent volume (and associated claim) deletion is allowed. May be specified multiple times.
+      --tracer-addr string                         tracer server address; empty to disable
+      --tracer-service-name string                 set a tracer default service name; optional
+      --wait-before-draining duration              Time to wait between moving a node in candidate status and starting the actual drain. (default 30s)
 ```
 
 ### Labels and Label Expressions
@@ -112,27 +151,6 @@ Example:
         - --do-not-evict-controlled-by=ExtendedDaemonSet.v1alpha1.datadoghq.com
         - --do-not-evict-controlled-by=
 ```
-  
-## Considerations
-Keep the following in mind before deploying Draino:
-
-* Always run Draino in `--dry-run` mode first to ensure it would drain the nodes
-  you expect it to. In dry run mode Draino will emit logs, metrics, and events
-  but will not actually cordon or drain nodes.
-* Draino immediately cordons nodes that match its configured labels and node
-  conditions, but will wait a configurable amount of time (10 minutes by default)
-  between draining nodes. i.e. If two nodes begin exhibiting a node condition
-  simultaneously one node will be drained immediately and the other in 10 minutes.
-* It is possible to set a maximum number of nodes that can be cordon simultaneously.
-  This can be done for the whole cluster or by group of nodes.
-* Draino considers a drain to have failed if at least one pod eviction triggered
-  by that drain fails. If Draino fails to evict two of five pods it will consider
-  the Drain to have failed, but the remaining three pods will always be evicted.
-* Pods that can't be evicted by the cluster-autoscaler won't be evicted by draino.
-  See annotation `"cluster-autoscaler.kubernetes.io/safe-to-evict": "false"` in
-  [cluster-autoscaler documentation](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node)
-
-
 
 ## Deployment
 
@@ -153,10 +171,6 @@ metrics at `/metrics`. The following metrics exist:
 ```bash
 $ kubectl -n kube-system exec -it ${DRAINO_POD} -- apk add curl
 $ kubectl -n kube-system exec -it ${DRAINO_POD} -- curl http://localhost:10002/metrics
-# HELP draino_cordoned_nodes_total Number of nodes cordoned.
-# TYPE draino_cordoned_nodes_total counter
-draino_cordoned_nodes_total{result="succeeded"} 2
-draino_cordoned_nodes_total{result="failed"} 1
 # HELP draino_drained_nodes_total Number of nodes drained.
 # TYPE draino_drained_nodes_total counter
 draino_drained_nodes_total{result="succeeded"} 1
@@ -164,17 +178,7 @@ draino_drained_nodes_total{result="failed"} 1
 ```
 
 ### Events
-Draino is generating event for every relevant step of the eviction process. Here is an example that ends with a reason `DrainFailed`. When everything is fine the last event for a given node will have a reason `DrainSucceeded`.
-```
-> kubectl get events -n default | grep -E '(^LAST|draino)'
-
-LAST SEEN   FIRST SEEN   COUNT   NAME                                               KIND TYPE      REASON             SOURCE MESSAGE
-5m          5m           1       node-demo.15fe0c35f0b4bd10    Node Warning   CordonStarting     draino Cordoning node
-5m          5m           1       node-demo.15fe0c35fe3386d8    Node Warning   CordonSucceeded    draino Cordoned node
-5m          5m           1       node-demo.15fe0c360bd516f8    Node Warning   DrainScheduled     draino Will drain node after 2020-03-20T16:19:14.91905+01:00
-5m          5m           1       node-demo.15fe0c3852986fe8    Node Warning   DrainStarting      draino Draining node
-4m          4m           1       node-demo.15fe0c48d010ecb0    Node Warning   DrainFailed        draino Draining failed: timed out waiting for evictions to complete: timed out
-```
+Draino is generating event for every relevant step of the eviction process. 
 
 ### Conditions
 When a drain is scheduled, on top of the event, a condition is added to the status of the node. This condition will hold information about the beginning and the end of the drain procedure. This is something that you can see by describing the node resource:
@@ -237,24 +241,6 @@ The user can proactively ask for pre-provisioning a replacement node before drai
 
 ### Dry Run
 Draino can be run in dry run mode using the `--dry-run` flag.
-
-### Cordon Only
-Draino can also optionally be run in a mode where the nodes are only cordoned, and not drained. This can be achieved by using the `--skip-drain` flag.
-
-### Setting limits for cordon
-To prevent situation in which a too large subset of the cluster would be cordoned (waiting for the drain to happen according to schedule), it is possible to define and combine limits that are either global to the cluster or dedicated to a group of nodes.
-The limit can be set as a count of node of in percentage. Some example:
-```shell script
-      --max-simultaneous-cordon=80   # No node will be cordon if there are already at least 80 nodes cordon.
-      --max-simultaneous-cordon=10%  # No node will be cordon if this result in having more than 10% of the cluster being cordon.
-      --max-simultaneous-cordon-for-labels=3,app,shard
-                                     # No more then 3 nodes will be cordon for group having same pair of values for label keys `app` and `shard`
-      --max-simultaneous-cordon-for-labels=20%,app,shard
-                                     # No more then 20% of the group of nodes having same pair of values for label keys `app` and `shard` can be cordon
-      --max-simultaneous-cordon-for-taints=33%,node
-                                     # No more then 33% of the group of nodes having same value for taint with key `node` can be cordon
-```
-It is possible to set multiple limits, the cordon activity is blocked as soon as at least one of the limit is reached. When some nodes are uncordoned or if they are deleted/replace, this will reopen some slots bellow the limit and some nodes can be cordoned again.
 
 ### Deleting PV/PVC associated with the evicted pods
 Draino can take care of deleting the PVs/PVCs associated with the evicted pod. This is interesting especially for pods using the `local-storage` storage class. Since the old nodes are not eligible for scheduling, the PVCs/PVs of the pod must be recycled to ensure that the pods can be scheduled on another node.

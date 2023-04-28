@@ -134,12 +134,12 @@ func (e NodePreprovisioningTimeoutError) Error() string {
 	return "timed out waiting for node pre-provisioning"
 }
 
-type NodeIsNotCordonError struct {
+type NodeHasNotDrainingTaintError struct {
 	NodeName string
 }
 
-func (e NodeIsNotCordonError) Error() string {
-	return "the node " + e.NodeName + " is not cordoned"
+func (e NodeHasNotDrainingTaintError) Error() string {
+	return "the node " + e.NodeName + " is not tainted 'draining'"
 }
 
 type PodEvictionTimeoutError struct {
@@ -182,15 +182,6 @@ func (e VolumeCleanupError) Unwrap() error {
 	return e.Err
 }
 
-// A Cordoner cordons nodes.
-type Cordoner interface {
-	// Cordon the supplied node. Marks it unschedulable for new pods.
-	Cordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error
-
-	// Uncordon the supplied node. Marks it schedulable for new pods.
-	Uncordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error
-}
-
 // A Drainer drains nodes.
 type Drainer interface {
 	// Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
@@ -217,9 +208,8 @@ type NodeReplacer interface {
 	GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error)
 }
 
-// A CordonDrainer both cordons and drains nodes!
-type CordonDrainer interface {
-	Cordoner
+// DrainerInstance is able to Drain or Replace Node
+type DrainerInstance interface {
 	Drainer
 	NodeReplacer
 }
@@ -229,62 +219,52 @@ type DrainerNodeReplacer interface {
 	NodeReplacer
 }
 
-// A NoopCordonDrainer does nothing.
-type NoopCordonDrainer struct{}
+// A NoopDrainer does nothing.
+type NoopDrainer struct{}
 
-func (d *NoopCordonDrainer) GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error) {
+func (d *NoopDrainer) GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error) {
 	return nil, nil
 }
 
-// Cordon does nothing.
-func (d *NoopCordonDrainer) Cordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
-	return nil
-}
-
-// Uncordon does nothing.
-func (d *NoopCordonDrainer) Uncordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
-	return nil
-}
-
 // Drain does nothing.
-func (d *NoopCordonDrainer) Drain(ctx context.Context, n *core.Node) error { return nil }
+func (d *NoopDrainer) Drain(ctx context.Context, n *core.Node) error { return nil }
 
 // ResetRetryAnnotation does nothing.
-func (d *NoopCordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Node) error { return nil }
+func (d *NoopDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Node) error { return nil }
 
 // MarkDrain does nothing.
-func (d *NoopCordonDrainer) MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
+func (d *NoopDrainer) MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	return nil
 }
 
 // MarkDrainDelete does nothing.
-func (d *NoopCordonDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) error {
+func (d *NoopDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) error {
 	return nil
 }
 
-func (d *NoopCordonDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32 {
+func (d *NoopDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32 {
 	return 0
 }
 
 // ReplaceNode return none
-func (d *NoopCordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
+func (d *NoopDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
 	return false, nil
 }
 
 // PreprovisionNode return none
-func (d *NoopCordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) error {
+func (d *NoopDrainer) PreprovisionNode(ctx context.Context, n *core.Node) error {
 	return nil
 }
 
 // PreprovisionNode return none
-func (d *NoopCordonDrainer) GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+func (d *NoopDrainer) GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
 	return "", nil
 }
 
-var _ CordonDrainer = &APICordonDrainer{}
+var _ DrainerInstance = &APIDrainer{}
 
-// APICordonDrainer drains Kubernetes nodes via the Kubernetes API.
-type APICordonDrainer struct {
+// APIDrainer drains Kubernetes nodes via the Kubernetes API.
+type APIDrainer struct {
 	crClient           client.Client
 	c                  kubernetes.Interface
 	l                  *zap.Logger
@@ -303,52 +283,52 @@ type APICordonDrainer struct {
 	storageClassesAllowingPVDeletion map[string]struct{}
 }
 
-// APICordonDrainerOption configures an APICordonDrainer.
-type APICordonDrainerOption func(d *APICordonDrainer)
+// APIDrainerOption configures an APIDrainer.
+type APIDrainerOption func(d *APIDrainer)
 
 // MaxGracePeriod configures the maximum time to wait for a pod eviction. Pod
 // containers will be allowed this much time to shutdown once they receive a
 // SIGTERM before they are sent a SIGKILL.
-func MaxGracePeriod(m time.Duration) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func MaxGracePeriod(m time.Duration) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.minEvictionTimeout = m
 	}
 }
 
 // EvictionHeadroom configures an amount of time to wait in addition to the
 // MaxGracePeriod for the API server to report a pod deleted.
-func EvictionHeadroom(h time.Duration) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func EvictionHeadroom(h time.Duration) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.evictionHeadroom = h
 	}
 }
 
 // WithPodFilter configures a filter that may be used to exclude certain pods
 // from eviction when draining.
-func WithPodFilter(f PodFilterFunc) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func WithPodFilter(f PodFilterFunc) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.filter = f
 	}
 }
 
 // WithDrain determines if we're actually going to drain nodes
-func WithSkipDrain(b bool) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func WithSkipDrain(b bool) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.skipDrain = b
 	}
 }
 
-// WithAPICordonDrainerLogger configures a APICordonDrainer to use the supplied
+// WithAPIDrainerLogger configures a APIDrainer to use the supplied
 // logger.
-func WithAPICordonDrainerLogger(l *zap.Logger) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func WithAPIDrainerLogger(l *zap.Logger) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.l = l
 	}
 }
 
-// WithStorageClassesAllowingDeletion configures an APICordonDrainer to allow deletion of PV/PVC for some storage classes only
-func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+// WithStorageClassesAllowingDeletion configures an APIDrainer to allow deletion of PV/PVC for some storage classes only
+func WithStorageClassesAllowingDeletion(storageClasses []string) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.storageClassesAllowingPVDeletion = map[string]struct{}{}
 		for _, sc := range storageClasses {
 			d.storageClassesAllowingPVDeletion[sc] = struct{}{}
@@ -357,36 +337,35 @@ func WithStorageClassesAllowingDeletion(storageClasses []string) APICordonDraine
 }
 
 // WithMaxDrainAttemptsBeforeFail configures the max count of failed drain attempts before a final fail
-func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func WithMaxDrainAttemptsBeforeFail(maxDrainAttemptsBeforeFail int) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.maxDrainAttemptsBeforeFail = int32(maxDrainAttemptsBeforeFail)
 	}
 }
 
 // WithRuntimeObjectStore configures the runtime object store
-func WithRuntimeObjectStore(store RuntimeObjectStore) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func WithRuntimeObjectStore(store RuntimeObjectStore) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.runtimeObjectStore = store
 	}
 }
 
 // WithGlobalConfig give the list of conditions for which draino is triggered
-func WithGlobalConfig(globalConfig GlobalConfig) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func WithGlobalConfig(globalConfig GlobalConfig) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.globalConfig = globalConfig
 	}
 }
 
-func WithContainerRuntimeClient(client client.Client) APICordonDrainerOption {
-	return func(d *APICordonDrainer) {
+func WithContainerRuntimeClient(client client.Client) APIDrainerOption {
+	return func(d *APIDrainer) {
 		d.crClient = client
 	}
 }
 
-// NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
-// the Kubernetes API.
-func NewAPICordonDrainer(c kubernetes.Interface, eventRecorder EventRecorder, ao ...APICordonDrainerOption) *APICordonDrainer {
-	d := &APICordonDrainer{
+// NewAPIDrainer returns a Drainer that drains nodes
+func NewAPIDrainer(c kubernetes.Interface, eventRecorder EventRecorder, ao ...APIDrainerOption) *APIDrainer {
+	d := &APIDrainer{
 		c:                  c,
 		l:                  zap.NewNop(),
 		filter:             NewPodFilters(),
@@ -418,7 +397,7 @@ func GetNodeRetryMaxAttempt(n *core.Node) (customValue int32, usedDefault bool, 
 	return 0, true, nil
 }
 
-func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32 {
+func (d *APIDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n *core.Node) int32 {
 	customValue, useDefault, err := GetNodeRetryMaxAttempt(n)
 	if err != nil {
 		d.l.Warn(err.Error(), zap.String("node", n.Name))
@@ -430,55 +409,7 @@ func (d *APICordonDrainer) GetMaxDrainAttemptsBeforeFail(ctx context.Context, n 
 	return customValue
 }
 
-// Cordon the supplied node. Marks it unschedulable for new pods.
-func (d *APICordonDrainer) Cordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
-	span, ctx := tracer.StartSpanFromContext(ctx, "Cordon")
-	defer span.Finish()
-
-	if n.Spec.Unschedulable {
-		return nil
-	}
-
-	fresh, err := d.c.CoreV1().Nodes().Get(ctx, n.GetName(), meta.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
-	}
-	if fresh.Spec.Unschedulable {
-		return nil
-	}
-	fresh.Spec.Unschedulable = true
-	for _, m := range mutators {
-		m(fresh)
-	}
-	if _, err := d.c.CoreV1().Nodes().Update(ctx, fresh, meta.UpdateOptions{FieldManager: "draino"}); err != nil {
-		return fmt.Errorf("cannot cordon node %s: %w", fresh.GetName(), err)
-	}
-	return nil
-}
-
-// Uncordon the supplied node. Marks it schedulable for new pods.
-func (d *APICordonDrainer) Uncordon(ctx context.Context, n *core.Node, mutators ...nodeMutatorFn) error {
-	span, ctx := tracer.StartSpanFromContext(ctx, "Uncordon")
-	defer span.Finish()
-
-	fresh, err := d.c.CoreV1().Nodes().Get(ctx, n.GetName(), meta.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("cannot get node %s: %w", n.GetName(), err)
-	}
-	if !fresh.Spec.Unschedulable {
-		return nil
-	}
-	fresh.Spec.Unschedulable = false
-	for _, m := range mutators {
-		m(fresh)
-	}
-	if _, err := d.c.CoreV1().Nodes().Update(ctx, fresh, meta.UpdateOptions{FieldManager: "draino"}); err != nil {
-		return fmt.Errorf("cannot uncordon node %s: %w", fresh.GetName(), err)
-	}
-	return nil
-}
-
-func (d *APICordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Node) error {
+func (d *APIDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Node) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "ResetRetryAnnotation")
 	defer span.Finish()
 
@@ -494,7 +425,7 @@ func (d *APICordonDrainer) ResetRetryAnnotation(ctx context.Context, n *core.Nod
 }
 
 // MarkDrainDelete removes the condition on the node to mark the current drain schedule.
-func (d *APICordonDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) error {
+func (d *APIDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "MarkDrainDelete")
 	defer span.Finish()
 
@@ -534,7 +465,7 @@ func (d *APICordonDrainer) MarkDrainDelete(ctx context.Context, n *core.Node) er
 }
 
 // MarkDrain set a condition on the node to mark that the drain is scheduled. (retry internally in case of failure)
-func (d *APICordonDrainer) MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
+func (d *APIDrainer) MarkDrain(ctx context.Context, n *core.Node, when, finish time.Time, failed bool, failCount int32) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "MarkDrain")
 	defer span.Finish()
 
@@ -653,7 +584,7 @@ func GetDrainConditionStatus(n *core.Node) (DrainConditionStatus, error) {
 }
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
-func (d *APICordonDrainer) Drain(ctx context.Context, node *core.Node) error {
+func (d *APIDrainer) Drain(ctx context.Context, node *core.Node) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "Drain")
 	defer span.Finish()
 
@@ -672,9 +603,9 @@ func (d *APICordonDrainer) Drain(ctx context.Context, node *core.Node) error {
 	taint, hasNLATaint := k8sclient.GetNLATaint(n)
 	drainCandidate := hasNLATaint && taint.Value == k8sclient.TaintDraining
 
-	if !n.Spec.Unschedulable && !drainCandidate {
-		TracedLoggerForNode(ctx, node, d.l).Info("Aborting drain because the node is not cordoned, or drain-candidate")
-		return NodeIsNotCordonError{NodeName: node.Name}
+	if !drainCandidate {
+		TracedLoggerForNode(ctx, node, d.l).Info("Aborting drain because the node is not drain-candidate")
+		return NodeHasNotDrainingTaintError{NodeName: node.Name}
 	}
 
 	pods, err := d.GetPodsToDrain(ctx, n.GetName(), nil)
@@ -721,7 +652,7 @@ func (d *APICordonDrainer) Drain(ctx context.Context, node *core.Node) error {
 	return nil
 }
 
-func (d *APICordonDrainer) GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error) {
+func (d *APIDrainer) GetPodsToDrain(ctx context.Context, node string, podStore PodStore) ([]*core.Pod, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "GetPodsToDrain")
 	defer span.Finish()
 
@@ -756,7 +687,7 @@ func (d *APICordonDrainer) GetPodsToDrain(ctx context.Context, node string, podS
 	return include, nil
 }
 
-func (d *APICordonDrainer) evict(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+func (d *APIDrainer) evict(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	evictionAPIURL, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, d.runtimeObjectStore)
 	if ok {
 		return d.evictWithOperatorAPI(ctx, evictionAPIURL, node, pod, abort)
@@ -764,7 +695,7 @@ func (d *APICordonDrainer) evict(ctx context.Context, node *core.Node, pod *core
 	return d.evictWithKubernetesAPI(ctx, node, pod, abort)
 }
 
-func (d *APICordonDrainer) getGracePeriodWithEvictionHeadRoom(pod *core.Pod) time.Duration {
+func (d *APIDrainer) getGracePeriodWithEvictionHeadRoom(pod *core.Pod) time.Duration {
 	gracePeriod := int64(core.DefaultTerminationGracePeriodSeconds)
 	if pod.Spec.TerminationGracePeriodSeconds != nil {
 		gracePeriod = *pod.Spec.TerminationGracePeriodSeconds
@@ -772,7 +703,7 @@ func (d *APICordonDrainer) getGracePeriodWithEvictionHeadRoom(pod *core.Pod) tim
 	return time.Duration(gracePeriod)*time.Second + d.evictionHeadroom
 }
 
-func (d *APICordonDrainer) getMinEvictionTimeoutWithEvictionHeadRoom(pod *core.Pod) time.Duration {
+func (d *APIDrainer) getMinEvictionTimeoutWithEvictionHeadRoom(pod *core.Pod) time.Duration {
 	gracePeriod := d.minEvictionTimeout
 	if pod.Spec.TerminationGracePeriodSeconds != nil && time.Duration(*pod.Spec.TerminationGracePeriodSeconds)*time.Second > gracePeriod {
 		gracePeriod = time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second
@@ -780,7 +711,7 @@ func (d *APICordonDrainer) getMinEvictionTimeoutWithEvictionHeadRoom(pod *core.P
 	return gracePeriod + d.evictionHeadroom
 }
 
-func (d *APICordonDrainer) evictWithKubernetesAPI(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+func (d *APIDrainer) evictWithKubernetesAPI(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "evictWithKubernetesAPI")
 	defer span.Finish()
 
@@ -813,7 +744,7 @@ func (d *APICordonDrainer) evictWithKubernetesAPI(ctx context.Context, node *cor
 // 404    : the pod is not found, already delete
 // 503    : the service is not able to answer now, potentially not reaching the leader, you should retry
 // 500    : server error, that could be a transient error, retry couple of times
-func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
+func (d *APIDrainer) evictWithOperatorAPI(ctx context.Context, url string, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "evictWithKubernetesAPI")
 	defer span.Finish()
 
@@ -914,7 +845,7 @@ func (d *APICordonDrainer) evictWithOperatorAPI(ctx context.Context, url string,
 	)
 }
 
-func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
+func (d *APIDrainer) evictionSequence(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "evictionSequence")
 	defer span.Finish()
 
@@ -1003,7 +934,7 @@ func (d *APICordonDrainer) evictionSequence(ctx context.Context, node *core.Node
 	}
 }
 
-func (d *APICordonDrainer) awaitDeletion(ctx context.Context, pod *core.Pod, timeout time.Duration) error {
+func (d *APIDrainer) awaitDeletion(ctx context.Context, pod *core.Pod, timeout time.Duration) error {
 	// We need to optimise the pollPeriod to maximize the chance to capture the deletion and not falling into rate limiting issue on the client side
 	pollPeriod := timeout / 10 // let's make 10 tentatives to check deletion
 	if pollPeriod < 6*time.Second {
@@ -1040,7 +971,7 @@ func (d *APICordonDrainer) awaitDeletion(ctx context.Context, pod *core.Pod, tim
 	return nil
 }
 
-func (d *APICordonDrainer) deletePVCAndPV(ctx context.Context, pod *core.Pod, pvcs []*core.PersistentVolumeClaim) error {
+func (d *APIDrainer) deletePVCAndPV(ctx context.Context, pod *core.Pod, pvcs []*core.PersistentVolumeClaim) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVCAndPV")
 	defer span.Finish()
 	span.SetTag("pod", pod.GetName())
@@ -1064,7 +995,7 @@ func (d *APICordonDrainer) deletePVCAndPV(ctx context.Context, pod *core.Pod, pv
 	return nil
 }
 
-func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(ctx context.Context, pod *core.Pod, pvc *core.PersistentVolumeClaim) error {
+func (d *APIDrainer) podDeleteRetryWaitingForPVC(ctx context.Context, pod *core.Pod, pvc *core.PersistentVolumeClaim) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "podDeleteRetryWaitingForPVC")
 	defer span.Finish()
 	span.SetTag("pvc", pvc.GetName())
@@ -1093,7 +1024,7 @@ func (d *APICordonDrainer) podDeleteRetryWaitingForPVC(ctx context.Context, pod 
 	return wait.PollImmediate(DefaultPodDeletePeriodWaitingForPVC, DefaultPVCRecreateTimeout, podDeleteCheckPVCFunc)
 }
 
-func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context, pod *core.Pod, pvcDeleted []*core.PersistentVolumeClaim) error {
+func (d *APIDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context, pod *core.Pod, pvcDeleted []*core.PersistentVolumeClaim) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVAssociatedWithDeletedPVC")
 	defer span.Finish()
 
@@ -1131,7 +1062,7 @@ func (d *APICordonDrainer) deletePVAssociatedWithDeletedPVC(ctx context.Context,
 	return nil
 }
 
-func (d *APICordonDrainer) awaitPVDeletion(ctx context.Context, pv *core.PersistentVolume, timeout time.Duration) error {
+func (d *APIDrainer) awaitPVDeletion(ctx context.Context, pv *core.PersistentVolume, timeout time.Duration) error {
 	// We need to optimise the pollPeriod to maximize the chance to capture the deletion and not falling into rate limiting issue on the client side
 	pollPeriod := timeout / 10 // let's make 10 tentatives to check deletion
 	if pollPeriod < 6*time.Second {
@@ -1176,7 +1107,7 @@ func PVCStorageClassCleanupEnabled(p *v1.Pod, store RuntimeObjectStore, defaultT
 
 // getInScopePVCs will return all pvcs that are "in scope" and available.
 // Where in scope means that the storage class is allowed to be deleted by configuration.
-func (d *APICordonDrainer) getInScopePVCs(ctx context.Context, pod *core.Pod) ([]*core.PersistentVolumeClaim, error) {
+func (d *APIDrainer) getInScopePVCs(ctx context.Context, pod *core.Pod) ([]*core.PersistentVolumeClaim, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "fetchPVCsAssociatedWithPod")
 	defer span.Finish()
 
@@ -1218,7 +1149,7 @@ func (d *APICordonDrainer) getInScopePVCs(ctx context.Context, pod *core.Pod) ([
 
 // deletePVCAssociatedWithStorageClass takes care of deleting the PVCs associated with the annotated classes
 // returns the list of deleted PVCs and the first error encountered if any
-func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(ctx context.Context, pod *core.Pod, pvcs []*core.PersistentVolumeClaim) ([]*core.PersistentVolumeClaim, error) {
+func (d *APIDrainer) deletePVCAssociatedWithStorageClass(ctx context.Context, pod *core.Pod, pvcs []*core.PersistentVolumeClaim) ([]*core.PersistentVolumeClaim, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "deletePVCAssociatedWithStorageClass")
 	defer span.Finish()
 
@@ -1259,7 +1190,7 @@ func (d *APICordonDrainer) deletePVCAssociatedWithStorageClass(ctx context.Conte
 	return deletedPVCs, nil
 }
 
-func (d *APICordonDrainer) awaitPVCDeletion(ctx context.Context, pvc *core.PersistentVolumeClaim, timeout time.Duration) error {
+func (d *APIDrainer) awaitPVCDeletion(ctx context.Context, pvc *core.PersistentVolumeClaim, timeout time.Duration) error {
 	return wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
 		d.l.Info("waiting for pvc complete deletion", zap.String("pvc", pvc.Name), zap.String("namespace", pvc.GetNamespace()), zap.String("pvc-uid", string(pvc.GetUID())))
 		var got core.PersistentVolumeClaim
@@ -1280,7 +1211,7 @@ func (d *APICordonDrainer) awaitPVCDeletion(ctx context.Context, pvc *core.Persi
 	})
 }
 
-func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.Node, reason string) error {
+func (d *APIDrainer) performNodeReplacement(ctx context.Context, n *core.Node, reason string) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "performNodeReplacement")
 	defer span.Finish()
 
@@ -1297,21 +1228,21 @@ func (d *APICordonDrainer) performNodeReplacement(ctx context.Context, n *core.N
 	return nil
 }
 
-func (d *APICordonDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
+func (d *APIDrainer) ReplaceNode(ctx context.Context, n *core.Node) (bool, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "ReplaceNode")
 	defer span.Finish()
 	err := d.performNodeReplacement(ctx, n, newNodeRequestReasonReplacement)
 	return err != nil, err
 }
 
-func (d *APICordonDrainer) PreprovisionNode(ctx context.Context, n *core.Node) error {
+func (d *APIDrainer) PreprovisionNode(ctx context.Context, n *core.Node) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "PreprovisionNode")
 	defer span.Finish()
 
 	return d.performNodeReplacement(ctx, n, newNodeRequestReasonPreprovisioning)
 }
 
-func (d *APICordonDrainer) GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
+func (d *APIDrainer) GetReplacementStatus(ctx context.Context, n *core.Node) (NodeReplacementStatus, error) {
 	freshNode, err := d.runtimeObjectStore.Nodes().Get(n.Name)
 	if err != nil {
 		return "", err

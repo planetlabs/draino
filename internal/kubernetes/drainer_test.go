@@ -32,14 +32,14 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
 	//"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 const (
@@ -54,8 +54,8 @@ const (
 )
 
 var (
-	_ CordonDrainer = (*APICordonDrainer)(nil)
-	_ CordonDrainer = (*NoopCordonDrainer)(nil)
+	_ DrainerInstance = (*APIDrainer)(nil)
+	_ DrainerInstance = (*NoopDrainer)(nil)
 )
 
 var podGracePeriodSeconds int64 = 10
@@ -87,213 +87,24 @@ func newFakeClientSet(objects []runtime.Object, rs ...reactor) kubernetes.Interf
 	return cs
 }
 
-func newFakeDynamicClient(objects ...runtime.Object) dynamic.Interface {
-	scheme := runtime.NewScheme()
-	if err := fake.AddToScheme(scheme); err != nil {
-		return nil
-	}
-	return dynamicfake.NewSimpleDynamicClient(scheme, objects...)
-}
-
-func TestCordon(t *testing.T) {
-	ctx := context.Background()
-	cases := []struct {
-		name      string
-		node      *core.Node
-		mutators  []nodeMutatorFn
-		expected  *core.Node
-		reactions []reactor
-		limiters  map[string]LimiterFunc
-	}{
-		{
-			name: "CordonSchedulableNode",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			expected: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-		},
-		{
-			name: "CordonUnschedulableNode",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-			expected: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-		},
-		{
-			name: "CordonNonExistentNode",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			reactions: []reactor{
-				{verb: "get", resource: "nodes", err: errors.New("nope")},
-			},
-		},
-		{
-			name: "ErrorCordoningSchedulableNode",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			reactions: []reactor{
-				{verb: "update", resource: "nodes", err: errors.New("nope")},
-			},
-		},
-		{
-			name: "CordonSchedulableNodeWithMutator",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			mutators: []nodeMutatorFn{func(n *core.Node) {
-				n.Annotations = map[string]string{"foo": "1"}
-			}},
-			expected: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName, Annotations: map[string]string{"foo": "1"}},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-		},
-		{
-			name: "CordonUnschedulableNodeWithMutator",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-			mutators: []nodeMutatorFn{func(n *core.Node) {
-				n.Annotations = map[string]string{"foo": "1"}
-			}},
-			expected: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := fake.NewSimpleClientset(tc.node)
-			for _, r := range tc.reactions {
-				c.PrependReactor(r.verb, r.resource, r.Fn())
-			}
-			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
-			if err := d.Cordon(ctx, tc.node, tc.mutators...); err != nil {
-				for _, r := range tc.reactions {
-					if errors.Is(err, r.err) {
-						return
-					}
-				}
-				t.Errorf("d.Cordon(%v): %v", tc.node.Name, err)
-			}
-			{
-				n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
-				if err != nil {
-					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
-				}
-				if !reflect.DeepEqual(tc.expected, n) {
-					t.Errorf("node.Get(%v): want %#v, got %#v", tc.node.Name, tc.expected, n)
-				}
-			}
-		})
-	}
-}
-
-func TestUncordon(t *testing.T) {
-	ctx := context.Background()
-	cases := []struct {
-		name      string
-		node      *core.Node
-		mutators  []nodeMutatorFn
-		expected  *core.Node
-		reactions []reactor
-	}{
-		{
-			name:     "UncordonSchedulableNode",
-			node:     &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-		},
-		{
-			name: "UncordonUnschedulableNode",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-		},
-		{
-			name: "UncordonNonExistentNode",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			reactions: []reactor{
-				{verb: "get", resource: "nodes", err: errors.New("nope")},
-			},
-		},
-		{
-			name: "ErrorUncordoningUnschedulableNode",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-			reactions: []reactor{
-				{verb: "update", resource: "nodes", err: errors.New("nope")},
-			},
-		},
-		{
-			name: "UncordonSchedulableNodeWithMutator",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-			mutators: []nodeMutatorFn{func(n *core.Node) {
-				n.Annotations = map[string]string{"foo": "1"}
-			}},
-			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}},
-		},
-		{
-			name: "UncordonUnschedulableNodeWithMutator",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{Name: nodeName},
-				Spec:       core.NodeSpec{Unschedulable: true},
-			},
-			mutators: []nodeMutatorFn{func(n *core.Node) {
-				n.Annotations = map[string]string{"foo": "1"}
-			}},
-			expected: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName, Annotations: map[string]string{"foo": "1"}}},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := fake.NewSimpleClientset(tc.node)
-			for _, r := range tc.reactions {
-				c.PrependReactor(r.verb, r.resource, r.Fn())
-			}
-			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
-			if err := d.Uncordon(ctx, tc.node, tc.mutators...); err != nil {
-				for _, r := range tc.reactions {
-					if errors.Is(err, r.err) {
-						return
-					}
-				}
-				t.Errorf("d.Uncordon(%v): %v", tc.node.Name, err)
-			}
-			{
-				n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
-				if err != nil {
-					t.Errorf("node.Get(%v): %v", tc.node.Name, err)
-				}
-				if !reflect.DeepEqual(tc.expected, n) {
-					t.Errorf("node.Get(%v): want %#v, got %#v", tc.node.Name, tc.expected, n)
-				}
-			}
-		})
-	}
-}
-
 func TestDrain(t *testing.T) {
+	taintDraining := []core.Taint{{
+		Key:    k8sclient.DrainoTaintKey,
+		Value:  k8sclient.TaintDraining,
+		Effect: core.TaintEffectNoSchedule,
+	}}
 	ctx := context.Background()
 	now := meta.Now()
 	cases := []struct {
 		name      string
-		options   []APICordonDrainerOption
+		options   []APIDrainerOption
 		node      *core.Node
 		reactions []reactor
 		errFn     func(err error) bool
 	}{
 		{
 			name: "EvictOnePod",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -324,18 +135,18 @@ func TestDrain(t *testing.T) {
 			},
 		},
 		{
-			name: "NodeSchedulableDontDrain",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: false}},
+			name: "NodeNotTaintedDontDrain",
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: nil}},
 			errFn: func(err error) bool {
-				return errors.Is(err, NodeIsNotCordonError{
+				return errors.Is(err, NodeHasNotDrainingTaintError{
 					NodeName: nodeName,
 				})
 			},
 		},
 		{
 			name:    "PodDisappearsBeforeEviction",
-			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
-			options: []APICordonDrainerOption{MaxGracePeriod(1 * time.Second), EvictionHeadroom(1 * time.Second)},
+			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
+			options: []APIDrainerOption{MaxGracePeriod(1 * time.Second), EvictionHeadroom(1 * time.Second)},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -354,7 +165,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "ErrorEvictingPod",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -373,8 +184,8 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name:    "PodEvictionNotAllowed",
-			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
-			options: []APICordonDrainerOption{MaxGracePeriod(1 * time.Second), EvictionHeadroom(1 * time.Second)},
+			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
+			options: []APIDrainerOption{MaxGracePeriod(1 * time.Second), EvictionHeadroom(1 * time.Second)},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -394,7 +205,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "EvictedPodReplacedWithDifferentUID",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -417,7 +228,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "ErrorConfirmingPodDeletion",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -440,8 +251,8 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "PodDoesNotPassFilter",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
-			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
+			options: []APIDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
 				if p.GetName() == "lamePod" {
 					// This pod does not pass the filter.
 					return false, "lame", nil
@@ -471,8 +282,8 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "PodFilterErrors",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
-			options: []APICordonDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
+			options: []APIDrainerOption{WithPodFilter(func(p core.Pod) (bool, string, error) {
 				if p.GetName() == "explodeyPod" {
 					return false, "explodey", errExploded
 				}
@@ -502,12 +313,12 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name:    "SkipDrain",
-			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
-			options: []APICordonDrainerOption{WithSkipDrain(true), WithAPICordonDrainerLogger(zap.NewNop())},
+			node:    &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
+			options: []APIDrainerOption{WithSkipDrain(true), WithAPIDrainerLogger(zap.NewNop())},
 		},
 		{
 			name: "ErrorListingPods",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
 			reactions: []reactor{
 				reactor{
 					verb:     "list",
@@ -518,7 +329,7 @@ func TestDrain(t *testing.T) {
 		},
 		{
 			name: "DoNotEvictTerminatingPodButWaitForDeletion",
-			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Unschedulable: true}},
+			node: &core.Node{ObjectMeta: meta.ObjectMeta{Name: nodeName}, Spec: core.NodeSpec{Taints: taintDraining}},
 			reactions: []reactor{{
 				verb:     "list",
 				resource: "pods",
@@ -542,7 +353,7 @@ func TestDrain(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newFakeClientSet([]runtime.Object{tc.node}, tc.reactions...)
-			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}), tc.options...)
+			d := NewAPIDrainer(c, NewEventRecorder(&record.FakeRecorder{}), tc.options...)
 			if err := d.Drain(ctx, tc.node); err != nil {
 				for _, r := range tc.reactions {
 					if errors.Is(err, r.err) {
@@ -749,7 +560,7 @@ func TestMarkDrain(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fake.NewSimpleClientset(tc.node)
-			d := NewAPICordonDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
+			d := NewAPIDrainer(c, NewEventRecorder(&record.FakeRecorder{}))
 			{
 				n, err := c.CoreV1().Nodes().Get(context.Background(), tc.node.GetName(), meta.GetOptions{})
 				if err != nil {
@@ -790,7 +601,7 @@ func TestSerializePolicy(t *testing.T) {
 	assert.Equal(t, "{\"kind\":\"Eviction\",\"apiVersion\":\"policy/v1\",\"metadata\":{\"name\":\"test-pod\",\"namespace\":\"test-namespace\",\"creationTimestamp\":null}}\n", string(GetEvictionJsonPayload(evictionPayload).Bytes()))
 }
 
-func TestAPICordonDrainer_MarkDrainDelete(t *testing.T) {
+func TestAPIDrainer_MarkDrainDelete(t *testing.T) {
 	ctx := context.Background()
 	someTimeAgo := meta.NewTime(time.Date(1978, time.April, 12, 22, 00, 00, 00, time.UTC))
 	tests := []struct {
@@ -883,7 +694,7 @@ func TestAPICordonDrainer_MarkDrainDelete(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := &APICordonDrainer{
+			d := &APIDrainer{
 				c: fake.NewSimpleClientset(tt.node),
 			}
 			if err := d.MarkDrainDelete(ctx, tt.node); (err != nil) != tt.wantErr {

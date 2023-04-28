@@ -5,36 +5,24 @@ import (
 	"net/http"
 
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/drain_runner"
-	"github.com/planetlabs/draino/internal/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/planetlabs/draino/internal/drain_runner"
+	"github.com/planetlabs/draino/internal/metrics"
+
 	"contrib.go.opencensus.io/exporter/prometheus"
-	"github.com/planetlabs/draino/internal/groups"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/observability"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"gopkg.in/alecthomas/kingpin.v2"
+
+	"github.com/planetlabs/draino/internal/groups"
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/observability"
 )
 
 func DrainoLegacyMetrics(ctx context.Context, options *Options, logger logr.Logger) manager.Runnable {
 	var (
-		nodesCordoned = &view.View{
-			Name:        "cordoned_nodes_total",
-			Measure:     kubernetes.MeasureNodesCordoned,
-			Description: "Number of nodes cordoned.",
-			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
-		}
-		nodesUncordoned = &view.View{
-			Name:        "uncordoned_nodes_total",
-			Measure:     kubernetes.MeasureNodesUncordoned,
-			Description: "Number of nodes uncordoned.",
-			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagResult},
-		}
 		nodesDrained = &view.View{
 			Name:        "drained_nodes_total",
 			Measure:     kubernetes.MeasureNodesDrained,
@@ -48,20 +36,6 @@ func DrainoLegacyMetrics(ctx context.Context, options *Options, logger logr.Logg
 			Description: "Number of nodes scheduled for drain.",
 			Aggregation: view.Count(),
 			TagKeys:     []tag.Key{kubernetes.TagResult, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
-		}
-		limitedCordon = &view.View{
-			Name:        "limited_cordon_total",
-			Measure:     kubernetes.MeasureLimitedCordon,
-			Description: "Number of limited cordon encountered.",
-			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
-		}
-		skippedCordon = &view.View{
-			Name:        "skipped_cordon_total",
-			Measure:     kubernetes.MeasureSkippedCordon,
-			Description: "Number of skipped cordon encountered.",
-			Aggregation: view.Count(),
-			TagKeys:     []tag.Key{kubernetes.TagReason, kubernetes.TagConditions, kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam},
 		}
 		nodesReplacement = &view.View{
 			Name:        "node_replacement_request_total",
@@ -81,9 +55,9 @@ func DrainoLegacyMetrics(ctx context.Context, options *Options, logger logr.Logg
 
 	if options.noLegacyNodeHandler {
 		// removing: nodesDrained
-		kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrainScheduled, limitedCordon, skippedCordon, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
+		kingpin.FatalIfError(view.Register(nodesDrainScheduled, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
 	} else {
-		kingpin.FatalIfError(view.Register(nodesCordoned, nodesUncordoned, nodesDrained, nodesDrainScheduled, limitedCordon, skippedCordon, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
+		kingpin.FatalIfError(view.Register(nodesDrained, nodesDrainScheduled, nodesReplacement, nodesPreprovisioningLatency), "cannot create metrics")
 	}
 
 	promOptions := prometheus.Options{Namespace: kubernetes.Component, Registry: prom.NewRegistry()}

@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/planetlabs/draino/internal/kubernetes/index"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
@@ -25,7 +26,7 @@ type GlobalBlocker interface {
 	Start(context.Context) error
 }
 
-// ComputeBlockStateFunction a function that would analyse the system state and return true if we should lock draino to prevent any cordon/drain activity
+// ComputeBlockStateFunction a function that would analyse the system state and return true if we should lock draino to prevent any drain activity
 type ComputeBlockStateFunction func() bool
 type ComputeBlockStateFunctionFactory func(idx *index.Indexer, logger logr.Logger) ComputeBlockStateFunction
 
