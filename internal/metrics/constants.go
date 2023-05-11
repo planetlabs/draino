@@ -19,4 +19,5 @@ const (
 	TagDryRun             = "dry_run"
 	TagFilter             = "filter"
 	TagPreProcessor       = "pre_processor"
+	TagTeam               = "team"
 )

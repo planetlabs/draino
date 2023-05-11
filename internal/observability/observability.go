@@ -400,7 +400,8 @@ func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
 }
 
 func (s *DrainoConfigurationObserverImpl) ProduceNodeMetrics(node *v1.Node) {
-	nodeLabelValues := []string{node.Name, string(s.groupKeyGetter.GetGroupKey(node))}
+	tags := kubernetes.GetNodeTagsValues(node)
+	nodeLabelValues := []string{node.Name, string(s.groupKeyGetter.GetGroupKey(node)), tags.NgName, tags.NgNamespace, tags.Team}
 	if retries := s.retryWall.GetDrainRetryAttemptsCount(node); retries != 0 {
 		nodeRetries.WithLabelValues(nodeLabelValues...).Set(float64(retries))
 	}
@@ -455,7 +456,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 
 func (s *DrainoConfigurationObserverImpl) updateAutoCleanupGauges(filterNodes filteredNodeMetrics) {
 	for tagsValues, count := range filterNodes {
-		tags := []string{tagsValues.NgName, tagsValues.NgNamespace, tagsValues.group, tagsValues.filter}
+		tags := []string{tagsValues.NgName, tagsValues.NgNamespace, tagsValues.group, tagsValues.Team, tagsValues.filter}
 		nodeFilterCleaner.SetAndPlanCleanup(float64(count), tags, false, s.analysisPeriod, false)
 	}
 }

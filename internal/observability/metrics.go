@@ -14,7 +14,7 @@ var (
 	registerMetricsOnce sync.Once
 
 	// Filters Subsystem
-	nodeFiltersTags = []string{metrics.TagNodegroupName, metrics.TagNodegroupNamespace, metrics.TagGroupKey, metrics.TagFilter}
+	nodeFiltersTags = []string{metrics.TagNodegroupName, metrics.TagNodegroupNamespace, metrics.TagGroupKey, metrics.TagTeam, metrics.TagFilter}
 	nodeFilters     = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: metrics.FiltersSubsystem,
 		Name:      "node_filters",
@@ -23,7 +23,7 @@ var (
 	nodeFilterCleaner gmetrics.GaugeCleaner
 
 	// Retry Wall Subsystem
-	nodeRetriesTags = []string{metrics.TagNodeName, metrics.TagGroupKey}
+	nodeRetriesTags = []string{metrics.TagNodeName, metrics.TagGroupKey, metrics.TagNodegroupName, metrics.TagNodegroupNamespace, metrics.TagTeam}
 	nodeRetries     = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: metrics.RetryWallSubsystem,
 		Name:      "node_retries",
