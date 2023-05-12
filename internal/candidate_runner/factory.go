@@ -38,6 +38,7 @@ func (factory *CandidateRunnerFactory) build() *candidateRunner {
 		runEvery:                  factory.conf.rerunEvery,
 		eventRecorder:             factory.conf.eventRecorder,
 		maxSimultaneousCandidates: factory.conf.maxSimultaneousCandidates,
+		maxSimultaneousDrained:    factory.conf.maxSimultaneousDrained,
 		drainSimulator:            factory.conf.drainSimulator,
 		dryRun:                    factory.conf.dryRun,
 		nodeSorters:               factory.conf.nodeSorters,

@@ -54,6 +54,7 @@ type candidateRunner struct {
 	suppliedConditions  []kubernetes.SuppliedCondition
 
 	maxSimultaneousCandidates int
+	maxSimultaneousDrained    int
 	dryRun                    bool
 
 	nodeSorters         NodeSorters
@@ -79,7 +80,8 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		start := runner.clock.Now()
 
 		var dataInfo, previousDataInfo DataInfo
-		dataInfo.Slots = runner.maxSimultaneousCandidates
+		dataInfo.CandidateSlots = runner.maxSimultaneousCandidates
+		dataInfo.DrainedSlots = runner.maxSimultaneousDrained
 		if previous, hasPrevious := info.Data.Get(CandidateRunnerInfoKey); hasPrevious {
 			previousDataInfo = previous.(DataInfo)
 			dataInfo.importLongLastingData(previousDataInfo)
@@ -109,10 +111,15 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		}
 
 		// filter nodes that are already candidate
-		nodes, alreadyCandidateNodes, maxReached := runner.checkAlreadyCandidates(nodes)
+		nodes, alreadyCandidateNodes, alreadyDrainedNodes, maxCandidateReached, maxDrainedReached := runner.checkAlreadyCandidates(nodes)
 		dataInfo.CurrentCandidates = utils.NodesNames(alreadyCandidateNodes)
-		if maxReached {
+		dataInfo.CurrentDrained = utils.NodesNames(alreadyDrainedNodes)
+		if maxCandidateReached {
 			runner.logger.Info("Max candidate already reached", "count", runner.maxSimultaneousCandidates, "nodes", strings.Join(utils.NodesNames(alreadyCandidateNodes), ","))
+			return
+		}
+		if maxDrainedReached {
+			runner.logger.Info("Max drained already reached", "count", runner.maxSimultaneousDrained, "nodes", strings.Join(utils.NodesNames(alreadyDrainedNodes), ","))
 			return
 		}
 		remainCandidateSlot := runner.maxSimultaneousCandidates - len(alreadyCandidateNodes)
@@ -196,22 +203,33 @@ func (runner *candidateRunner) hasConditionRateLimitingCapacity(node *corev1.Nod
 }
 
 // checkAlreadyCandidates keep only the nodes that are not candidate. If maxSimultaneousCandidates>0, then we check against the max. If max is reached a nil slice is returned and the boolean returned is true
-func (runner *candidateRunner) checkAlreadyCandidates(nodes []*corev1.Node) (remainingNodes, alreadyCandidateNodes []*corev1.Node, maxCandidateReached bool) {
+func (runner *candidateRunner) checkAlreadyCandidates(nodes []*corev1.Node) (remainingNodes, alreadyCandidateNodes, alreadyDrainedNodes []*corev1.Node, maxCandidateReached, maxDrainedReached bool) {
 	remainingNodes = make([]*corev1.Node, 0, len(nodes)) // high probability that all nodes are to be kept
 	alreadyCandidateNodes = make([]*corev1.Node, 0, runner.maxSimultaneousCandidates)
+	alreadyDrainedNodes = make([]*corev1.Node, 0, runner.maxSimultaneousDrained)
 	for _, n := range nodes {
-		if _, hasTaint := k8sclient.GetNLATaint(n); !hasTaint {
+		if taint, hasTaint := k8sclient.GetNLATaint(n); !hasTaint {
 			remainingNodes = append(remainingNodes, n)
 		} else {
-			alreadyCandidateNodes = append(alreadyCandidateNodes, n)
-			if runner.maxSimultaneousCandidates > 0 {
-				if len(alreadyCandidateNodes) >= runner.maxSimultaneousCandidates {
-					return nil, alreadyCandidateNodes, true
+			if taint.Value == k8sclient.TaintDrained {
+				alreadyDrainedNodes = append(alreadyDrainedNodes, n)
+				if runner.maxSimultaneousDrained > 0 {
+					if len(alreadyDrainedNodes) >= runner.maxSimultaneousDrained {
+						return nil, alreadyCandidateNodes, alreadyDrainedNodes, false, true
+					}
+				}
+			} else {
+				alreadyCandidateNodes = append(alreadyCandidateNodes, n)
+				if runner.maxSimultaneousCandidates > 0 {
+					if len(alreadyCandidateNodes) >= runner.maxSimultaneousCandidates {
+						return nil, alreadyCandidateNodes, alreadyDrainedNodes, true, false
+					}
 				}
 			}
+
 		}
 	}
-	return remainingNodes, alreadyCandidateNodes, false
+	return remainingNodes, alreadyCandidateNodes, alreadyDrainedNodes, false, false
 }
 
 func (runner *candidateRunner) GetNodeIterator(nodes []*corev1.Node) scheduler.ItemProvider[*corev1.Node] {

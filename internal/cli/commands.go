@@ -273,7 +273,7 @@ func (h *CLICommands) cmdGroupList() error {
 	}
 
 	table := table.NewTable([]string{
-		"Group", "Nodes", "Slot", "Filtered", "Simulation failed", "Cond. Rate Limited", "Warn", "Last Run Aborted", "Last Candidate Run", "Candidate Duration", "Last Candidate(s)", "Last Candidate(s) At", "Last Candidates Sort", "Drain Duration", "Drain Buffer",
+		"Group", "Nodes", "CandidateSlots", "DrainedSlots", "Filtered", "Simulation failed", "Cond. Rate Limited", "Warn", "Last Run Aborted", "Last Candidate Run", "Candidate Duration", "Last Candidate(s)", "Last Candidate(s) At", "Last Candidates Sort", "Drain Duration", "Drain Buffer",
 	},
 		func(obj interface{}) []string {
 			item := obj.(groups.RunnerInfo)
@@ -289,7 +289,7 @@ func (h *CLICommands) cmdGroupList() error {
 			warn := ""
 			if candidateDataInfo.NodeCount > 0 {
 				// Show warning if there are free slots available and we have potential candidates that fail on the way to get the taint
-				if len(candidateDataInfo.CurrentCandidates) < candidateDataInfo.Slots && candidateDataInfo.NodeCount > candidateDataInfo.FilteredOutCount {
+				if len(candidateDataInfo.CurrentCandidates) < candidateDataInfo.CandidateSlots && candidateDataInfo.NodeCount > candidateDataInfo.FilteredOutCount {
 					warn = "*"
 				}
 
@@ -300,11 +300,13 @@ func (h *CLICommands) cmdGroupList() error {
 				lastRunAborted = "*"
 			}
 
-			remainingSlots := candidateDataInfo.Slots - len(candidateDataInfo.CurrentCandidates)
+			remainingCandidateSlots := candidateDataInfo.CandidateSlots - len(candidateDataInfo.CurrentCandidates)
+			remainingDrainedSlots := candidateDataInfo.DrainedSlots - len(candidateDataInfo.CurrentDrained)
 			return []string{
 				string(item.Key),
 				fmt.Sprintf("%v", candidateDataInfo.NodeCount),
-				fmt.Sprintf("%d/%d", remainingSlots, candidateDataInfo.Slots),
+				fmt.Sprintf("%d/%d", remainingCandidateSlots, candidateDataInfo.CandidateSlots),
+				fmt.Sprintf("%d/%d", remainingDrainedSlots, candidateDataInfo.DrainedSlots),
 				fmt.Sprintf("%v", candidateDataInfo.FilteredOutCount),
 				fmt.Sprintf("%v", candidateDataInfo.LastSimulationRejections),
 				fmt.Sprintf("%d", len(candidateDataInfo.LastConditionRateLimitRejections)),

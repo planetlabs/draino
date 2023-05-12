@@ -39,6 +39,7 @@ type Config struct {
 	clock                     clock.Clock
 	rerunEvery                time.Duration
 	maxSimultaneousCandidates int
+	maxSimultaneousDrained    int
 	dryRun                    bool
 	nodeIteratorFactory       NodeIteratorFactory
 }
@@ -50,6 +51,7 @@ func NewConfig() *Config {
 		rerunEvery:                time.Second,
 		dryRun:                    true,
 		maxSimultaneousCandidates: 1,
+		maxSimultaneousDrained:    5,
 		nodeIteratorFactory: func(nodes []*corev1.Node, sorters NodeSorters) scheduler.ItemProvider[*corev1.Node] {
 			return scheduler.NewSortingTreeWithInitialization(nodes, sorters)
 		},
@@ -131,6 +133,12 @@ func WithEventRecorder(er kubernetes.EventRecorder) WithOption {
 func WithMaxSimultaneousCandidates(maxSimultaneousCandidates int) WithOption {
 	return func(conf *Config) {
 		conf.maxSimultaneousCandidates = maxSimultaneousCandidates
+	}
+}
+
+func WithMaxSimultaneousDrained(maxSimultaneousDrained int) WithOption {
+	return func(conf *Config) {
+		conf.maxSimultaneousDrained = maxSimultaneousDrained
 	}
 }
 

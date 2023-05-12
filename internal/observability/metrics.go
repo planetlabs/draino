@@ -56,19 +56,33 @@ var (
 	}, candidateRunnerTags)
 	candidateRunnerFilteredOutNodesCleaner gmetrics.GaugeCleaner
 
-	candidateRunnerTotalSlots = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	candidateRunnerTotalCandidateSlots = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: metrics.CandidateRunnerSubsystem,
 		Name:      "total_slots",
 		Help:      "Total amount of available drain candidate slots",
 	}, candidateRunnerTags)
-	candidateRunnerTotalSlotsCleaner gmetrics.GaugeCleaner
+	candidateRunnerTotalCandidateSlotsCleaner gmetrics.GaugeCleaner
 
-	candidateRunnerRemainingSlots = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	candidateRunnerTotalDrainedSlots = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: metrics.CandidateRunnerSubsystem,
+		Name:      "total_drained_slots",
+		Help:      "Total amount of available already drained slots",
+	}, candidateRunnerTags)
+	candidateRunnerTotalDrainedSlotsCleaner gmetrics.GaugeCleaner
+
+	candidateRunnerRemainingCandidateSlots = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: metrics.CandidateRunnerSubsystem,
 		Name:      "remaining_slots",
 		Help:      "Current remaining drain candidate slots",
 	}, candidateRunnerTags)
-	candidateRunnerRemainingSlotsCleaner gmetrics.GaugeCleaner
+	candidateRunnerRemainingCandidateSlotsCleaner gmetrics.GaugeCleaner
+
+	candidateRunnerRemainingDrainedSlots = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Subsystem: metrics.CandidateRunnerSubsystem,
+		Name:      "remaining_drained_slots",
+		Help:      "Current remaining already drained slots",
+	}, candidateRunnerTags)
+	candidateRunnerRemainingDrainedSlotsCleaner gmetrics.GaugeCleaner
 
 	candidateRunnerSimulationRejections = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Subsystem: metrics.CandidateRunnerSubsystem,
@@ -105,8 +119,10 @@ func initGaugeCleaner(cleanupPeriod time.Duration) {
 	// Candidate Runner Subsystem
 	candidateRunnerTotalNodesCleaner = gmetrics.NewGaugeCleaner(candidateRunnerTotalNodes, candidateRunnerTags, cleanupPeriod)
 	candidateRunnerFilteredOutNodesCleaner = gmetrics.NewGaugeCleaner(candidateRunnerFilteredOutNodes, candidateRunnerTags, cleanupPeriod)
-	candidateRunnerTotalSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerTotalSlots, candidateRunnerTags, cleanupPeriod)
-	candidateRunnerRemainingSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerRemainingSlots, candidateRunnerTags, cleanupPeriod)
+	candidateRunnerTotalCandidateSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerTotalCandidateSlots, candidateRunnerTags, cleanupPeriod)
+	candidateRunnerTotalDrainedSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerTotalDrainedSlots, candidateRunnerTags, cleanupPeriod)
+	candidateRunnerRemainingCandidateSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerRemainingCandidateSlots, candidateRunnerTags, cleanupPeriod)
+	candidateRunnerRemainingDrainedSlotsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerRemainingDrainedSlots, candidateRunnerTags, cleanupPeriod)
 	candidateRunnerSimulationRejectionsCleaner = gmetrics.NewGaugeCleaner(candidateRunnerSimulationRejections, candidateRunnerTags, cleanupPeriod)
 	candidateRunnerConditionRateLimitedCleaner = gmetrics.NewGaugeCleaner(candidateRunnerConditionRateLimited, candidateRunnerTags, cleanupPeriod)
 	candidateRunnerRunRateLimitedCleaner = gmetrics.NewGaugeCleaner(candidateRunnerRunRateLimited, candidateRunnerTags, cleanupPeriod)
@@ -125,6 +141,6 @@ func RegisterNewMetrics(registry *prometheus.Registry, cleanupPeriod time.Durati
 		registry.MustRegister(groupRunnerLoopDuration)
 
 		// Candidate Runner Subsystem
-		registry.MustRegister(candidateRunnerTotalNodes, candidateRunnerFilteredOutNodes, candidateRunnerTotalSlots, candidateRunnerRemainingSlots, candidateRunnerSimulationRejections, candidateRunnerConditionRateLimited)
+		registry.MustRegister(candidateRunnerTotalNodes, candidateRunnerFilteredOutNodes, candidateRunnerTotalCandidateSlots, candidateRunnerTotalDrainedSlots, candidateRunnerRemainingCandidateSlots, candidateRunnerRemainingDrainedSlots, candidateRunnerSimulationRejections, candidateRunnerConditionRateLimited)
 	})
 }
