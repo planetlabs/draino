@@ -3,6 +3,7 @@ package drain
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -96,13 +97,20 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 		return false, nil, []error{err}
 	}
 
+	// stable pod sort for stable reason / error construction
+	sort.Slice(pods, func(i, j int) bool {
+		podI := pods[i]
+		podJ := pods[j]
+		return podI.Namespace+"/"+podI.Name < podJ.Namespace+"/"+podJ.Name
+	})
+
 	// As we are  caching the positive results for one minute and negative ones for three minutes, we might make a lot of unneeded API calls
 	// As an optimization we are iterating over all pods and check if at least one has a negative cache entry, before simulating the drain for all the pods.
-	reasons := []string{}
+	var reasons []string
 	var errors []error
 	for _, pod := range pods {
 		if res, exist := sim.podResultCache.Get(createCacheKey(pod), time.Now()); exist && !res.result {
-			reasons = append(reasons, res.reason)
+			reasons = append(reasons, sim.nodeReasonFromPodReason(pod, res.reason))
 			if res.err != nil {
 				errors = append(errors, res.err)
 			}
@@ -116,21 +124,25 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 	for _, pod := range pods {
 		// TODO add suceeded/failed pod drain simulation count metric
 		canEvict, reason, err := sim.SimulatePodDrain(ctx, pod)
-		if err != nil {
-			return false, nil, []error{err}
-		}
 		if !canEvict {
-			reasons = append(reasons, fmt.Sprintf("Cannot drain pod '%s/%s', because: %v", pod.GetNamespace(), pod.GetName(), reason))
+			reasons = append(reasons, sim.nodeReasonFromPodReason(pod, reason))
+			if err != nil {
+				errors = append(errors, err)
+			}
 		}
 	}
 
 	// TODO add suceeded/failed node drain simulation count metric
 	if len(reasons) > 0 {
 		sim.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventDrainSimulationFailed, "Drain simulation failed: "+strings.Join(reasons, "; "))
-		return false, reasons, nil
+		return false, reasons, errors
 	}
 
-	return true, nil, nil
+	return true, nil, errors
+}
+
+func (sim *drainSimulatorImpl) nodeReasonFromPodReason(pod *corev1.Pod, reason string) string {
+	return fmt.Sprintf("Cannot drain pod '%s/%s', because: %v", pod.GetNamespace(), pod.GetName(), reason)
 }
 
 func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod) (bool, string, error) {
