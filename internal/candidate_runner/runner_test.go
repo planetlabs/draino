@@ -25,7 +25,7 @@ func setClockForTest() clock.Clock {
 	return clockInTest
 }
 
-func Test_candidateRunner_checkAlreadyCandidates(t *testing.T) {
+func Test_candidateRunner_checkAlreadyCandidatesOrDrained(t *testing.T) {
 	setClockForTest()
 	n0 := &corev1.Node{}
 	n10 := &corev1.Node{}
@@ -100,21 +100,21 @@ func Test_candidateRunner_checkAlreadyCandidates(t *testing.T) {
 				maxSimultaneousCandidates: tt.maxCandidate,
 				maxSimultaneousDrained:    tt.maxDrained,
 			}
-			gotRemainingNodes, gotAlreadyCandidateNodes, gotAlreadyDrainedNodes, gotMaxCandidateReached, gotMaxDrainedReached := runner.checkAlreadyCandidates(tt.nodes)
+			gotRemainingNodes, slotsInfo := runner.checkAlreadyCandidatesOrDrained(tt.nodes)
 			if !reflect.DeepEqual(gotRemainingNodes, tt.wantRemainingNodes) {
 				t.Errorf("checkAlreadyCandidates() gotRemainingNodes = %v, want %v", gotRemainingNodes, tt.wantRemainingNodes)
 			}
-			if !reflect.DeepEqual(gotAlreadyCandidateNodes, tt.wantAlreadyCandidateNodes) {
-				t.Errorf("checkAlreadyCandidates() gotAlreadyCandidateNodes = %v, want %v", gotAlreadyCandidateNodes, tt.wantAlreadyCandidateNodes)
+			if !reflect.DeepEqual(slotsInfo.alreadyCandidateNodes, tt.wantAlreadyCandidateNodes) {
+				t.Errorf("checkAlreadyCandidates() gotAlreadyCandidateNodes = %v, want %v", slotsInfo.alreadyCandidateNodes, tt.wantAlreadyCandidateNodes)
 			}
-			if !reflect.DeepEqual(gotAlreadyCandidateNodes, tt.wantAlreadyCandidateNodes) {
-				t.Errorf("checkAlreadyCandidates() gotAlreadyDrainedNodes = %v, want %v", gotAlreadyDrainedNodes, tt.wantAlreadyDrainedNodes)
+			if !reflect.DeepEqual(slotsInfo.alreadyCandidateNodes, tt.wantAlreadyCandidateNodes) {
+				t.Errorf("checkAlreadyCandidates() gotAlreadyDrainedNodes = %v, want %v", slotsInfo.alreadyDrainedNodes, tt.wantAlreadyDrainedNodes)
 			}
-			if gotMaxCandidateReached != tt.wantMaxCandidateReached {
-				t.Errorf("checkAlreadyCandidates() gotMaxCandidateReached = %v, want %v", gotMaxCandidateReached, tt.wantMaxCandidateReached)
+			if slotsInfo.maxCandidateReached != tt.wantMaxCandidateReached {
+				t.Errorf("checkAlreadyCandidates() gotMaxCandidateReached = %v, want %v", slotsInfo.maxCandidateReached, tt.wantMaxCandidateReached)
 			}
-			if gotMaxDrainedReached != tt.wantMaxDrainedReached {
-				t.Errorf("checkAlreadyCandidates() gotMaxDrainedReached = %v, want %v", gotMaxDrainedReached, tt.wantMaxDrainedReached)
+			if slotsInfo.maxDrainedReached != tt.wantMaxDrainedReached {
+				t.Errorf("checkAlreadyCandidates() gotMaxDrainedReached = %v, want %v", slotsInfo.maxDrainedReached, tt.wantMaxDrainedReached)
 			}
 		})
 	}
