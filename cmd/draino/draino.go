@@ -367,6 +367,7 @@ func main() {
 			candidate_runner.WithSharedIndexInformer(indexer),
 			candidate_runner.WithEventRecorder(eventRecorder),
 			candidate_runner.WithMaxSimultaneousCandidates(1), // TODO should we move that to something that can be customized per user
+			candidate_runner.WithMaxSimultaneousDrained(5),    // TODO should we move that to something that can be customized per user
 			candidate_runner.WithFilter(filterFactory.BuildCandidateFilter()),
 			candidate_runner.WithDrainSimulator(simulator),
 			candidate_runner.WithNodeSorters(sorters),

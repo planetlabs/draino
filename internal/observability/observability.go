@@ -384,7 +384,9 @@ func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
 		candidateRunnerTags := []string{string(group)}
 		candidateRunnerTotalNodesCleaner.SetAndPlanCleanup(float64(candidateDataInfo.NodeCount), candidateRunnerTags, false, cleanupPeriod, false)
 		candidateRunnerFilteredOutNodesCleaner.SetAndPlanCleanup(float64(candidateDataInfo.FilteredOutCount), candidateRunnerTags, false, cleanupPeriod, false)
-		candidateRunnerTotalSlotsCleaner.SetAndPlanCleanup(float64(candidateDataInfo.Slots), candidateRunnerTags, false, cleanupPeriod, false)
+		candidateRunnerTotalCandidateSlotsCleaner.SetAndPlanCleanup(float64(candidateDataInfo.CandidateSlots), candidateRunnerTags, false, cleanupPeriod, false)
+		candidateRunnerTotalDrainedSlotsCleaner.SetAndPlanCleanup(float64(candidateDataInfo.DrainedSlots), candidateRunnerTags, false, cleanupPeriod, false)
+
 		candidateRunnerSimulationRejectionsCleaner.SetAndPlanCleanup(float64(len(candidateDataInfo.LastSimulationRejections)), candidateRunnerTags, false, cleanupPeriod, false)
 		candidateRunnerConditionRateLimitedCleaner.SetAndPlanCleanup(float64(len(candidateDataInfo.LastConditionRateLimitRejections)), candidateRunnerTags, false, cleanupPeriod, false)
 
@@ -394,8 +396,11 @@ func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
 		}
 		candidateRunnerRunRateLimitedCleaner.SetAndPlanCleanup(wasRateLimited, candidateRunnerTags, false, cleanupPeriod, false)
 
-		remainingSlots := candidateDataInfo.Slots - len(candidateDataInfo.CurrentCandidates)
-		candidateRunnerRemainingSlotsCleaner.SetAndPlanCleanup(float64(remainingSlots), candidateRunnerTags, false, cleanupPeriod, false)
+		remainingCandidateSlots := candidateDataInfo.CandidateSlots - len(candidateDataInfo.CurrentCandidates)
+		candidateRunnerRemainingCandidateSlotsCleaner.SetAndPlanCleanup(float64(remainingCandidateSlots), candidateRunnerTags, false, cleanupPeriod, false)
+
+		remainingDrainedSlots := candidateDataInfo.DrainedSlots - len(candidateDataInfo.CurrentDrained)
+		candidateRunnerRemainingDrainedSlotsCleaner.SetAndPlanCleanup(float64(remainingDrainedSlots), candidateRunnerTags, false, cleanupPeriod, false)
 	}
 }
 

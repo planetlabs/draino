@@ -20,7 +20,8 @@ type DataInfo struct {
 	// Candidate Run
 	NodeCount                        int           // initial node count in the group
 	FilteredOutCount                 int           // How many nodes were filtered out
-	Slots                            int           // How many slots are available in total
+	CandidateSlots                   int           // How many candidate slots are available in total
+	DrainedSlots                     int           // How many already drained slots are available in total
 	ProcessingDuration               time.Duration // How long does the loop took to run entirely
 	LastRunTime                      time.Time     // When was the runner loop launched the last time
 	LastNodeIteratorTime             time.Time     // When did the loop had to node to iterate on AFTER the filtering part
@@ -29,7 +30,8 @@ type DataInfo struct {
 	LastSimulationRejections         []string      // Nodes that were rejected by the drain simulation during the candidate evaluation
 	LastConditionRateLimitRejections []string      // Nodes that were rejected because of missing condition rate limiting budget
 	LastRunRateLimited               bool          // Indicates if the last run was stopped because of client side rate limiting
-	CurrentCandidates                []string      // Nodes that are currently in candidate state always: len(CurrentCandidtaes) <= Slots
+	CurrentCandidates                []string      // Nodes that are currently in candidate state always: len(CurrentCandidates) <= CandidateSlots
+	CurrentDrained                   []string      // Nodes that are currently in drained state always: len(CurrentDrained) <= DrainedSlots
 
 	// private filed that should not go through the serialization
 	lastNodeIterator scheduler.ItemProvider[*v1.Node] // Pointer to the last SortingTreeRepresentation as it was left by the last run.
