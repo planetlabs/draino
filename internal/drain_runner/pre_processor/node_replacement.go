@@ -2,10 +2,12 @@ package pre_processor
 
 import (
 	"context"
+	"time"
 
 	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -16,17 +18,20 @@ const (
 	PreprovisioningAnnotationKey        = "node-lifecycle.datadoghq.com/provision-new-node-before-drain"
 	PreprovisioningAnnotationValue      = "true"
 	PreprovisioningFalseAnnotationValue = "false"
+	PreprovisioningTimeout              = 60 * time.Minute
 )
 
 type NodeReplacer struct {
 	kclient client.Client
 	logger  logr.Logger
+	clock   clock.Clock
 }
 
-func NewNodeReplacer(client client.Client, logger logr.Logger) *NodeReplacer {
+func NewNodeReplacer(client client.Client, logger logr.Logger, clock clock.Clock) *NodeReplacer {
 	return &NodeReplacer{
 		kclient: client,
 		logger:  logger.WithName("NodeReplacer"),
+		clock:   clock,
 	}
 }
 
@@ -48,6 +53,18 @@ func (repl *NodeReplacer) ResetReplacement(ctx context.Context, node *corev1.Nod
 
 func (repl *NodeReplacer) IsDone(node *corev1.Node) (bool, PreProcessNotDoneReason) {
 	logger := repl.logger.WithValues("node", node.Name)
+
+	taint, exist := k8sclient.GetNLATaint(node)
+	if !exist {
+		logger.Info("Taint does not exist anymore; Node replacemnet aborted.")
+		return false, PreProcessNotDoneReasonNotCandidate
+	}
+
+	if repl.clock.Since(taint.TimeAdded.Time) > PreprovisioningTimeout {
+		logger.Info("Node replacement timeout")
+		return false, PreProcessNotDoneReasonTimeout
+	}
+
 	state := node.Labels[kubernetes.NodeLabelKeyReplaceRequest]
 	switch state {
 	case kubernetes.NodeLabelValueReplaceDone:
@@ -68,9 +85,9 @@ type NodeReplacementPreProcessor struct {
 	nodeReplacer      *NodeReplacer
 }
 
-func NewNodeReplacementPreProcessor(client client.Client, replaceAllNodesByDefault bool, logger logr.Logger) DrainPreProcessor {
+func NewNodeReplacementPreProcessor(client client.Client, replaceAllNodesByDefault bool, logger logr.Logger, clock clock.Clock) DrainPreProcessor {
 	return &NodeReplacementPreProcessor{
-		nodeReplacer:      NewNodeReplacer(client, logger),
+		nodeReplacer:      NewNodeReplacer(client, logger, clock),
 		allNodesByDefault: replaceAllNodesByDefault,
 	}
 }

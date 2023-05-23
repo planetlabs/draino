@@ -3,16 +3,19 @@ package pre_processor
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 func TestNodeReplacementPreProcessor(t *testing.T) {
@@ -94,12 +97,20 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 			ExpectedReason:           PreProcessNotDoneReasonFailure,
 			ExpectLabel:              true,
 		},
+		{
+			Name:                     "Should return timeout error if preprocessing takes too long",
+			ReplaceAllNodesByDefault: false,
+			Node:                     createNodeWithTimeToReplace(&trueVal, &failedVal, time.Now().Add(-2*time.Hour)),
+			ExpectedResult:           false,
+			ExpectedReason:           PreProcessNotDoneReasonTimeout,
+			ExpectLabel:              true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
 			client := fake.NewFakeClient(&tt.Node)
-			pre := NewNodeReplacementPreProcessor(client, tt.ReplaceAllNodesByDefault, logr.Discard())
+			pre := NewNodeReplacementPreProcessor(client, tt.ReplaceAllNodesByDefault, logr.Discard(), &clock.RealClock{})
 
 			res, reason, err := pre.IsDone(context.Background(), tt.Node.DeepCopy())
 			assert.Equal(t, tt.ExpectedResult, res)
@@ -114,6 +125,10 @@ func TestNodeReplacementPreProcessor(t *testing.T) {
 }
 
 func createNodeToReplace(annotationVal *string, labelVal *string) corev1.Node {
+	return createNodeWithTimeToReplace(annotationVal, labelVal, time.Now())
+}
+
+func createNodeWithTimeToReplace(annotationVal *string, labelVal *string, time time.Time) corev1.Node {
 	annotaions := map[string]string{}
 	if annotationVal != nil {
 		annotaions[PreprovisioningAnnotationKey] = *annotationVal
@@ -122,11 +137,22 @@ func createNodeToReplace(annotationVal *string, labelVal *string) corev1.Node {
 	if labelVal != nil {
 		labels[kubernetes.NodeLabelKeyReplaceRequest] = *labelVal
 	}
+	taintAdded := metav1.NewTime(time)
 	return corev1.Node{
-		ObjectMeta: v1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:        "test-node",
 			Annotations: annotaions,
 			Labels:      labels,
+		},
+		Spec: corev1.NodeSpec{
+			Taints: []corev1.Taint{
+				{
+					Key:       k8sclient.DrainoTaintKey,
+					Value:     k8sclient.TaintDrainCandidate,
+					Effect:    corev1.TaintEffectNoSchedule,
+					TimeAdded: &taintAdded,
+				},
+			},
 		},
 	}
 }

@@ -67,7 +67,7 @@ func (opts *FakeOptions) ApplyDefaults() error {
 		opts.RetryStrategy = &drain.StaticRetryStrategy{Delay: time.Second, AlertThreashold: 5}
 	}
 	if opts.NodeReplacer == nil {
-		opts.NodeReplacer = preprocessor.NewNodeReplacer(opts.ClientWrapper.GetManagerClient(), *opts.Logger)
+		opts.NodeReplacer = preprocessor.NewNodeReplacer(opts.ClientWrapper.GetManagerClient(), *opts.Logger, opts.Clock)
 	}
 	if opts.Filter == nil {
 		opts.Filter = filters.FilterFromFunction("always_true", func(ctx context.Context, n *v1.Node) bool { return true })

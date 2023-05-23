@@ -322,14 +322,14 @@ func main() {
 			return err
 		}
 
-		nodeReplacer := preprocessor.NewNodeReplacer(mgr.GetClient(), mgr.GetLogger())
+		nodeReplacer := preprocessor.NewNodeReplacer(mgr.GetClient(), mgr.GetLogger(), &clock.RealClock{})
 		drainRunnerFactory, err := drain_runner.NewFactory(
 			drain_runner.WithKubeClient(mgr.GetClient()),
 			drain_runner.WithClock(&clock.RealClock{}),
 			drain_runner.WithDrainer(drainerAPI),
 			drain_runner.WithPreprocessors(
 				preprocessor.NewWaitTimePreprocessor(options.waitBeforeDraining),
-				preprocessor.NewNodeReplacementPreProcessor(mgr.GetClient(), options.preprovisioningActivatedByDefault, mgr.GetLogger()),
+				preprocessor.NewNodeReplacementPreProcessor(mgr.GetClient(), options.preprovisioningActivatedByDefault, mgr.GetLogger(), &clock.RealClock{}),
 				preprocessor.NewPreActivitiesPreProcessor(mgr.GetClient(), indexer, store, mgr.GetLogger(), eventRecorderForDrainRunnerActivities, clock.RealClock{}, options.preActivityDefaultTimeout),
 			),
 			drain_runner.WithRerun(options.groupRunnerPeriod),
