@@ -1,9 +1,6 @@
 include: https://gitlab-templates.ddbuild.io/compute-delivery/v2/compute-delivery.yml
 
-# shared variables for the cnab-diff/apply jobs below
 variables:
-  KPR_CHART_NAME: "k8s-platform-draino" # if different than k8s-platform-$CI_PROJECT_NAME (CI_PROJECT_NAME is the repo name)
-  IMG_TAG_VALUE_PATH: "draino.image.tags.staging"
   CI_APP: draino
   CURRENT_CI_IMAGE: "v1.0.1"
 
@@ -50,6 +47,16 @@ cnab-apply:
   before_script:
     - *export-github-token
     - *export-cnab-token
+
+update-single-image:
+  extends: .update-single-image
+  before_script:
+  - *export-github-token
+
+update-all-images:
+  extends: .update-all-images
+  before_script:
+  - *export-github-token
 
 test:
   <<: *ci
