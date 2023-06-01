@@ -264,21 +264,27 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			s.ProduceGroupRunnerMetrics()
 
 			// Let's update the nodes metadata
+			nodeBeingUpdated := map[string]struct{}{}
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 				_, outOfDate, err := s.getLabelUpdate(node)
 				if err != nil {
 					s.logger.Error("Failed to check if config annotation was out of date", zap.Error(err), zap.String("node", node.Name))
 				} else if outOfDate {
 					s.addNodeToQueue(node)
+					nodeBeingUpdated[node.Name] = struct{}{}
 				}
 			}
+
 			newMetricsFilterValue := filteredNodeMetrics{}
 			newMetricsValue := inScopeMetrics{}
 			newMetricsCPUValue := inScopeCPUMetrics{}
 			// Let's update the metrics
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 				// skip the node if it is too recent... it does not have all the required labels/annotations yet to have relevant metrics
-				if time.Now().Sub(node.CreationTimestamp.Time) < time.Minute {
+				if _, found := nodeBeingUpdated[node.Name]; found {
+					continue
+				}
+				if IsNewNodeMissingLabel(node, 2*time.Minute) { // to cover cases where we have delay in the queue
 					continue
 				}
 
@@ -286,6 +292,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				group := s.groupKeyGetter.GetGroupKey(node) // TODO once we have cleanup legacy code, check how to integrate 'group' directly in GetNodeTagsValues
 				nodeTags := kubernetes.GetNodeTagsValues(node)
 				conditions := kubernetes.GetNodeOffendingConditions(node, s.globalConfig.SuppliedConditions)
+
 				if node.Annotations == nil {
 					node.Annotations = map[string]string{}
 				}
@@ -410,6 +417,16 @@ func (s *DrainoConfigurationObserverImpl) ProduceNodeMetrics(node *v1.Node) {
 	if retries := s.retryWall.GetDrainRetryAttemptsCount(node); retries != 0 {
 		nodeRetries.WithLabelValues(nodeLabelValues...).Set(float64(retries))
 	}
+}
+
+func IsNewNodeMissingLabel(node *v1.Node, youngNodeDuration time.Duration) bool {
+	if _, ok := node.Labels[ConfigurationLabelKey]; ok {
+		return false
+	}
+	if time.Since(node.CreationTimestamp.Time) > youngNodeDuration {
+		return false
+	}
+	return true
 }
 
 func NodeInScopeWithConditionCheck(conditions []kubernetes.SuppliedCondition, node *v1.Node) bool {

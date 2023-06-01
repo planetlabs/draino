@@ -11,17 +11,18 @@ import (
 
 	"github.com/DataDog/compute-go/logs"
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/analyser"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/kubernetes/utils"
-	"github.com/planetlabs/draino/internal/limit"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/analyser"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/utils"
+	"github.com/planetlabs/draino/internal/limit"
 )
 
 const (

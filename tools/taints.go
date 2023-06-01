@@ -91,7 +91,7 @@ func TaintCmd(kubecfg *kubeclient.Config) *cobra.Command {
 					resultColumn.data[node.Name] = "no taint found"
 					continue
 				}
-				if t.Value != k8sclient.TaintDrainCandidate {
+				if t.Value != taintCmdFlags.taintValue {
 					resultColumn.data[node.Name] = fmt.Sprintf("skipping taint %s", t.Value)
 					continue
 				}
@@ -152,7 +152,7 @@ func TaintCmd(kubecfg *kubeclient.Config) *cobra.Command {
 			return nil
 		},
 	}
-	taintCmd.PersistentFlags().StringVarP(&taintCmdFlags.taintValue, "taint-value", "", k8sclient.TaintDrainCandidate, "NLA taint value to add")
+	taintCmd.PersistentFlags().StringVarP(&taintCmdFlags.taintValue, "taint-value", "", k8sclient.TaintDrainCandidate, "NLA taint value to add/delete")
 	taintCmd.PersistentFlags().BoolVarP(&taintCmdFlags.taintOverride, "taint-override", "", false, "allow taint override")
 
 	taintCmd.AddCommand(listCmd, deleteCmd, addCmd)
