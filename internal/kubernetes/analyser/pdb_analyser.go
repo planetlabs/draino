@@ -3,13 +3,14 @@ package analyser
 import (
 	"context"
 	"errors"
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/utils/clock"
-	"time"
 )
 
 var _ PDBAnalyser = &pdbAnalyserImpl{}
@@ -96,7 +97,7 @@ func (a *pdbAnalyserImpl) BlockingPodsOnNode(ctx context.Context, nodeName strin
 
 	blockingPods := make([]BlockingPod, 0)
 	for _, pod := range pods {
-		if utils.IsPodReady(pod) {
+		if podutil.IsPodReady(pod) {
 			// we are only interested in not ready pods
 			continue
 		}
@@ -250,7 +251,7 @@ func IsPDBBlockedByPod(ctx context.Context, pod *corev1.Pod, pdb *policyv1.PodDi
 	// If the pod is not ready it's already taking budget from the PDB
 	// If the remaining budget is still positive or zero, it's fine
 	var podTakingBudget int32 = 0
-	if !utils.IsPodReady(pod) {
+	if !podutil.IsPodReady(pod) {
 		podTakingBudget = 1
 	}
 

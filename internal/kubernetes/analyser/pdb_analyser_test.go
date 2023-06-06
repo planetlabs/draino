@@ -265,7 +265,7 @@ func createPod(name, ns, nodeName string, isReady bool, ls labels.Set) *corev1.P
 		Status: corev1.PodStatus{
 			Conditions: []corev1.PodCondition{
 				{
-					Type:   corev1.ContainersReady,
+					Type:   corev1.PodReady,
 					Status: ready,
 				},
 			},

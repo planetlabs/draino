@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	cachek "k8s.io/client-go/tools/cache"
+	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	cachecr "sigs.k8s.io/controller-runtime/pkg/cache"
 	clientcr "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -117,7 +117,7 @@ func getAssociatedPodsForPDB(podListFn podListFunc, pdb *policyv1.PodDisruptionB
 
 	associatedPods := make([]string, 0)
 	for _, pod := range pods.Items {
-		if onlyNotReadyPods && utils.IsPodReady(&pod) {
+		if onlyNotReadyPods && podutil.IsPodReady(&pod) {
 			continue
 		}
 		ls := labels.Set(pod.GetLabels())

@@ -56,7 +56,6 @@ require (
 	go.opencensus.io v0.23.0
 	go.uber.org/zap v1.24.0
 	golang.org/x/exp v0.0.0-20221031165847-c99f073a8326
-	golang.org/x/mod v0.6.0
 	golang.org/x/net v0.3.1-0.20221206200815-1e63c2f08a10
 	golang.org/x/time v0.3.0
 	gopkg.in/DataDog/dd-trace-go.v1 v1.38.1
@@ -65,7 +64,7 @@ require (
 	k8s.io/apimachinery v0.26.0
 	k8s.io/client-go v8.0.0+incompatible
 	k8s.io/klog v1.0.0
-	k8s.io/kubernetes v1.23.3
+	k8s.io/kubernetes v1.26.0
 	k8s.io/utils v0.0.0-20221128185143-99ec85e7a448
 	sigs.k8s.io/controller-runtime v0.14.1
 )

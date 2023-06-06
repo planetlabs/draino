@@ -40,7 +40,7 @@ func createPod(opts createPodOptions) *corev1.Pod {
 		Status: corev1.PodStatus{
 			Conditions: []corev1.PodCondition{
 				{
-					Type:   corev1.ContainersReady,
+					Type:   corev1.PodReady,
 					Status: ready,
 				},
 			},

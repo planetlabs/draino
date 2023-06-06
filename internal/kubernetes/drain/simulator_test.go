@@ -184,7 +184,7 @@ func createPodWithVolume(opts createPodOpts) *corev1.Pod {
 
 func createPod(opts createPodOpts) *corev1.Pod {
 	condition := corev1.PodCondition{
-		Type:   corev1.ContainersReady,
+		Type:   corev1.PodReady,
 		Status: corev1.ConditionTrue,
 	}
 	if opts.IsNotReady {
