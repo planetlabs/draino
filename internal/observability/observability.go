@@ -28,6 +28,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
+	"github.com/planetlabs/draino/internal/metrics"
 )
 
 const (
@@ -329,7 +330,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 				}
 
 				// adding a virtual condition 'any' to be able to count the nodes whatever the condition(s) or absence of condition.
-				conditionsWithAll := append(kubernetes.GetConditionsTypes(conditions), "any")
+				conditionsWithAll := append(kubernetes.GetConditionsTypes(conditions), metrics.TagConditionAnyValue)
 				for _, c := range conditionsWithAll {
 					t.Condition = c
 					t.Overdue = overdue[c]

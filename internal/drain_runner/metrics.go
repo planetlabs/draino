@@ -47,7 +47,9 @@ const (
 
 func CounterDrainedNodes(node *core.Node, result DrainNodesResult, conditions []kubernetes.SuppliedCondition, failureReason kubernetes.FailureCause) {
 	values := kubernetes.GetNodeTagsValues(node)
-	for _, c := range kubernetes.GetConditionsTypes(conditions) {
+	conditionTypes := append(kubernetes.GetConditionsTypes(conditions), metrics.TagConditionAnyValue)
+
+	for _, c := range conditionTypes {
 		tags := []string{string(result), string(failureReason), c, values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team}
 		Metrics.DrainedNodes.WithLabelValues(tags...).Add(1)
 	}

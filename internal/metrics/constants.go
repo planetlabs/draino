@@ -9,6 +9,8 @@ const (
 )
 
 const (
+	TagConditionAnyValue = "any"
+
 	TagNodegroupName      = "nodegroup_name"
 	TagNodegroupNamespace = "nodegroup_namespace"
 	TagNodeName           = "node_name"
