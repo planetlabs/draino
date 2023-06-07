@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -16,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
 )
 
 func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
@@ -177,7 +178,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 				return s.runtimeObjectStore.HasSynced(), nil
 			})
 
-			actualValue, actualOutOfDate, err := s.getLabelUpdate(tt.node)
+			actualValue, actualOutOfDate, err := s.getConfigLabelUpdate(tt.node)
 			if tt.expectedError != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedError)
@@ -194,10 +195,8 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 	tests := []struct {
 		name           string
 		nodeName       string
-		nodeStore      kubernetes.NodeStore
-		podStore       kubernetes.PodStore
 		configName     string
-		conditions     []kubernetes.SuppliedCondition
+		conditions     []string
 		nodeFilterFunc func(obj interface{}) bool
 		objects        []runtime.Object
 		validationFunc func(node *v1.Node) bool
@@ -205,7 +204,7 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 		isNotFoundErr  bool
 	}{
 		{
-			name:           "updates when out of date",
+			name:           "updates when config out of date",
 			configName:     "draino1",
 			nodeFilterFunc: func(obj interface{}) bool { return true },
 			objects: []runtime.Object{
@@ -238,6 +237,106 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 			wantErr:       true,
 			isNotFoundErr: true,
 		},
+		{
+			name:           "updates when newly overdue",
+			nodeFilterFunc: func(obj interface{}) bool { return true },
+			conditions:     []string{"SomeCondition"},
+			objects: []runtime.Object{
+				&v1.Node{
+					ObjectMeta: meta.ObjectMeta{
+						Name: "node1",
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{{
+							Type:               "SomeCondition",
+							Status:             v1.ConditionTrue,
+							LastTransitionTime: meta.NewTime(time.Now().Add(-2 * kubernetes.DefaultExpectedResolutionTime)),
+						}},
+					},
+				},
+			},
+			nodeName: "node1",
+			validationFunc: func(node *v1.Node) bool {
+				return node.Labels[OverdueLabelKey] == "true"
+			},
+		},
+		{
+			name:           "updates when still overdue",
+			nodeFilterFunc: func(obj interface{}) bool { return true },
+			conditions:     []string{"SomeCondition"},
+			objects: []runtime.Object{
+				&v1.Node{
+					ObjectMeta: meta.ObjectMeta{
+						Name: "node1",
+						Labels: map[string]string{
+							OverdueLabelKey: "true",
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{{
+							Type:               "SomeCondition",
+							Status:             v1.ConditionTrue,
+							LastTransitionTime: meta.NewTime(time.Now().Add(-2 * kubernetes.DefaultExpectedResolutionTime)),
+						}},
+					},
+				},
+			},
+			nodeName: "node1",
+			validationFunc: func(node *v1.Node) bool {
+				return node.Labels[OverdueLabelKey] == "true"
+			},
+		},
+		{
+			name:           "updates when not overdue",
+			nodeFilterFunc: func(obj interface{}) bool { return true },
+			conditions:     []string{"SomeCondition"},
+			objects: []runtime.Object{
+				&v1.Node{
+					ObjectMeta: meta.ObjectMeta{
+						Name: "node1",
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{{
+							Type:               "SomeCondition",
+							Status:             v1.ConditionTrue,
+							LastTransitionTime: meta.NewTime(time.Now().Add(-kubernetes.DefaultExpectedResolutionTime / 2)),
+						}},
+					},
+				},
+			},
+			nodeName: "node1",
+			validationFunc: func(node *v1.Node) bool {
+				_, ok := node.Labels[OverdueLabelKey]
+				return !ok
+			},
+		},
+		{
+			name:           "updates when no more overdue",
+			nodeFilterFunc: func(obj interface{}) bool { return true },
+			conditions:     []string{"SomeCondition"},
+			objects: []runtime.Object{
+				&v1.Node{
+					ObjectMeta: meta.ObjectMeta{
+						Name: "node1",
+						Labels: map[string]string{
+							OverdueLabelKey: "true",
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{{
+							Type:               "SomeCondition",
+							Status:             v1.ConditionTrue,
+							LastTransitionTime: meta.NewTime(time.Now().Add(-kubernetes.DefaultExpectedResolutionTime / 2)),
+						}},
+					},
+				},
+			},
+			nodeName: "node1",
+			validationFunc: func(node *v1.Node) bool {
+				_, ok := node.Labels[OverdueLabelKey]
+				return !ok
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -245,18 +344,23 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 			kclient := fake.NewSimpleClientset(tt.objects...)
 			runtimeObjectStore, closeFunc := kubernetes.RunStoreForTest(context.Background(), kclient)
 			defer closeFunc()
+			suppliedConditions, err := kubernetes.ParseConditions(tt.conditions)
+			if err != nil {
+				t.Errorf(err.Error())
+				return
+			}
 			s := &DrainoConfigurationObserverImpl{
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
 				globalConfig: kubernetes.GlobalConfig{
 					ConfigName:         tt.configName,
-					SuppliedConditions: tt.conditions,
+					SuppliedConditions: suppliedConditions,
 				},
 				nodeFilterFunc: tt.nodeFilterFunc,
 				podFilterFunc:  kubernetes.NewPodFilters(),
 				logger:         zap.NewNop(),
 			}
-			err := s.patchNodeLabels(tt.nodeName)
+			err = s.patchNodeLabels(tt.nodeName)
 			if err == nil && tt.wantErr {
 				t.Errorf("Should have returned and error")
 				return

@@ -33,6 +33,7 @@ import (
 
 const (
 	ConfigurationLabelKey    = "node-lifecycle.datadoghq.com/draino-configuration"
+	OverdueLabelKey          = "node-lifecycle.datadoghq.com/overdue"
 	OutOfScopeLabelValue     = "out-of-scope"
 	nodeOptionsMetricName    = "node_options_nodes_total"
 	nodeOptionsCPUMetricName = "node_options_cpu_total"
@@ -265,14 +266,18 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			s.ProduceGroupRunnerMetrics()
 
 			// Let's update the nodes metadata
-			nodeBeingUpdated := map[string]struct{}{}
+			nodeCfgLabelBeingUpdated := map[string]struct{}{}
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
-				_, outOfDate, err := s.getLabelUpdate(node)
+				_, cfgLabelOutOfDate, err := s.getConfigLabelUpdate(node)
 				if err != nil {
-					s.logger.Error("Failed to check if config annotation was out of date", zap.Error(err), zap.String("node", node.Name))
-				} else if outOfDate {
+					s.logger.Error("Failed to check if config label was out of date", zap.Error(err), zap.String("node", node.Name))
+				}
+				if cfgLabelOutOfDate {
+					nodeCfgLabelBeingUpdated[node.Name] = struct{}{}
+				}
+				addOverdueLabel, removeOverdueLabel := s.getOverdueLabelUpdate(node)
+				if cfgLabelOutOfDate || addOverdueLabel || removeOverdueLabel {
 					s.addNodeToQueue(node)
-					nodeBeingUpdated[node.Name] = struct{}{}
 				}
 			}
 
@@ -282,7 +287,7 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			// Let's update the metrics
 			for _, node := range s.runtimeObjectStore.Nodes().ListNodes() {
 				// skip the node if it is too recent... it does not have all the required labels/annotations yet to have relevant metrics
-				if _, found := nodeBeingUpdated[node.Name]; found {
+				if _, found := nodeCfgLabelBeingUpdated[node.Name]; found {
 					continue
 				}
 				if IsNewNodeMissingLabel(node, 2*time.Minute) { // to cover cases where we have delay in the queue
@@ -490,9 +495,9 @@ func (s *DrainoConfigurationObserverImpl) addNodeToQueue(node *v1.Node) {
 	s.queueNodeToBeUpdated.AddRateLimited(node.Name)
 }
 
-// getLabelUpdate returns the label value the node should have and whether or not the label
+// getConfigLabelUpdate returns the label value the node should have and whether or not the label
 // value is currently out of date (not equal to first return value)
-func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string, bool, error) {
+func (s *DrainoConfigurationObserverImpl) getConfigLabelUpdate(node *v1.Node) (string, bool, error) {
 	valueOriginal := node.Labels[ConfigurationLabelKey]
 	configsOriginal := strings.Split(valueOriginal, ".")
 	var configs []string
@@ -517,6 +522,19 @@ func (s *DrainoConfigurationObserverImpl) getLabelUpdate(node *v1.Node) (string,
 	sort.Strings(configs)
 	valueDesired := strings.Join(configs, ".")
 	return valueDesired, valueDesired != valueOriginal, nil
+}
+
+func (s *DrainoConfigurationObserverImpl) getOverdueLabelUpdate(node *v1.Node) (addLabel bool, removeLabel bool) {
+	_, wasOverdue := node.Labels[OverdueLabelKey]
+	conditions := kubernetes.GetNodeOffendingConditions(node, s.globalConfig.SuppliedConditions)
+	isOverdue := false
+	for _, c := range conditions {
+		if kubernetes.IsOverdue(node, c) {
+			isOverdue = true
+			break
+		}
+	}
+	return isOverdue && !wasOverdue, !isOverdue && wasOverdue
 }
 
 func IsNodeNLAEnableByLabel(n *v1.Node) (hasLabel, enabled bool) {
@@ -613,16 +631,23 @@ func (s *DrainoConfigurationObserverImpl) patchNodeLabels(nodeName string) error
 	if err != nil {
 		return err
 	}
-	desiredValue, outOfDate, err := s.getLabelUpdate(node)
+
+	cfgDesiredValue, cfgOutOfDate, err := s.getConfigLabelUpdate(node)
 	if err != nil {
 		return err
 	}
+	addOverdueLabel, removeOverdueLabel := s.getOverdueLabelUpdate(node)
 
-	if outOfDate {
-		if node.Annotations == nil {
-			node.Annotations = map[string]string{}
+	if cfgOutOfDate || addOverdueLabel {
+		var labelPatch k8sclient.LabelPatch
+		labelPatch.Metadata.Labels = map[string]string{}
+		if cfgOutOfDate {
+			labelPatch.Metadata.Labels[ConfigurationLabelKey] = cfgDesiredValue
 		}
-		err := k8sclient.PatchNodeLabelKey(s.globalConfig.Context, s.kclient, nodeName, ConfigurationLabelKey, desiredValue)
+		if addOverdueLabel {
+			labelPatch.Metadata.Labels[OverdueLabelKey] = "true"
+		}
+		err := k8sclient.PatchNode(s.globalConfig.Context, s.kclient, nodeName, labelPatch)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil
@@ -630,6 +655,17 @@ func (s *DrainoConfigurationObserverImpl) patchNodeLabels(nodeName string) error
 			return err
 		}
 	}
+
+	if removeOverdueLabel {
+		err := k8sclient.PatchDeleteNodeLabelKey(s.globalConfig.Context, s.kclient, nodeName, OverdueLabelKey)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+	}
+
 	return nil
 }
 
