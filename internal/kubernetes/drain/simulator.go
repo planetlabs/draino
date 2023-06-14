@@ -39,16 +39,18 @@ type DrainSimulator interface {
 	SimulateDrain(context.Context, *corev1.Node) (canEvict bool, reasons []string, err []error)
 	// SimulatePodDrain will simulate a drain of the given pod.
 	// Before calling the API server it will make sure that some of the obvious problems are not given.
-	SimulatePodDrain(context.Context, *corev1.Pod) (canEvict bool, reason string, err error)
+	SimulatePodDrain(context.Context, *corev1.Pod, *corev1.Node) (canEvict bool, reason string, err error)
 }
 
 type drainSimulatorImpl struct {
-	pdbIndexer    index.PDBIndexer
-	podIndexer    index.PodIndexer
-	client        client.Client
-	eventRecorder kubernetes.EventRecorder
-	rateLimiter   limit.RateLimiter
-	logger        logr.Logger
+	pdbIndexer         index.PDBIndexer
+	podIndexer         index.PodIndexer
+	client             client.Client
+	eventRecorder      kubernetes.EventRecorder
+	rateLimiter        limit.RateLimiter
+	logger             logr.Logger
+	runtimeObjectStore kubernetes.RuntimeObjectStore
+	globalConfig       kubernetes.GlobalConfig
 	// skipPodFilter will be used to evaluate if pods running on a node should go through the eviction simulation
 	skipPodFilter  kubernetes.PodFilterFunc
 	podResultCache utils.TTLCache[simulationResult]
@@ -70,16 +72,19 @@ func NewDrainSimulator(
 	eventRecorder kubernetes.EventRecorder,
 	rateLimiter limit.RateLimiter,
 	logger logr.Logger,
+	runtimeObjectStore kubernetes.RuntimeObjectStore,
+	globalConfig kubernetes.GlobalConfig,
 ) DrainSimulator {
 	simulator := &drainSimulatorImpl{
-		podIndexer:    indexer,
-		pdbIndexer:    indexer,
-		client:        client,
-		skipPodFilter: skipPodFilter,
-		eventRecorder: eventRecorder,
-		rateLimiter:   rateLimiter,
-		logger:        logger.WithName("EvictionSimulator"),
-
+		podIndexer:         indexer,
+		pdbIndexer:         indexer,
+		client:             client,
+		skipPodFilter:      skipPodFilter,
+		eventRecorder:      eventRecorder,
+		rateLimiter:        rateLimiter,
+		logger:             logger.WithName("EvictionSimulator"),
+		runtimeObjectStore: runtimeObjectStore,
+		globalConfig:       globalConfig,
 		// TODO think about using alternative solutions like a MRU cache
 		podResultCache: utils.NewTTLCache[simulationResult](3*time.Minute, 10*time.Second),
 	}
@@ -124,7 +129,7 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 
 	for _, pod := range pods {
 		// TODO add suceeded/failed pod drain simulation count metric
-		canEvict, reason, err := sim.SimulatePodDrain(ctx, pod)
+		canEvict, reason, err := sim.SimulatePodDrain(ctx, pod, node)
 		if !canEvict {
 			reasons = append(reasons, sim.nodeReasonFromPodReason(pod, reason))
 			if err != nil {
@@ -146,7 +151,7 @@ func (sim *drainSimulatorImpl) nodeReasonFromPodReason(pod *corev1.Pod, reason s
 	return fmt.Sprintf("Cannot drain pod '%s/%s', because: %v", pod.GetNamespace(), pod.GetName(), reason)
 }
 
-func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod) (bool, string, error) {
+func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod, node *corev1.Node) (bool, string, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodDrain")
 	defer span.Finish()
 
@@ -164,28 +169,37 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 		return true, reason, nil
 	}
 
-	pdbs, err := sim.pdbIndexer.GetPDBsForPods(ctx, []*corev1.Pod{pod})
-	if err != nil {
-		return false, "", err
+	// if using eviction++ but not opted-in for dry-run, pass simulation early
+	// once all teams are opted-in and dry-run is required, this can be removed
+	if sim.operatorAPIDryRunNotOptedIn(pod) {
+		return true, "", nil
 	}
 
-	// If there is more than one PDB associated to the given pod, the eviction will fail for sure due to the APIServer behaviour.
-	podKey := index.GeneratePodIndexKey(pod.GetName(), pod.GetNamespace())
-	if len(pdbs[podKey]) > 1 {
-		reason = fmt.Sprintf("Pod has more than one associated PDB: %s", strings.Join(utils.GetPDBNames(pdbs[podKey]), ";"))
-		sim.writePodCache(pod, false, reason, nil)
-		sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
-		return false, reason, nil
-	}
+	// if eviction++ is used, skip pdb checks
+	if !sim.usesOperatorAPI(pod) {
+		pdbs, err := sim.pdbIndexer.GetPDBsForPods(ctx, []*corev1.Pod{pod})
+		if err != nil {
+			return false, "", err
+		}
 
-	// If there is a matching PDB, check if it would allow disruptions
-	if len(pdbs[podKey]) == 1 {
-		pdb := pdbs[podKey][0]
-		if analyser.IsPDBBlockedByPod(ctx, pod, pdb) {
-			reason = fmt.Sprintf("PDB '%s' does not allow any disruptions", pdb.GetName())
+		// If there is more than one PDB associated to the given pod, the eviction will fail for sure due to the APIServer behaviour.
+		podKey := index.GeneratePodIndexKey(pod.GetName(), pod.GetNamespace())
+		if len(pdbs[podKey]) > 1 {
+			reason = fmt.Sprintf("Pod has more than one associated PDB: %s", strings.Join(utils.GetPDBNames(pdbs[podKey]), ";"))
 			sim.writePodCache(pod, false, reason, nil)
 			sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
 			return false, reason, nil
+		}
+
+		// If there is a matching PDB, check if it would allow disruptions
+		if len(pdbs[podKey]) == 1 {
+			pdb := pdbs[podKey][0]
+			if analyser.IsPDBBlockedByPod(ctx, pod, pdb) {
+				reason = fmt.Sprintf("PDB '%s' does not allow any disruptions", pdb.GetName())
+				sim.writePodCache(pod, false, reason, nil)
+				sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
+				return false, reason, nil
+			}
 		}
 	}
 
@@ -195,7 +209,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	}
 
 	// do a dry-run eviction call
-	evictionDryRunRes, err := sim.simulateAPIEviction(ctx, pod)
+	evictionDryRunRes, err := sim.simulateAPIEviction(ctx, pod, node)
 	if !evictionDryRunRes {
 		reason = fmt.Sprintf("Eviction dry run was not successful: %v", err)
 		if apierrors.IsForbidden(err) { // This is the admission that is rejecting the drain. The error carry the reason for the rejection
@@ -215,8 +229,33 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	return true, "", nil
 }
 
-func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *corev1.Pod) (bool, error) {
-	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodEviction")
+func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *corev1.Pod, node *corev1.Node) (bool, error) {
+	evictionAPIURL, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIURLAnnotationKey, pod, sim.runtimeObjectStore)
+	if ok {
+		return sim.simulateWithOperatorAPI(ctx, evictionAPIURL, pod, node)
+	}
+	return sim.simulateWithKubernetesAPI(ctx, pod)
+}
+
+// return true if the pod uses eviction++ and is not opted-in for eviction++ dry-run
+// these pods should pass simulation right away without doing any checks
+// once all teams are opted-in and dry-run is required, this can be removed
+func (sim *drainSimulatorImpl) operatorAPIDryRunNotOptedIn(pod *corev1.Pod) bool {
+	if sim.usesOperatorAPI(pod) {
+		if _, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIDryRunSupportedAnnotationKey, pod, sim.runtimeObjectStore); !ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (sim *drainSimulatorImpl) usesOperatorAPI(pod *corev1.Pod) bool {
+	_, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIURLAnnotationKey, pod, sim.runtimeObjectStore)
+	return ok
+}
+
+func (sim *drainSimulatorImpl) simulateWithKubernetesAPI(ctx context.Context, pod *corev1.Pod) (bool, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodEvictionWithKubernetesAPI")
 	defer span.Finish()
 
 	eviction := &policyv1.Eviction{
@@ -229,6 +268,20 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 		},
 	}
 	err := sim.client.SubResource("eviction").Create(ctx, pod, eviction)
+	if err != nil {
+		sim.logger.V(logs.ZapDebug).Info("Error returned by simulation eviction", "pod", pod.Namespace+"/"+pod.Name, "err", err, "IsTooManyReq", apierrors.IsTooManyRequests(err), "IsForbidden", apierrors.IsForbidden(err), "Reason", apierrors.ReasonForError(err))
+		return false, fmt.Errorf("Cannot evict pod '%s/%s': %w", pod.Namespace, pod.Name, err)
+	}
+
+	return true, nil
+}
+
+func (sim *drainSimulatorImpl) simulateWithOperatorAPI(ctx context.Context, evictionAPIUrl string, pod *corev1.Pod, node *corev1.Node) (bool, error) {
+	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodEvictionWithOperatorAPI")
+	defer span.Finish()
+
+	conditions := kubernetes.GetConditionsTypes(kubernetes.GetNodeOffendingConditions(node, sim.globalConfig.SuppliedConditions))
+	_, err := kubernetes.CallOperatorAPI(ctx, sim.logger, evictionAPIUrl, pod, conditions, true, 1)
 	if err != nil {
 		sim.logger.V(logs.ZapDebug).Info("Error returned by simulation eviction", "pod", pod.Namespace+"/"+pod.Name, "err", err, "IsTooManyReq", apierrors.IsTooManyRequests(err), "IsForbidden", apierrors.IsForbidden(err), "Reason", apierrors.ReasonForError(err))
 		return false, fmt.Errorf("Cannot evict pod '%s/%s': %w", pod.Namespace, pod.Name, err)

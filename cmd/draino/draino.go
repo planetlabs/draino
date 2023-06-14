@@ -268,9 +268,9 @@ func main() {
 			return err
 		}
 
-		simulationPodFilter := kubernetes.NewPodFilters(filtersDef.DrainPodFilter, kubernetes.PodOrControllerHasNoneOfTheAnnotations(store, kubernetes.EvictionAPIURLAnnotationKey))
+		simulationPodFilter := kubernetes.NewPodFilters(filtersDef.DrainPodFilter)
 		simulationRateLimiter := limit.NewRateLimiter(clock.RealClock{}, cfg.KubeClientConfig.QPS*options.simulationRateLimitingRatio, int(float32(cfg.KubeClientConfig.Burst)*options.simulationRateLimitingRatio))
-		simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, simulationPodFilter, eventRecorder, simulationRateLimiter, logger)
+		simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, simulationPodFilter, eventRecorder, simulationRateLimiter, logger, store, globalConfig)
 		pdbAnalyser := analyser.NewPDBAnalyser(ctx, mgr.GetLogger(), indexer, clock.RealClock{}, options.podWarmupDelayExtension)
 		sorters := candidate_runner.NodeSorters{
 			sorters.NewAnnotationPrioritizer(store, indexer, eventRecorder, logger),

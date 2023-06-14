@@ -32,6 +32,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 
 	"github.com/DataDog/go-service-authn/pkg/serviceauthentication/authnclient"
@@ -94,7 +96,8 @@ const (
 
 	eventReasonBadValueForAnnotation = "BadValueForAnnotation"
 
-	EvictionAPIURLAnnotationKey = "draino/eviction-api-url"
+	EvictionAPIURLAnnotationKey             = "draino/eviction-api-url"
+	EvictionAPIDryRunSupportedAnnotationKey = "draino/eviction-api-dry-run-supported"
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -756,93 +759,109 @@ func (d *APIDrainer) evictWithOperatorAPI(ctx context.Context, url string, node 
 		func() error {
 
 			logger := d.l.With(zap.String("node", node.Name)).With(zap.String("pod", pod.Namespace+"/"+pod.Name))
-			evictionPayload := &policy.Eviction{
-				ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName(),
-					Annotations: map[string]string{EvictionNodeConditionsAnnotationKey: strings.Join(conditions, ",")}},
-			}
-
-			var client *http.Client
-			urlParsed, err := url2.Parse(url)
+			resp, err := CallOperatorAPI(ctx, zapr.NewLogger(logger), url, pod, conditions, false, maxRetryOn500)
 			if err != nil {
-				logger.Info("custom eviction endpoint response error, can't parse URL", zap.Error(err))
-				return EvictionEndpointError{}
-			}
-
-			// building the base roundTripper
-			var roundTripper http.RoundTripper
-			if urlParsed.Scheme == "https" {
-				roundTripper = &http.Transport{
-					TLSClientConfig: &tls.Config{
-						// We are not trying to verify the server side for the moment
-						// Men in the middle risk is low if not null: CNP helps here.
-						// We can add more verification later if needed
-						InsecureSkipVerify: true,
-					},
-				}
-			} else {
-				roundTripper = http.DefaultTransport
-			}
-
-			// If the user specify a parameter "token-audience" on the URL then we will forge a token that is using the value of the parameter as audience in the token
-			// If the user do not specify the audience then that means that he does not want the token (audience is mandatory)
-			tokenAudience := urlParsed.Query().Get("token-audience")
-			if tokenAudience != "" {
-				// Uses Emissary to get JWTs.
-				roundTripper = authnclient.NewRoundTripper(roundTripper, authnclient.NewEmissaryTokenGetter(tokenAudience))
-				// Removing this token parameter so that the server don't get it on the URL. The value is now available for the server inside the bearer token
-				urlParsed.Query().Del("token-audience")
-				logger.Info("Using token-audience parameter", zap.String("token-audience", tokenAudience))
-			}
-
-			client = &http.Client{Transport: roundTripper, Timeout: 20 * time.Second}
-			logger.Info("calling eviction++", zap.String("url", urlParsed.String()))
-			req, err := http.NewRequest("POST", urlParsed.String(), GetEvictionJsonPayload(evictionPayload))
-			req = req.WithContext(ctx)
-			req.Header.Set("Content-Type", "application/json")
-
-			client = httptrace.WrapClient(client)
-			resp, err := client.Do(req)
-			if err != nil {
-				logger.Info("custom eviction endpoint response error", zap.Error(err))
-				if tokenAudience != "" && strings.Contains(err.Error(), "unable to retrieve token from vault (http status: 400)") {
-					return AudienceNotFoundError{Audience: tokenAudience}
-				}
-				if os.IsTimeout(err) {
-					return EvictionEndpointError{IsRequestTimeout: true}
-				}
-				return EvictionEndpointError{}
-			}
-			defer resp.Body.Close()
-			logger.Info("custom eviction endpoint response", zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
-			switch {
-			case resp.StatusCode == http.StatusOK:
-				return nil
-			case resp.StatusCode == http.StatusTooManyRequests:
-				return apierrors.NewTooManyRequests("retry later", 10)
-			case resp.StatusCode == http.StatusNotFound:
-				return apierrors.NewNotFound(schema.GroupResource{Resource: "pod"}, pod.Name)
-			case resp.StatusCode == http.StatusServiceUnavailable:
-				return apierrors.NewTooManyRequests("retry later, service endpoint is not the leader", 15)
-			case resp.StatusCode == http.StatusInternalServerError:
-				respContent, _ := ioutil.ReadAll(resp.Body)
-				if maxRetryOn500 > 0 {
+				if resp.StatusCode == http.StatusInternalServerError {
 					maxRetryOn500--
-					logger.Info("Custom eviction endpoint returned an error", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-					return apierrors.NewTooManyRequests("retry later following endpoint error", 20)
 				}
-				logger.Error("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return EvictionEndpointError{StatusCode: resp.StatusCode, AfterSeveralRetries: true}
-			default:
-				respContent, _ := ioutil.ReadAll(resp.Body)
-				logger.Error("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
-				return EvictionEndpointError{StatusCode: resp.StatusCode}
+				return err
 			}
+			return nil
 		},
 		// error handling function
 		func(err error) error {
 			return err
 		},
 	)
+}
+
+func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *core.Pod, conditions []string, dryRun bool, maxRetryOn500 int) (*http.Response, error) {
+	evictionPayload := &policy.Eviction{
+		ObjectMeta: meta.ObjectMeta{Namespace: pod.GetNamespace(), Name: pod.GetName(),
+			Annotations: map[string]string{EvictionNodeConditionsAnnotationKey: strings.Join(conditions, ",")}},
+	}
+	if dryRun {
+		// Make it a dry-run request
+		evictionPayload.DeleteOptions = &meta.DeleteOptions{
+			DryRun: []string{"All"},
+		}
+	}
+
+	var client *http.Client
+	urlParsed, err := url2.Parse(url)
+	if err != nil {
+		logger.Info("custom eviction endpoint response error, can't parse URL", zap.Error(err))
+		return nil, EvictionEndpointError{}
+	}
+
+	// building the base roundTripper
+	var roundTripper http.RoundTripper
+	if urlParsed.Scheme == "https" {
+		roundTripper = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				// We are not trying to verify the server side for the moment
+				// Men in the middle risk is low if not null: CNP helps here.
+				// We can add more verification later if needed
+				InsecureSkipVerify: true,
+			},
+		}
+	} else {
+		roundTripper = http.DefaultTransport
+	}
+
+	// If the user specify a parameter "token-audience" on the URL then we will forge a token that is using the value of the parameter as audience in the token
+	// If the user do not specify the audience then that means that he does not want the token (audience is mandatory)
+	tokenAudience := urlParsed.Query().Get("token-audience")
+	if tokenAudience != "" {
+		// Uses Emissary to get JWTs.
+		roundTripper = authnclient.NewRoundTripper(roundTripper, authnclient.NewEmissaryTokenGetter(tokenAudience))
+		// Removing this token parameter so that the server don't get it on the URL. The value is now available for the server inside the bearer token
+		urlParsed.Query().Del("token-audience")
+		logger.Info("Using token-audience parameter", zap.String("token-audience", tokenAudience))
+	}
+
+	client = &http.Client{Transport: roundTripper, Timeout: 20 * time.Second}
+	logger.Info("calling eviction++", zap.String("url", urlParsed.String()))
+	req, err := http.NewRequest("POST", urlParsed.String(), GetEvictionJsonPayload(evictionPayload))
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	client = httptrace.WrapClient(client)
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Info("custom eviction endpoint response error", zap.Error(err))
+		if tokenAudience != "" && strings.Contains(err.Error(), "unable to retrieve token from vault (http status: 400)") {
+			return nil, AudienceNotFoundError{Audience: tokenAudience}
+		}
+		if os.IsTimeout(err) {
+			return nil, EvictionEndpointError{IsRequestTimeout: true}
+		}
+		return nil, EvictionEndpointError{}
+	}
+	defer resp.Body.Close()
+	logger.Info("custom eviction endpoint response", zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		return resp, nil
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return resp, apierrors.NewTooManyRequests("retry later", 10)
+	case resp.StatusCode == http.StatusNotFound:
+		return resp, apierrors.NewNotFound(schema.GroupResource{Resource: "pod"}, pod.Name)
+	case resp.StatusCode == http.StatusServiceUnavailable:
+		return resp, apierrors.NewTooManyRequests("retry later, service endpoint is not the leader", 15)
+	case resp.StatusCode == http.StatusInternalServerError:
+		respContent, _ := ioutil.ReadAll(resp.Body)
+		if maxRetryOn500 > 0 {
+			logger.Info("Custom eviction endpoint returned an error", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+			return resp, apierrors.NewTooManyRequests("retry later following endpoint error", 20)
+		}
+		logger.Info("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+		return resp, EvictionEndpointError{StatusCode: resp.StatusCode, AfterSeveralRetries: true}
+	default:
+		respContent, _ := ioutil.ReadAll(resp.Body)
+		logger.Info("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+		return resp, EvictionEndpointError{StatusCode: resp.StatusCode}
+	}
 }
 
 func (d *APIDrainer) evictionSequence(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}, evictionFunc func() error, otherErrorsHandlerFunc func(e error) error) error {
