@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/planetlabs/draino/internal/kubernetes/index"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/planetlabs/draino/internal/kubernetes/index"
 )
 
 type MetadataSearch[T any] struct {
 	Key               string
 	metadataGetter    MetadataGetterFunc
+	podFilterFunc     PodFilterFunc
 	podIndexer        index.PodIndexer
 	store             RuntimeObjectStore
 	converter         func(string) (T, error)
@@ -58,6 +60,13 @@ var GetExactAnnotation MetadataGetterFunc = func(object metav1.Object, key strin
 	return []MetadataGetterResult{{Key: key, Value: val}}, exist
 }
 
+var GetExactMetadata MetadataGetterFunc = func(object metav1.Object, key string) ([]MetadataGetterResult, bool) {
+	if r1, b1 := GetExactLabel(object, key); b1 {
+		return r1, b1
+	}
+	return GetExactAnnotation(object, key)
+}
+
 var GetPrefixedAnnotation MetadataGetterFunc = func(object metav1.Object, prefix string) ([]MetadataGetterResult, bool) {
 	annotations := object.GetAnnotations()
 	if annotations == nil {
@@ -77,10 +86,11 @@ var GetPrefixedAnnotation MetadataGetterFunc = func(object metav1.Object, prefix
 	return results, len(results) > 0
 }
 
-func NewSearch[T any](ctx context.Context, podIndexer index.PodIndexer, store RuntimeObjectStore, converter func(string) (T, error), node *core.Node, annotationKey string, stopIfFoundOnNode, stopIfFoundOnPod bool, metadataFunc MetadataGetterFunc) (*MetadataSearch[T], error) {
+func NewSearch[T any](ctx context.Context, podIndexer index.PodIndexer, podFilterFunc PodFilterFunc, store RuntimeObjectStore, converter func(string) (T, error), node *core.Node, annotationKey string, stopIfFoundOnNode, stopIfFoundOnPod bool, metadataFunc MetadataGetterFunc) (*MetadataSearch[T], error) {
 	search := &MetadataSearch[T]{
 		metadataGetter:    metadataFunc,
 		podIndexer:        podIndexer,
+		podFilterFunc:     podFilterFunc,
 		store:             store,
 		Key:               annotationKey,
 		stopIfFoundOnPod:  stopIfFoundOnPod,
@@ -120,6 +130,11 @@ func (a *MetadataSearch[T]) processNode(node *core.Node) {
 }
 
 func (a *MetadataSearch[T]) processPod(pod *core.Pod) {
+	if a.podFilterFunc != nil {
+		if pass, _, _ := a.podFilterFunc(*pod); !pass {
+			return
+		}
+	}
 	if values, ok := a.metadataGetter(pod, a.Key); ok {
 		for _, val := range values {
 			var item MetadataSearchResultItem[T]
@@ -222,6 +237,14 @@ func (i *MetadataSearchResultItem[T]) GetItemId() string {
 	return "not_available"
 }
 
-func SearchAnnotationFromNodeAndThenPodOrController[T any](ctx context.Context, podIndexer index.PodIndexer, store RuntimeObjectStore, converter func(string) (T, error), annotationKey string, node *core.Node, stopIfFoundOnNode, stopIfFoundOnPod bool) (*MetadataSearch[T], error) {
-	return NewSearch(ctx, podIndexer, store, converter, node, annotationKey, stopIfFoundOnPod, stopIfFoundOnNode, GetExactAnnotation)
+func SearchAnnotationFromNodeAndThenPodOrController[T any](ctx context.Context, podIndexer index.PodIndexer, podFilterFunc PodFilterFunc, store RuntimeObjectStore, converter ConverterFunc[T], annotationKey string, node *core.Node, stopIfFoundOnNode, stopIfFoundOnPod bool) (*MetadataSearch[T], error) {
+	return NewSearch(ctx, podIndexer, podFilterFunc, store, converter, node, annotationKey, stopIfFoundOnPod, stopIfFoundOnNode, GetExactAnnotation)
 }
+
+func SearchMetadataFromNodeAndThenPodOrController[T any](ctx context.Context, podIndexer index.PodIndexer, podFilterFunc PodFilterFunc, store RuntimeObjectStore, converter ConverterFunc[T], key string, node *core.Node, stopIfFoundOnNode, stopIfFoundOnPod bool) (*MetadataSearch[T], error) {
+	return NewSearch(ctx, podIndexer, podFilterFunc, store, converter, node, key, stopIfFoundOnPod, stopIfFoundOnNode, GetExactMetadata)
+}
+
+type ConverterFunc[T any] func(string) (T, error)
+
+var IndentityStr ConverterFunc[string] = func(s string) (string, error) { return s, nil }

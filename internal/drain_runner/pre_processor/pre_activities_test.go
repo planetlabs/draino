@@ -6,9 +6,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +14,10 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/clock"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 func TestPreActivitiesPreProcessor(t *testing.T) {
@@ -368,7 +369,7 @@ func TestPreActivitiesPreProcessor_Reset(t *testing.T) {
 			var node corev1.Node
 			err = wrapper.GetManagerClient().Get(ctx, types.NamespacedName{Name: tt.Node.Name}, &node)
 			assert.NoError(t, err, "Failed to refresh node")
-			result, err := kubernetes.NewSearch(ctx, idx, store, preActivityStateConverter, &node, PreActivityAnnotationPrefix, false, false, kubernetes.GetPrefixedAnnotation)
+			result, err := kubernetes.NewSearch(ctx, idx, nil, store, preActivityStateConverter, &node, PreActivityAnnotationPrefix, false, false, kubernetes.GetPrefixedAnnotation)
 			for _, item := range result.Results() {
 				assert.Equal(t, PreActivityAnnotationNotStarted, item.Value, "Did not properly reset pre-activity for: %v", item.Source)
 			}

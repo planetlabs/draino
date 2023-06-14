@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	v1 "k8s.io/api/core/v1"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	v1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -51,7 +52,7 @@ func NewAnnotationPrioritizer(store kubernetes.RuntimeObjectStore, indexer *inde
 }
 
 func getHighestPrioFromNode(ctx context.Context, store kubernetes.RuntimeObjectStore, indexer *index.Indexer, eventRecorder kubernetes.EventRecorder, node *v1.Node) (int, bool, error) {
-	searchRes, err := kubernetes.SearchAnnotationFromNodeAndThenPodOrController(ctx, indexer, store, convertPriority, AnnotationDrainPriorityPKey, node, false, false)
+	searchRes, err := kubernetes.SearchAnnotationFromNodeAndThenPodOrController(ctx, indexer, nil, store, convertPriority, AnnotationDrainPriorityPKey, node, false, false)
 	if err != nil {
 		return 0, false, err
 	}

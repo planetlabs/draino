@@ -169,8 +169,7 @@ func TestScopeObserverImpl_GetLabelUpdate(t *testing.T) {
 				kclient:            kclient,
 				runtimeObjectStore: runtimeObjectStore,
 				globalConfig:       kubernetes.GlobalConfig{ConfigName: tt.configName},
-				nodeFilterFunc:     tt.nodeFilterFunc,
-				podFilterFunc:      tt.podFilterFunc,
+				filtersDefinitions: kubernetes.FiltersDefinitions{NodeLabelFilter: tt.nodeFilterFunc, CandidatePodFilter: tt.podFilterFunc},
 				logger:             zap.NewNop(),
 			}
 
@@ -356,9 +355,8 @@ func TestScopeObserverImpl_updateNodeAnnotationsAndLabels(t *testing.T) {
 					ConfigName:         tt.configName,
 					SuppliedConditions: suppliedConditions,
 				},
-				nodeFilterFunc: tt.nodeFilterFunc,
-				podFilterFunc:  kubernetes.NewPodFilters(),
-				logger:         zap.NewNop(),
+				filtersDefinitions: kubernetes.FiltersDefinitions{NodeLabelFilter: tt.nodeFilterFunc, CandidatePodFilter: kubernetes.NewPodFilters()},
+				logger:             zap.NewNop(),
 			}
 			err = s.patchNodeLabels(tt.nodeName)
 			if err == nil && tt.wantErr {

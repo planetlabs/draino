@@ -22,4 +22,5 @@ const (
 	TagFilter             = "filter"
 	TagPreProcessor       = "pre_processor"
 	TagTeam               = "team"
+	TagService            = "service"
 )

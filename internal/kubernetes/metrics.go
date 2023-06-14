@@ -15,6 +15,7 @@ var (
 	TagNodeName, _                        = tag.NewKey("node_name")
 	TagConditions, _                      = tag.NewKey("conditions")
 	TagTeam, _                            = tag.NewKey("team")
+	TagService, _                         = tag.NewKey("service")
 	TagNodegroupName, _                   = tag.NewKey("nodegroup_name")
 	TagNodegroupNamePrefix, _             = tag.NewKey("nodegroup_name_prefix")
 	TagNodegroupNamespace, _              = tag.NewKey("nodegroup_namespace")

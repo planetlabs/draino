@@ -211,7 +211,7 @@ func GetAPIResourcesForGVK(discoveryInterface discovery.DiscoveryInterface, gvks
 }
 
 type NodeTagsValues struct {
-	Team, NgName, NgNamespace string
+	Team, NgName, NgNamespace, Service string
 }
 
 func GetNodeTagsValues(node *core.Node) NodeTagsValues {
@@ -219,10 +219,16 @@ func GetNodeTagsValues(node *core.Node) NodeTagsValues {
 	if team == "" {
 		team = node.Labels["team"]
 	}
+	service := node.Labels["service"]
+	if service == "" {
+		service = node.Annotations["service"]
+	}
+
 	return NodeTagsValues{
 		Team:        team,
 		NgName:      node.Labels[LabelKeyNodeGroupName],
 		NgNamespace: node.Labels[LabelKeyNodeGroupNamespace],
+		Service:     service,
 	}
 }
 
@@ -232,7 +238,7 @@ func GetNodeGroupNamePrefix(ngName string) string {
 
 func nodeTags(ctx context.Context, node *core.Node) (context.Context, error) {
 	values := GetNodeTagsValues(node)
-	return tag.New(ctx, tag.Upsert(TagNodegroupNamespace, values.NgNamespace), tag.Upsert(TagNodegroupName, values.NgName), tag.Upsert(TagNodegroupNamePrefix, GetNodeGroupNamePrefix(values.NgName)), tag.Upsert(TagTeam, values.Team))
+	return tag.New(ctx, tag.Upsert(TagNodegroupNamespace, values.NgNamespace), tag.Upsert(TagNodegroupName, values.NgName), tag.Upsert(TagNodegroupNamePrefix, GetNodeGroupNamePrefix(values.NgName)), tag.Upsert(TagTeam, values.Team), tag.Upsert(TagService, values.Service))
 }
 
 func StatRecordForNode(ctx context.Context, node *core.Node, m stats.Measurement) {

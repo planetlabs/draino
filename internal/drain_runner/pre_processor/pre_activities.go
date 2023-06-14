@@ -148,11 +148,11 @@ type preActivity struct {
 // getActivities will search for all pre activity annotations in the whole chain (node -> pod -> controller).
 // Furthermore, it's going to evaluate the timeout annotation for the same activity
 func (pre *PreActivitiesPreProcessor) getActivities(ctx context.Context, node *corev1.Node) (map[string]*preActivity, error) {
-	activitySearch, err := kubernetes.NewSearch(ctx, pre.podIndexer, pre.store, preActivityStateConverter, node, PreActivityAnnotationPrefix, false, false, kubernetes.GetPrefixedAnnotation)
+	activitySearch, err := kubernetes.NewSearch(ctx, pre.podIndexer, nil, pre.store, preActivityStateConverter, node, PreActivityAnnotationPrefix, false, false, kubernetes.GetPrefixedAnnotation)
 	if err != nil {
 		return nil, err
 	}
-	activityTimeoutSearch, err := kubernetes.NewSearch(ctx, pre.podIndexer, pre.store, time.ParseDuration, node, PreActivityTimeoutAnnotationPrefix, false, false, kubernetes.GetPrefixedAnnotation)
+	activityTimeoutSearch, err := kubernetes.NewSearch(ctx, pre.podIndexer, nil, pre.store, time.ParseDuration, node, PreActivityTimeoutAnnotationPrefix, false, false, kubernetes.GetPrefixedAnnotation)
 	if err != nil {
 		return nil, err
 	}

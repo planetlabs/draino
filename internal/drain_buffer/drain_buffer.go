@@ -76,7 +76,7 @@ const (
 
 // GetDrainBufferConfigurationDetails retrieve all the drain configuration details
 func (buffer *drainBufferImpl) GetDrainBufferConfigurationDetails(ctx context.Context, node *v1.Node) (*kubernetes.MetadataSearch[time.Duration], error) {
-	return kubernetes.SearchAnnotationFromNodeAndThenPodOrController(ctx, buffer.podIndexer, buffer.store, time.ParseDuration, CustomDrainBufferAnnotation, node, false, false)
+	return kubernetes.SearchAnnotationFromNodeAndThenPodOrController(ctx, buffer.podIndexer, nil, buffer.store, time.ParseDuration, CustomDrainBufferAnnotation, node, false, false)
 }
 
 // GetDrainBufferConfiguration does a best effort to find a valid configuration and always return a value. The error can be non nil if something went wrong during the processing, still the value can be used. Worst case you get the default value.

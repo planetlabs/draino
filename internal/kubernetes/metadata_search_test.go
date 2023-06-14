@@ -8,8 +8,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
-	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	v1 "k8s.io/api/apps/v1"
@@ -17,6 +15,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
+
+	"github.com/planetlabs/draino/internal/kubernetes/index"
+	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 )
 
 func TestSearcAnnotationFromNodeAndThenPodOrController(t *testing.T) {
@@ -203,7 +204,7 @@ func TestSearcAnnotationFromNodeAndThenPodOrController(t *testing.T) {
 				t.Fatalf("can't create fakeIndexer: %#v", err)
 			}
 
-			got, err := SearchAnnotationFromNodeAndThenPodOrController(context.Background(), fakeIndexer, store, func(s string) (string, error) { return s, nil }, testKey, tt.node, true, true)
+			got, err := SearchAnnotationFromNodeAndThenPodOrController(context.Background(), fakeIndexer, nil, store, func(s string) (string, error) { return s, nil }, testKey, tt.node, true, true)
 			if tt.wantErr != (err != nil) {
 				fmt.Printf("%sGetAnnotationFromNodeAndThenPodOrController() ERR: %#v", tt.name, err)
 				t.Failed()
@@ -561,7 +562,7 @@ func TestMetadataSearch_WithAnnotationPrefix(t *testing.T) {
 				t.Fatalf("can't create fakeIndexer: %#v", err)
 			}
 
-			got, err := NewSearch(context.Background(), fakeIndexer, store, func(s string) (string, error) { return s, nil }, tt.Node, tt.KeyPrefix, false, false, GetPrefixedAnnotation)
+			got, err := NewSearch(context.Background(), fakeIndexer, nil, store, func(s string) (string, error) { return s, nil }, tt.Node, tt.KeyPrefix, false, false, GetPrefixedAnnotation)
 			if tt.WantErr != (err != nil) {
 				fmt.Printf("%sGetAnnotationFromNodeAndThenPodOrController() ERR: %#v", tt.Name, err)
 				t.Failed()

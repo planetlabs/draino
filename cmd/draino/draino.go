@@ -65,101 +65,6 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-type filtersDefinitions struct {
-	candidatePodFilter kubernetes.PodFilterFunc
-	drainPodFilter     kubernetes.PodFilterFunc
-
-	nodeLabelFilter kubernetes.NodeLabelFilterFunc
-}
-
-func generateFilters(cs *client.Clientset, store kubernetes.RuntimeObjectStore, log *zap.Logger, options *Options) (filtersDefinitions, error) {
-	pf := []kubernetes.PodFilterFunc{kubernetes.MirrorPodFilter}
-	if !options.evictLocalStoragePods {
-		pf = append(pf, kubernetes.LocalStoragePodFilter)
-	}
-
-	apiResources, err := kubernetes.GetAPIResourcesForGVK(cs, options.doNotEvictPodControlledBy, log)
-	if err != nil {
-		return filtersDefinitions{}, fmt.Errorf("failed to get resources for controlby filtering for eviction: %v", err)
-	}
-	if len(apiResources) > 0 {
-		for _, apiResource := range apiResources {
-			if apiResource == nil {
-				log.Info("Filtering pod that are uncontrolled for eviction")
-			} else {
-				log.Info("Filtering pods controlled by apiresource for eviction", zap.Any("apiresource", *apiResource))
-			}
-		}
-		pf = append(pf, kubernetes.NewPodControlledByFilter(apiResources))
-	}
-	systemKnownAnnotations := []string{
-		// https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
-		"cluster-autoscaler.kubernetes.io/safe-to-evict=false",
-	}
-	pf = append(pf, kubernetes.UnprotectedPodFilter(store, false, append(systemKnownAnnotations, options.protectedPodAnnotations...)...))
-
-	// Candidate Filtering
-	podFilterCandidate := []kubernetes.PodFilterFunc{}
-	if !options.candidateLocalStoragePods {
-		podFilterCandidate = append(podFilterCandidate, kubernetes.LocalStoragePodFilter)
-	}
-	apiResourcesPodControllerBy, err := kubernetes.GetAPIResourcesForGVK(cs, options.doNotCandidatePodControlledBy, log)
-	if err != nil {
-		return filtersDefinitions{}, fmt.Errorf("failed to get resources for 'controlledBy' filtering for being candidate: %v", err)
-	}
-	if len(apiResourcesPodControllerBy) > 0 {
-		for _, apiResource := range apiResourcesPodControllerBy {
-			if apiResource == nil {
-				log.Info("Filtering pods that are uncontrolled for being candidate")
-			} else {
-				log.Info("Filtering pods controlled by apiresource for being candidate", zap.Any("apiresource", *apiResource))
-			}
-		}
-		podFilterCandidate = append(podFilterCandidate, kubernetes.NewPodControlledByFilter(apiResourcesPodControllerBy))
-	}
-	podFilterCandidate = append(podFilterCandidate, kubernetes.UnprotectedPodFilter(store, true, options.candidateProtectedPodAnnotations...))
-
-	// To maintain compatibility with draino v1 version we have to exclude pods from STS running on node without local-storage
-	if options.excludeStatefulSetOnNodeWithoutStorage {
-		podFilterCandidate = append(podFilterCandidate, kubernetes.NewPodFiltersNoStatefulSetOnNodeWithoutDisk(store))
-	}
-
-	consolidatedOptInAnnotations := append(options.optInPodAnnotations, options.shortLivedPodAnnotations...)
-	drainerSkipPodFilter := kubernetes.NewPodFiltersIgnoreCompletedPods(
-		kubernetes.NewPodFiltersIgnoreShortLivedPods(
-			kubernetes.NewPodFiltersWithOptInFirst(kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(pf...)),
-			store, options.shortLivedPodAnnotations...))
-
-	podFilteringFunc := kubernetes.NewPodFiltersIgnoreCompletedPods(
-		kubernetes.NewPodFiltersWithOptInFirst(
-			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, consolidatedOptInAnnotations...), kubernetes.NewPodFilters(podFilterCandidate...)))
-
-	// Node filtering
-	if len(options.nodeLabels) > 0 {
-		log.Info("node labels", zap.Any("labels", options.nodeLabels))
-		if options.nodeLabelsExpr != "" {
-			return filtersDefinitions{}, fmt.Errorf("nodeLabels and NodeLabelsExpr cannot both be set")
-		}
-		if ptrStr, err := kubernetes.ConvertLabelsToFilterExpr(options.nodeLabels); err != nil {
-			return filtersDefinitions{}, err
-		} else {
-			options.nodeLabelsExpr = *ptrStr
-		}
-	}
-	log.Debug("label expression", zap.Any("expr", options.nodeLabelsExpr))
-	nodeLabelFilterFunc, err := kubernetes.NewNodeLabelFilter(options.nodeLabelsExpr, log)
-	if err != nil {
-		return filtersDefinitions{}, fmt.Errorf("Failed to parse node label expression: %v", err)
-	}
-
-	return filtersDefinitions{
-		// TODO renmae
-		candidatePodFilter: podFilteringFunc,
-		drainPodFilter:     drainerSkipPodFilter,
-		nodeLabelFilter:    nodeLabelFilterFunc,
-	}, nil
-}
-
 func main() {
 	// Read application flags
 	cfg, fs := controllerruntime.ConfigFromFlags(true, false)
@@ -247,7 +152,21 @@ func main() {
 			NodesStore:                 nodes,
 		}
 
-		filtersDef, err := generateFilters(cs, store, zlog, options)
+		filteringOptions := kubernetes.FilterOptions{
+			DoNotEvictPodControlledBy:              options.doNotEvictPodControlledBy,
+			EvictLocalStoragePods:                  options.evictLocalStoragePods,
+			ProtectedPodAnnotations:                options.protectedPodAnnotations,
+			DoNotCandidatePodControlledBy:          options.doNotCandidatePodControlledBy,
+			CandidateLocalStoragePods:              options.candidateLocalStoragePods,
+			ExcludeStatefulSetOnNodeWithoutStorage: options.excludeStatefulSetOnNodeWithoutStorage,
+			CandidateProtectedPodAnnotations:       options.candidateProtectedPodAnnotations,
+			OptInPodAnnotations:                    options.optInPodAnnotations,
+			ShortLivedPodAnnotations:               options.shortLivedPodAnnotations,
+			NodeLabels:                             options.nodeLabels,
+			NodeLabelsExpr:                         options.nodeLabelsExpr,
+		}
+
+		filtersDef, err := kubernetes.GenerateFilters(cs, store, zlog, filteringOptions)
 		if err != nil {
 			return err
 		}
@@ -258,7 +177,7 @@ func main() {
 			kubernetes.MaxGracePeriod(options.minEvictionTimeout),
 			kubernetes.EvictionHeadroom(options.evictionHeadroom),
 			kubernetes.WithSkipDrain(options.skipDrain),
-			kubernetes.WithPodFilter(filtersDef.drainPodFilter),
+			kubernetes.WithPodFilter(filtersDef.DrainPodFilter),
 			kubernetes.WithStorageClassesAllowingDeletion(options.storageClassesAllowingVolumeDeletion),
 			kubernetes.WithMaxDrainAttemptsBeforeFail(options.maxDrainAttemptsBeforeFail),
 			kubernetes.WithGlobalConfig(globalConfig),
@@ -302,13 +221,13 @@ func main() {
 		}
 
 		pvcProtector := protector.NewPVCProtector(store, zlog, globalConfig.PVCManagementEnableIfNoEvictionUrl)
-		stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{}, filtersDef.drainPodFilter)
+		stabilityPeriodChecker := analyser.NewStabilityPeriodChecker(ctx, logger, mgr.GetClient(), nil, store, indexer, analyser.StabilityPeriodCheckerConfiguration{}, filtersDef.DrainPodFilter)
 		filterFactory, err := filters.NewFactory(
 			filters.WithLogger(mgr.GetLogger()),
 			filters.WithRetryWall(retryWall),
 			filters.WithRuntimeObjectStore(store),
-			filters.WithPodFilterFunc(filtersDef.candidatePodFilter),
-			filters.WithNodeLabelsFilterFunction(filtersDef.nodeLabelFilter),
+			filters.WithPodFilterFunc(filtersDef.CandidatePodFilter),
+			filters.WithNodeLabelsFilterFunction(filtersDef.NodeLabelFilter),
 			filters.WithGlobalConfig(globalConfig),
 			filters.WithStabilityPeriodChecker(stabilityPeriodChecker),
 			filters.WithDrainBuffer(drainBuffer),
@@ -349,7 +268,7 @@ func main() {
 			return err
 		}
 
-		simulationPodFilter := kubernetes.NewPodFilters(filtersDef.drainPodFilter, kubernetes.PodOrControllerHasNoneOfTheAnnotations(store, kubernetes.EvictionAPIURLAnnotationKey))
+		simulationPodFilter := kubernetes.NewPodFilters(filtersDef.DrainPodFilter, kubernetes.PodOrControllerHasNoneOfTheAnnotations(store, kubernetes.EvictionAPIURLAnnotationKey))
 		simulationRateLimiter := limit.NewRateLimiter(clock.RealClock{}, cfg.KubeClientConfig.QPS*options.simulationRateLimitingRatio, int(float32(cfg.KubeClientConfig.Burst)*options.simulationRateLimitingRatio))
 		simulator := drain.NewDrainSimulator(context.Background(), mgr.GetClient(), indexer, simulationPodFilter, eventRecorder, simulationRateLimiter, logger)
 		pdbAnalyser := analyser.NewPDBAnalyser(ctx, mgr.GetLogger(), indexer, clock.RealClock{}, options.podWarmupDelayExtension)
@@ -381,12 +300,12 @@ func main() {
 			return err
 		}
 
-		groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.nodeLabelFilter, store.HasSynced, options.groupRunnerPeriod)
+		groupRegistry := groups.NewGroupRegistry(ctx, mgr.GetClient(), mgr.GetLogger(), eventRecorder, keyGetter, drainRunnerFactory, drainCandidateRunnerFactory, filtersDef.NodeLabelFilter, store.HasSynced, options.groupRunnerPeriod)
 		if err = groupRegistry.SetupWithManager(mgr); err != nil {
 			logger.Error(err, "failed to setup groupRegistry")
 			return err
 		}
-		groupFromPod := groups.NewGroupFromPod(mgr.GetClient(), mgr.GetLogger(), keyGetter, filtersDef.drainPodFilter, store.HasSynced)
+		groupFromPod := groups.NewGroupFromPod(mgr.GetClient(), mgr.GetLogger(), keyGetter, filtersDef.DrainPodFilter, store.HasSynced)
 		if err = groupFromPod.SetupWithManager(mgr); err != nil {
 			logger.Error(err, "failed to setup groupFromPod")
 			return err
@@ -422,10 +341,10 @@ func main() {
 			return errCli
 		}
 
-		scopeObserver := observability.NewScopeObserver(cs, globalConfig, store, options.scopeAnalysisPeriod, filtersDef.candidatePodFilter,
+		scopeObserver := observability.NewScopeObserver(cs, globalConfig, indexer, store, options.scopeAnalysisPeriod, filtersDef,
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.optInPodAnnotations...),
 			kubernetes.PodOrControllerHasAnyOfTheAnnotations(store, options.candidateProtectedPodAnnotations...),
-			filtersDef.nodeLabelFilter, zlog, retryWall, keyGetter, groupRegistry, filterFactory.BuildCandidateFilter())
+			zlog, retryWall, keyGetter, groupRegistry, filterFactory.BuildCandidateFilter())
 
 		if options.resetScopeLabel == true {
 			err = mgr.Add(&RunOnce{fn: func(context.Context) error { scopeObserver.Reset(); return nil }})

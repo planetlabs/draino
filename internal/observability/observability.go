@@ -27,6 +27,7 @@ import (
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
+	"github.com/planetlabs/draino/internal/kubernetes/index"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/metrics"
 )
@@ -116,6 +117,7 @@ func (g *metricsObjectsForObserver) reset() error {
 			kubernetes.TagNodegroupNamePrefix,
 			kubernetes.TagNodegroupNamespace,
 			kubernetes.TagTeam,
+			kubernetes.TagService,
 			kubernetes.TagDrainStatus,
 			kubernetes.TagConditions,
 			kubernetes.TagUserOptInViaPodAnnotation,
@@ -137,7 +139,7 @@ func (g *metricsObjectsForObserver) reset() error {
 		Measure:     g.MeasureCPUsWithNodeOptions,
 		Description: "Number of cpu for each options",
 		Aggregation: view.LastValue(),
-		TagKeys:     []tag.Key{kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam, kubernetes.TagInScope, kubernetes.TagConditions},
+		TagKeys:     []tag.Key{kubernetes.TagNodegroupName, kubernetes.TagNodegroupNamePrefix, kubernetes.TagNodegroupNamespace, kubernetes.TagTeam, kubernetes.TagService, kubernetes.TagInScope, kubernetes.TagConditions},
 	}
 
 	view.Register(g.previousMeasureNodesWithNodeOptions)
@@ -149,6 +151,7 @@ func (g *metricsObjectsForObserver) reset() error {
 // It also exposes a metrics 'draino_in_scope_nodes_total' that count the nodes of a nodegroup that are in scope of a given configuration. The metric is available per condition. A condition named 'any' is virtually defined to groups all the nodes (with or without conditions).
 type DrainoConfigurationObserverImpl struct {
 	kclient            client.Interface
+	podIndexer         index.PodIndexer
 	runtimeObjectStore kubernetes.RuntimeObjectStore
 	analysisPeriod     time.Duration
 
@@ -158,8 +161,7 @@ type DrainoConfigurationObserverImpl struct {
 	nodePatchLimiter     flowcontrol.RateLimiter // client side protection for APIServer
 
 	globalConfig        kubernetes.GlobalConfig
-	nodeFilterFunc      func(obj interface{}) bool
-	podFilterFunc       kubernetes.PodFilterFunc
+	filtersDefinitions  kubernetes.FiltersDefinitions
 	userOptOutPodFilter kubernetes.PodFilterFunc
 	userOptInPodFilter  kubernetes.PodFilterFunc
 	logger              *zap.Logger
@@ -174,7 +176,7 @@ type DrainoConfigurationObserverImpl struct {
 
 var _ DrainoConfigurationObserver = &DrainoConfigurationObserverImpl{}
 
-func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalConfig, runtimeObjectStore kubernetes.RuntimeObjectStore, analysisPeriod time.Duration, podFilterFunc, userOptInPodFilter, userOptOutPodFilter kubernetes.PodFilterFunc, nodeFilterFunc func(obj interface{}) bool, log *zap.Logger, retryWall drain.RetryWall, groupKeyGetter groups.GroupKeyGetter, runnerInfoGetter groups.RunnerInfoGetter, candidateFilter filters.Filter) DrainoConfigurationObserver {
+func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalConfig, podIndexer index.PodIndexer, runtimeObjectStore kubernetes.RuntimeObjectStore, analysisPeriod time.Duration, filterDef kubernetes.FiltersDefinitions, userOptInPodFilter, userOptOutPodFilter kubernetes.PodFilterFunc, log *zap.Logger, retryWall drain.RetryWall, groupKeyGetter groups.GroupKeyGetter, runnerInfoGetter groups.RunnerInfoGetter, candidateFilter filters.Filter) DrainoConfigurationObserver {
 
 	// We are not adding a BucketRateLimiter to that list because the same nodes are going to be appended periodically if the update fails
 	// Failing nodes will already be in the queue with a retry. Added a BucketRL proved to be a problem here is the client side is not able to dequeue
@@ -189,9 +191,9 @@ func NewScopeObserver(client client.Interface, globalConfig kubernetes.GlobalCon
 
 	scopeObserver := &DrainoConfigurationObserverImpl{
 		kclient:              client,
+		podIndexer:           podIndexer,
 		runtimeObjectStore:   runtimeObjectStore,
-		nodeFilterFunc:       nodeFilterFunc,
-		podFilterFunc:        podFilterFunc,
+		filtersDefinitions:   filterDef,
 		userOptOutPodFilter:  userOptOutPodFilter,
 		userOptInPodFilter:   userOptInPodFilter,
 		analysisPeriod:       analysisPeriod,
@@ -303,6 +305,10 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 					node.Annotations = map[string]string{}
 				}
 
+				if nodeTags.Service == "" {
+					nodeTags.Service = s.getServiceTagForNode(node)
+				}
+
 				_, useDefaultRetryMaxAttempt, _ := kubernetes.GetNodeRetryMaxAttempt(node)
 
 				t := inScopeTags{
@@ -367,6 +373,30 @@ func (s *DrainoConfigurationObserverImpl) Run(stop <-chan struct{}) {
 			s.updateAutoCleanupGauges(newMetricsFilterValue)
 		}
 	}
+}
+
+func (s *DrainoConfigurationObserverImpl) getServiceTagForNode(node *v1.Node) (service string) {
+	// we are going to search the service tag
+	// 1- get it on the node level
+	// 2- if not found on the node look at the pods => in that case we will use value just if it returns 1 value
+	// because for nodeless (or shared NG) we don't want tot tag the node metric with multiple services.
+	if searchService, err := kubernetes.SearchMetadataFromNodeAndThenPodOrController(
+		context.Background(),
+		s.podIndexer,
+		s.filtersDefinitions.DrainPodFilter,
+		s.runtimeObjectStore,
+		kubernetes.IndentityStr,
+		"service",
+		node,
+		true, true,
+	); err == nil {
+		services := searchService.ValuesWithoutDupe()
+		if len(services) == 1 {
+			service = services[0]
+		}
+	}
+
+	return
 }
 
 func (s *DrainoConfigurationObserverImpl) ProduceGroupRunnerMetrics() {
@@ -457,6 +487,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 		allTags, _ := tag.New(context.Background(),
 			tag.Upsert(kubernetes.TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(kubernetes.TagNodegroupName, tagsValues.NgName), tag.Upsert(kubernetes.TagNodegroupNamePrefix, kubernetes.GetNodeGroupNamePrefix(tagsValues.NgName)),
 			tag.Upsert(kubernetes.TagTeam, tagsValues.Team),
+			tag.Upsert(kubernetes.TagService, tagsValues.Service),
 			tag.Upsert(kubernetes.TagDrainStatus, tagsValues.DrainStatus),
 			tag.Upsert(kubernetes.TagConditions, tagsValues.Condition),
 			tag.Upsert(kubernetes.TagInScope, strconv.FormatBool(tagsValues.InScope)),
@@ -476,6 +507,7 @@ func (s *DrainoConfigurationObserverImpl) updateGauges(metrics inScopeMetrics, m
 		allTags, _ := tag.New(context.Background(),
 			tag.Upsert(kubernetes.TagNodegroupNamespace, tagsValues.NgNamespace), tag.Upsert(kubernetes.TagNodegroupName, tagsValues.NgName), tag.Upsert(kubernetes.TagNodegroupNamePrefix, kubernetes.GetNodeGroupNamePrefix(tagsValues.NgName)),
 			tag.Upsert(kubernetes.TagTeam, tagsValues.Team),
+			tag.Upsert(kubernetes.TagService, tagsValues.Service),
 			tag.Upsert(kubernetes.TagConditions, tagsValues.Condition),
 			tag.Upsert(kubernetes.TagInScope, strconv.FormatBool(tagsValues.InScope)))
 		stats.Record(allTags, s.metricsObjects.MeasureCPUsWithNodeOptions.M(count))
@@ -558,7 +590,7 @@ func IsNodeNLAEnableByLabel(n *v1.Node) (hasLabel, enabled bool) {
 
 // IsInScope return if the node is in scope of the running configuration. If not it also return the reason for not being in scope.
 func (s *DrainoConfigurationObserverImpl) IsInScope(node *v1.Node) (inScope bool, reasonIfnOtInScope string, err error) {
-	if !s.nodeFilterFunc(node) {
+	if !s.filtersDefinitions.NodeLabelFilter(node) {
 		return false, "labelSelection", nil
 	}
 
@@ -574,7 +606,7 @@ func (s *DrainoConfigurationObserverImpl) IsInScope(node *v1.Node) (inScope bool
 		return false, "", err
 	}
 	for _, p := range pods {
-		passes, reason, err := s.podFilterFunc(*p)
+		passes, reason, err := s.filtersDefinitions.CandidatePodFilter(*p)
 		if err != nil {
 			return false, "", err
 		}

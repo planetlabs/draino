@@ -19,11 +19,11 @@ var (
 		DrainedNodes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "draino_drained_nodes_total",
 			Help: "Number of nodes drained.",
-		}, []string{kubernetes.TagResult.Name(), kubernetes.TagFailureCause.Name(), kubernetes.TagConditions.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name()}),
+		}, []string{kubernetes.TagResult.Name(), kubernetes.TagFailureCause.Name(), kubernetes.TagConditions.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name(), kubernetes.TagService.Name()}),
 		PreProcessorFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "pre_processor_failures",
 			Help: "Number of failures per nodegroup",
-		}, []string{metrics.TagPreProcessor, metrics.TagReason, metrics.TagNodegroupName, metrics.TagNodegroupNamespace, metrics.TagGroupKey}),
+		}, []string{metrics.TagPreProcessor, metrics.TagReason, metrics.TagNodegroupName, metrics.TagNodegroupNamespace, metrics.TagGroupKey, metrics.TagService}),
 	}
 	registerOnce sync.Once
 )
@@ -50,14 +50,14 @@ func CounterDrainedNodes(node *core.Node, result DrainNodesResult, conditions []
 	conditionTypes := append(kubernetes.GetConditionsTypes(conditions), metrics.TagConditionAnyValue)
 
 	for _, c := range conditionTypes {
-		tags := []string{string(result), string(failureReason), c, values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team}
+		tags := []string{string(result), string(failureReason), c, values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team, values.Service}
 		Metrics.DrainedNodes.WithLabelValues(tags...).Add(1)
 	}
 }
 
 func CounterPreProcessorFailures(node *core.Node, preProcName, reason, drainGroup string) {
 	values := kubernetes.GetNodeTagsValues(node)
-	Metrics.PreProcessorFailures.WithLabelValues(preProcName, reason, values.NgName, values.NgNamespace, drainGroup).Add(1)
+	Metrics.PreProcessorFailures.WithLabelValues(preProcName, reason, values.NgName, values.NgNamespace, drainGroup, values.Service).Add(1)
 }
 
 const (
