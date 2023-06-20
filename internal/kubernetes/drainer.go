@@ -782,6 +782,7 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 	}
 	if dryRun {
 		// Make it a dry-run request
+		logger.Info("custom eviction dry run")
 		evictionPayload.DeleteOptions = &meta.DeleteOptions{
 			DryRun: []string{"All"},
 		}
@@ -790,7 +791,7 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 	var client *http.Client
 	urlParsed, err := url2.Parse(url)
 	if err != nil {
-		logger.Info("custom eviction endpoint response error, can't parse URL", zap.Error(err))
+		logger.Info("custom eviction endpoint response error, can't parse URL", "error", err)
 		return nil, EvictionEndpointError{}
 	}
 
@@ -817,11 +818,11 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 		roundTripper = authnclient.NewRoundTripper(roundTripper, authnclient.NewEmissaryTokenGetter(tokenAudience))
 		// Removing this token parameter so that the server don't get it on the URL. The value is now available for the server inside the bearer token
 		urlParsed.Query().Del("token-audience")
-		logger.Info("Using token-audience parameter", zap.String("token-audience", tokenAudience))
+		logger.Info("Using token-audience parameter", "token-audience", tokenAudience)
 	}
 
 	client = &http.Client{Transport: roundTripper, Timeout: 20 * time.Second}
-	logger.Info("calling eviction++", zap.String("url", urlParsed.String()))
+	logger.Info("calling eviction++", "url", urlParsed.String())
 	req, err := http.NewRequest("POST", urlParsed.String(), GetEvictionJsonPayload(evictionPayload))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
@@ -829,7 +830,7 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 	client = httptrace.WrapClient(client)
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Info("custom eviction endpoint response error", zap.Error(err))
+		logger.Info("custom eviction endpoint response error", "error", err)
 		if tokenAudience != "" && strings.Contains(err.Error(), "unable to retrieve token from vault (http status: 400)") {
 			return nil, AudienceNotFoundError{Audience: tokenAudience}
 		}
@@ -839,7 +840,7 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 		return nil, EvictionEndpointError{}
 	}
 	defer resp.Body.Close()
-	logger.Info("custom eviction endpoint response", zap.String("endpoint", url), zap.Int("responseCode", resp.StatusCode))
+	logger.Info("custom eviction endpoint response", "endpoint", url, "responseCode", resp.StatusCode)
 	switch {
 	case resp.StatusCode == http.StatusOK:
 		return resp, nil
@@ -852,14 +853,14 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 	case resp.StatusCode == http.StatusInternalServerError:
 		respContent, _ := ioutil.ReadAll(resp.Body)
 		if maxRetryOn500 > 0 {
-			logger.Info("Custom eviction endpoint returned an error", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+			logger.Info("Custom eviction endpoint returned an error", "code", resp.StatusCode, "body", string(respContent))
 			return resp, apierrors.NewTooManyRequests("retry later following endpoint error", 20)
 		}
-		logger.Info("Too many service error from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+		logger.Info("Too many service error from custom eviction endpoint.", "code", resp.StatusCode, "body", string(respContent))
 		return resp, EvictionEndpointError{StatusCode: resp.StatusCode, AfterSeveralRetries: true}
 	default:
 		respContent, _ := ioutil.ReadAll(resp.Body)
-		logger.Info("Unexpected response code from custom eviction endpoint.", zap.Int("code", resp.StatusCode), zap.String("body", string(respContent)))
+		logger.Info("Unexpected response code from custom eviction endpoint.", "code", resp.StatusCode, "body", string(respContent))
 		return resp, EvictionEndpointError{StatusCode: resp.StatusCode}
 	}
 }
