@@ -782,7 +782,6 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 	}
 	if dryRun {
 		// Make it a dry-run request
-		logger.Info("custom eviction dry run")
 		evictionPayload.DeleteOptions = &meta.DeleteOptions{
 			DryRun: []string{"All"},
 		}
@@ -822,7 +821,7 @@ func CallOperatorAPI(ctx context.Context, logger logr.Logger, url string, pod *c
 	}
 
 	client = &http.Client{Transport: roundTripper, Timeout: 20 * time.Second}
-	logger.Info("calling eviction++", "url", urlParsed.String())
+	logger.Info("calling eviction++", "url", urlParsed.String(), "dryRun", dryRun)
 	req, err := http.NewRequest("POST", urlParsed.String(), GetEvictionJsonPayload(evictionPayload))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
