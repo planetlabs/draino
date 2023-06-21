@@ -171,7 +171,7 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 
 	// if using eviction++ but not opted-in for dry-run, pass simulation early
 	// once all teams are opted-in and dry-run is required, this can be removed
-	if sim.operatorAPIDryRunNotOptedIn(pod) {
+	if !sim.operatorAPIDryRunEnabled(pod) {
 		return true, "", nil
 	}
 
@@ -237,16 +237,15 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 	return sim.simulateWithKubernetesAPI(ctx, pod)
 }
 
-// return true if the pod uses eviction++ and is not opted-in for eviction++ dry-run
+// return false if the pod uses eviction++ and is not opted-in for eviction++ dry-run
 // these pods should pass simulation right away without doing any checks
 // once all teams are opted-in and dry-run is required, this can be removed
-func (sim *drainSimulatorImpl) operatorAPIDryRunNotOptedIn(pod *corev1.Pod) bool {
+func (sim *drainSimulatorImpl) operatorAPIDryRunEnabled(pod *corev1.Pod) bool {
 	if sim.usesOperatorAPI(pod) {
-		if _, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIDryRunSupportedAnnotationKey, pod, sim.runtimeObjectStore); !ok {
-			return true
-		}
+		_, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIDryRunSupportedAnnotationKey, pod, sim.runtimeObjectStore)
+		return !ok
 	}
-	return false
+	return true
 }
 
 func (sim *drainSimulatorImpl) usesOperatorAPI(pod *corev1.Pod) bool {
