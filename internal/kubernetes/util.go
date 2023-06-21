@@ -232,6 +232,20 @@ func GetNodeTagsValues(node *core.Node) NodeTagsValues {
 	}
 }
 
+type PodTagsValues struct {
+	Team, Service string
+}
+
+func GetPodTagsValues(pod *core.Pod) PodTagsValues {
+	team := pod.Labels["team"]
+	service := pod.Labels["service"]
+
+	return PodTagsValues{
+		Team:        team,
+		Service:     service,
+	}
+}
+
 func GetNodeGroupNamePrefix(ngName string) string {
 	return strings.Split(ngName, "-")[0]
 }
