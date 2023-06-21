@@ -251,7 +251,7 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 func (sim *drainSimulatorImpl) operatorAPIDryRunEnabled(pod *corev1.Pod) bool {
 	if sim.usesOperatorAPI(pod) {
 		_, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIDryRunSupportedAnnotationKey, pod, sim.runtimeObjectStore)
-		return !ok
+		return ok
 	}
 	return true
 }
