@@ -177,29 +177,8 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 
 	// if eviction++ is used, skip pdb checks
 	if !sim.usesOperatorAPI(pod) {
-		pdbs, err := sim.pdbIndexer.GetPDBsForPods(ctx, []*corev1.Pod{pod})
-		if err != nil {
-			return false, "", err
-		}
-
-		// If there is more than one PDB associated to the given pod, the eviction will fail for sure due to the APIServer behaviour.
-		podKey := index.GeneratePodIndexKey(pod.GetName(), pod.GetNamespace())
-		if len(pdbs[podKey]) > 1 {
-			reason = fmt.Sprintf("Pod has more than one associated PDB: %s", strings.Join(utils.GetPDBNames(pdbs[podKey]), ";"))
-			sim.writePodCache(pod, false, reason, nil)
-			sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
-			return false, reason, nil
-		}
-
-		// If there is a matching PDB, check if it would allow disruptions
-		if len(pdbs[podKey]) == 1 {
-			pdb := pdbs[podKey][0]
-			if analyser.IsPDBBlockedByPod(ctx, pod, pdb) {
-				reason = fmt.Sprintf("PDB '%s' does not allow any disruptions", pdb.GetName())
-				sim.writePodCache(pod, false, reason, nil)
-				sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
-				return false, reason, nil
-			}
+		if passes, reason, err := sim.checkPDBs(ctx, pod); !passes {
+			return passes, reason, err
 		}
 	}
 
@@ -226,6 +205,35 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 	}
 
 	sim.writePodCache(pod, true, "", nil)
+	return true, "", nil
+}
+
+func (sim *drainSimulatorImpl) checkPDBs(ctx context.Context, pod *corev1.Pod) (bool, string, error) {
+	var reason string
+	pdbs, err := sim.pdbIndexer.GetPDBsForPods(ctx, []*corev1.Pod{pod})
+	if err != nil {
+		return false, "", err
+	}
+
+	// If there is more than one PDB associated to the given pod, the eviction will fail for sure due to the APIServer behaviour.
+	podKey := index.GeneratePodIndexKey(pod.GetName(), pod.GetNamespace())
+	if len(pdbs[podKey]) > 1 {
+		reason = fmt.Sprintf("Pod has more than one associated PDB: %s", strings.Join(utils.GetPDBNames(pdbs[podKey]), ";"))
+		sim.writePodCache(pod, false, reason, nil)
+		sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
+		return false, reason, nil
+	}
+
+	// If there is a matching PDB, check if it would allow disruptions
+	if len(pdbs[podKey]) == 1 {
+		pdb := pdbs[podKey][0]
+		if analyser.IsPDBBlockedByPod(ctx, pod, pdb) {
+			reason = fmt.Sprintf("PDB '%s' does not allow any disruptions", pdb.GetName())
+			sim.writePodCache(pod, false, reason, nil)
+			sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
+			return false, reason, nil
+		}
+	}
 	return true, "", nil
 }
 

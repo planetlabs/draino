@@ -134,7 +134,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 			Reason:      nil,
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
-			Objects:     []runtime.Object{
+			Objects: []runtime.Object{
 				createEvictionPPPod(createPodOpts{Name: "foo-pod", Labels: testLabels, NodeName: "foo-node"}, false),
 				createPDB(createPDBOpts{Name: "foo-pdb", Labels: testLabels, Des: 2, Healthy: 1}),
 			},
@@ -145,7 +145,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 			Reason:      []string{"Cannot drain pod 'default/foo-pod', because: Eviction dry run was not successful: Cannot evict pod 'default/foo-pod': eviction endpoint error"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
-			Objects:     []runtime.Object{
+			Objects: []runtime.Object{
 				createEvictionPPPod(createPodOpts{Name: "foo-pod", Labels: testLabels, NodeName: "foo-node"}, true),
 				createPDB(createPDBOpts{Name: "foo-pdb", Labels: testLabels, Des: 2, Healthy: 1}),
 			},
@@ -176,10 +176,10 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 }
 
 type createPodOpts struct {
-	Name             string
-	NodeName         string
-	Labels           map[string]string
-	IsNotReady       bool
+	Name       string
+	NodeName   string
+	Labels     map[string]string
+	IsNotReady bool
 }
 
 func createEvictionPPPod(opts createPodOpts, evictionPPDryRun bool) *corev1.Pod {
