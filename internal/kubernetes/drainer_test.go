@@ -598,7 +598,7 @@ func TestCallOperatorAPI(t *testing.T) {
 		res.WriteHeader(http.StatusOK)
 		res.Write([]byte("body"))
 	}))
-	defer func() { okServer.Close() }()
+	defer okServer.Close()
 
 	dryRunOkServer := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		var evictionPayload policy.Eviction
@@ -616,13 +616,13 @@ func TestCallOperatorAPI(t *testing.T) {
 
 		res.Write([]byte("body"))
 	}))
-	defer func() { okServer.Close() }()
+	defer dryRunOkServer.Close()
 
 	internalErrorServer := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		res.WriteHeader(http.StatusInternalServerError)
 		res.Write([]byte("body"))
 	}))
-	defer func() { okServer.Close() }()
+	defer internalErrorServer.Close()
 
 	tests := []struct {
 		Name               string
