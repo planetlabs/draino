@@ -23,7 +23,7 @@ var (
 		SimulatedPods: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "draino_simulated_pods_total",
 			Help: "Number of pods simulated",
-		}, []string{kubernetes.TagResult.Name(), kubernetes.TagFailureCause.Name(), kubernetes.TagPodName.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name(), kubernetes.TagService.Name(), kubernetes.TagUserEvictionURL.Name()}),
+		}, []string{kubernetes.TagResult.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name(), kubernetes.TagService.Name(), kubernetes.TagUserEvictionURL.Name()}),
 	}
 	registerOnce sync.Once
 )
@@ -52,7 +52,7 @@ func CounterSimulatedNodes(node *core.Node, result SimulationResult) {
 	Metrics.SimulatedNodes.WithLabelValues(tags...).Add(1)
 }
 
-func CounterSimulatedPods(pod *core.Pod, node *core.Node, result SimulationResult, failureReason string, evictionURL bool) {
+func CounterSimulatedPods(pod *core.Pod, node *core.Node, result SimulationResult, evictionURL bool) {
 	podValues := kubernetes.GetPodTagsValues(pod)
 	nodeValues := kubernetes.GetNodeTagsValues(node)
 	team := podValues.Team
@@ -64,6 +64,6 @@ func CounterSimulatedPods(pod *core.Pod, node *core.Node, result SimulationResul
 		service = nodeValues.Service
 	}
 
-	tags := []string{string(result), failureReason, pod.GetName(), nodeValues.NgName, kubernetes.GetNodeGroupNamePrefix(nodeValues.NgName), nodeValues.NgNamespace, team, service, strconv.FormatBool(evictionURL)}
+	tags := []string{string(result), nodeValues.NgName, kubernetes.GetNodeGroupNamePrefix(nodeValues.NgName), nodeValues.NgNamespace, team, service, strconv.FormatBool(evictionURL)}
 	Metrics.SimulatedNodes.WithLabelValues(tags...).Add(1)
 }

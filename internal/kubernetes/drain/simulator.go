@@ -129,7 +129,6 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 	}
 
 	for _, pod := range pods {
-		// TODO add suceeded/failed pod drain simulation count metric
 		canEvict, reason, err := sim.SimulatePodDrain(ctx, pod)
 		if !canEvict {
 			reasons = append(reasons, sim.nodeReasonFromPodReason(pod, reason))
@@ -137,10 +136,11 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 				errors = append(errors, err)
 			}
 		}
-		CounterSimulatedPods(pod, node, simResult(canEvict), reason, sim.usesOperatorAPI(pod))
+		CounterSimulatedPods(pod, node, simResult(canEvict), sim.usesOperatorAPI(pod))
 	}
 
-	CounterSimulatedNodes(node, simResult(len(reasons) > 0))
+	// 0 reasons means the simulation succeeded
+	CounterSimulatedNodes(node, simResult(len(reasons) == 0))
 	if len(reasons) > 0 {
 		sim.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventDrainSimulationFailed, "Drain simulation failed: "+strings.Join(reasons, "; "))
 		return false, reasons, errors
