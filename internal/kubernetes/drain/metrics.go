@@ -65,5 +65,5 @@ func CounterSimulatedPods(pod *core.Pod, node *core.Node, result SimulationResul
 	}
 
 	tags := []string{string(result), nodeValues.NgName, kubernetes.GetNodeGroupNamePrefix(nodeValues.NgName), nodeValues.NgNamespace, team, service, strconv.FormatBool(evictionURL)}
-	Metrics.SimulatedNodes.WithLabelValues(tags...).Add(1)
+	Metrics.SimulatedPods.WithLabelValues(tags...).Add(1)
 }

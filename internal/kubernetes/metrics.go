@@ -13,7 +13,6 @@ var (
 	MeasurePreprovisioningLatency  = stats.Float64("draino/nodes_preprovisioning_latency", "Latency to get a node preprovisioned", stats.UnitMilliseconds)
 
 	TagNodeName, _                        = tag.NewKey("node_name")
-	TagPodName, _                         = tag.NewKey("pod_name")
 	TagConditions, _                      = tag.NewKey("conditions")
 	TagTeam, _                            = tag.NewKey("team")
 	TagService, _                         = tag.NewKey("service")
