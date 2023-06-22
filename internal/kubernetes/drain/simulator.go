@@ -137,15 +137,23 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 				errors = append(errors, err)
 			}
 		}
+		CounterSimulatedPods(pod, node, simResult(canEvict), reason, sim.usesOperatorAPI(pod))
 	}
 
-	// TODO add suceeded/failed node drain simulation count metric
+	CounterSimulatedNodes(node, simResult(len(reasons) > 0))
 	if len(reasons) > 0 {
 		sim.eventRecorder.NodeEventf(ctx, node, corev1.EventTypeWarning, eventDrainSimulationFailed, "Drain simulation failed: "+strings.Join(reasons, "; "))
 		return false, reasons, errors
 	}
 
 	return true, nil, errors
+}
+
+func simResult(canDrain bool) SimulationResult {
+	if canDrain {
+		return SimulationSucceeded
+	}
+	return SimulationFailed
 }
 
 func (sim *drainSimulatorImpl) nodeReasonFromPodReason(pod *corev1.Pod, reason string) string {

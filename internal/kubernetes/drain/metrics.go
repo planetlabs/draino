@@ -19,7 +19,7 @@ var (
 		SimulatedNodes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "draino_simulated_nodes_total",
 			Help: "Number of nodes simulated",
-		}, []string{kubernetes.TagResult.Name(), kubernetes.TagFailureCause.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name(), kubernetes.TagService.Name()}),
+		}, []string{kubernetes.TagResult.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name(), kubernetes.TagService.Name()}),
 		SimulatedPods: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "draino_simulated_pods_total",
 			Help: "Number of pods simulated",
@@ -45,14 +45,14 @@ const (
 	SimulationFailed    SimulationResult = "failed"
 )
 
-func CounterSimulatedNodes(node *core.Node, result SimulationResult, failureReason kubernetes.FailureCause, evictionURL bool) {
+func CounterSimulatedNodes(node *core.Node, result SimulationResult) {
 	values := kubernetes.GetNodeTagsValues(node)
 
-	tags := []string{string(result), string(failureReason), values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team, values.Service}
+	tags := []string{string(result), values.NgName, kubernetes.GetNodeGroupNamePrefix(values.NgName), values.NgNamespace, values.Team, values.Service}
 	Metrics.SimulatedNodes.WithLabelValues(tags...).Add(1)
 }
 
-func CounterSimulatedPods(pod *core.Pod, node *core.Node, result SimulationResult, failureReason kubernetes.FailureCause, evictionURL bool) {
+func CounterSimulatedPods(pod *core.Pod, node *core.Node, result SimulationResult, failureReason string, evictionURL bool) {
 	podValues := kubernetes.GetPodTagsValues(pod)
 	nodeValues := kubernetes.GetNodeTagsValues(node)
 	team := podValues.Team
@@ -64,6 +64,6 @@ func CounterSimulatedPods(pod *core.Pod, node *core.Node, result SimulationResul
 		service = nodeValues.Service
 	}
 
-	tags := []string{string(result), string(failureReason), pod.GetName(), nodeValues.NgName, kubernetes.GetNodeGroupNamePrefix(nodeValues.NgName), nodeValues.NgNamespace, team, service, strconv.FormatBool(evictionURL)}
+	tags := []string{string(result), failureReason, pod.GetName(), nodeValues.NgName, kubernetes.GetNodeGroupNamePrefix(nodeValues.NgName), nodeValues.NgNamespace, team, service, strconv.FormatBool(evictionURL)}
 	Metrics.SimulatedNodes.WithLabelValues(tags...).Add(1)
 }
