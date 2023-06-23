@@ -9,6 +9,7 @@ import (
 	core "k8s.io/api/core/v1"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/metrics"
 )
 
 var (
@@ -17,13 +18,13 @@ var (
 		SimulatedPods  *prometheus.CounterVec
 	}{
 		SimulatedNodes: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "draino_simulated_nodes_total",
+			Name: "simulated_nodes_total",
 			Help: "Number of nodes simulated",
-		}, []string{kubernetes.TagResult.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name(), kubernetes.TagService.Name()}),
+		}, []string{metrics.TagResult, metrics.TagNodegroupName, metrics.TagNodegroupNamePrefix, metrics.TagNodegroupNamespace, metrics.TagTeam, metrics.TagService}),
 		SimulatedPods: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "draino_simulated_pods_total",
+			Name: "simulated_pods_total",
 			Help: "Number of pods simulated",
-		}, []string{kubernetes.TagResult.Name(), kubernetes.TagNodegroupName.Name(), kubernetes.TagNodegroupNamePrefix.Name(), kubernetes.TagNodegroupNamespace.Name(), kubernetes.TagTeam.Name(), kubernetes.TagService.Name(), kubernetes.TagUserEvictionURL.Name()}),
+		}, []string{metrics.TagResult, metrics.TagNodegroupName, metrics.TagNodegroupNamePrefix, metrics.TagNodegroupNamespace, metrics.TagTeam, metrics.TagService, metrics.TagUserEvictionURL}),
 	}
 	registerOnce sync.Once
 )
