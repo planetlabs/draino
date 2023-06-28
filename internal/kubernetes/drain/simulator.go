@@ -16,6 +16,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -39,7 +40,7 @@ type DrainSimulator interface {
 	SimulateDrain(context.Context, *corev1.Node) (canEvict bool, reasons []string, err []error)
 	// SimulatePodDrain will simulate a drain of the given pod.
 	// Before calling the API server it will make sure that some of the obvious problems are not given.
-	SimulatePodDrain(context.Context, *corev1.Pod, *corev1.Node) (canEvict bool, reason string, err error)
+	SimulatePodDrain(context.Context, *corev1.Pod) (canEvict bool, reason string, err error)
 }
 
 type drainSimulatorImpl struct {
@@ -129,7 +130,7 @@ func (sim *drainSimulatorImpl) SimulateDrain(ctx context.Context, node *corev1.N
 
 	for _, pod := range pods {
 		// TODO add suceeded/failed pod drain simulation count metric
-		canEvict, reason, err := sim.SimulatePodDrain(ctx, pod, node)
+		canEvict, reason, err := sim.SimulatePodDrain(ctx, pod)
 		if !canEvict {
 			reasons = append(reasons, sim.nodeReasonFromPodReason(pod, reason))
 			if err != nil {
@@ -151,7 +152,7 @@ func (sim *drainSimulatorImpl) nodeReasonFromPodReason(pod *corev1.Pod, reason s
 	return fmt.Sprintf("Cannot drain pod '%s/%s', because: %v", pod.GetNamespace(), pod.GetName(), reason)
 }
 
-func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod, node *corev1.Node) (bool, string, error) {
+func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1.Pod) (bool, string, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "SimulatePodDrain")
 	defer span.Finish()
 
@@ -187,8 +188,12 @@ func (sim *drainSimulatorImpl) SimulatePodDrain(ctx context.Context, pod *corev1
 		return false, "", &k8sclient.ClientSideRateLimit{}
 	}
 
+	var node corev1.Node
+	if err := sim.client.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, &node); err != nil {
+		return false, "node not fouund", err
+	}
 	// do a dry-run eviction call
-	evictionDryRunRes, err := sim.simulateAPIEviction(ctx, pod, node)
+	evictionDryRunRes, err := sim.simulateAPIEviction(ctx, pod, &node)
 	if !evictionDryRunRes {
 		reason = fmt.Sprintf("Eviction dry run was not successful: %v", err)
 		if apierrors.IsForbidden(err) { // This is the admission that is rejecting the drain. The error carry the reason for the rejection
@@ -238,7 +243,7 @@ func (sim *drainSimulatorImpl) checkPDBs(ctx context.Context, pod *corev1.Pod) (
 }
 
 func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *corev1.Pod, node *corev1.Node) (bool, error) {
-	evictionAPIURL, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIURLAnnotationKey, pod, sim.runtimeObjectStore)
+	evictionAPIURL, ok := kubernetes.GetEvictionAPIURL(pod, sim.runtimeObjectStore)
 	if ok {
 		return sim.simulateWithOperatorAPI(ctx, evictionAPIURL, pod, node)
 	}
@@ -257,7 +262,7 @@ func (sim *drainSimulatorImpl) operatorAPIDryRunEnabled(pod *corev1.Pod) bool {
 }
 
 func (sim *drainSimulatorImpl) usesOperatorAPI(pod *corev1.Pod) bool {
-	_, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIURLAnnotationKey, pod, sim.runtimeObjectStore)
+	_, ok := kubernetes.GetEvictionAPIURL(pod, sim.runtimeObjectStore)
 	return ok
 }
 

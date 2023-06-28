@@ -96,8 +96,9 @@ const (
 
 	eventReasonBadValueForAnnotation = "BadValueForAnnotation"
 
-	EvictionAPIURLAnnotationKey             = "draino/eviction-api-url"
-	EvictionAPIDryRunSupportedAnnotationKey = "draino/eviction-api-dry-run-supported"
+	EvictionAPIURLAnnotationKeyDeprecated   = "draino/eviction-api-url"
+	EvictionAPIURLAnnotationKey             = "node-lifecycle.datadoghq.com/eviction-api-url"
+	EvictionAPIDryRunSupportedAnnotationKey = "node-lifecycle.datadoghq.com/eviction-api-dry-run-supported"
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -691,7 +692,7 @@ func (d *APIDrainer) GetPodsToDrain(ctx context.Context, node string, podStore P
 }
 
 func (d *APIDrainer) evict(ctx context.Context, node *core.Node, pod *core.Pod, abort <-chan struct{}) error {
-	evictionAPIURL, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, d.runtimeObjectStore)
+	evictionAPIURL, ok := GetEvictionAPIURL(pod, d.runtimeObjectStore)
 	if ok {
 		return d.evictWithOperatorAPI(ctx, evictionAPIURL, node, pod, abort)
 	}
@@ -883,7 +884,7 @@ func (d *APIDrainer) evictionSequence(ctx context.Context, node *core.Node, pod 
 		case <-abort:
 			return errors.New("pod eviction aborted")
 		case <-ctx.Done():
-			_, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, d.runtimeObjectStore)
+			_, ok := GetEvictionAPIURL(pod, d.runtimeObjectStore)
 			return PodEvictionTimeoutError{isEvictionPP: ok} // this one is typed because we match it to a failure cause
 		default:
 			pvcs, err := d.getInScopePVCs(ctx, pod)

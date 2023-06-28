@@ -763,7 +763,7 @@ func (s *DrainoConfigurationObserverImpl) HasEvictionUrlViaAnnotation(node *v1.N
 		return false
 	}
 	for _, p := range pods {
-		if _, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIURLAnnotationKey, p, s.runtimeObjectStore); ok {
+		if _, ok := kubernetes.GetEvictionAPIURL(p, s.runtimeObjectStore); ok {
 			return true
 		}
 	}
