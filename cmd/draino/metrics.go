@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/planetlabs/draino/internal/drain_runner"
+	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/metrics"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
@@ -74,6 +75,7 @@ func DrainoLegacyMetrics(ctx context.Context, options *Options, logger logr.Logg
 	groups.RegisterMetrics(promOptions.Registry)
 	observability.RegisterNewMetrics(promOptions.Registry, options.scopeAnalysisPeriod)
 	metrics.RegisterMetrics(promOptions.Registry)
+	drain.RegisterMetrics(promOptions.Registry)
 
 	if options.noLegacyNodeHandler {
 		DrainoMetrics(promOptions.Registry)
