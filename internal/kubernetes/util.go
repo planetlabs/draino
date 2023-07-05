@@ -303,6 +303,15 @@ func GetAnnotationFromPodOrController(annotationKey string, pod *core.Pod, store
 	return "", false
 }
 
+func GetEvictionAPIURL(pod *core.Pod, store RuntimeObjectStore) (value string, found bool) {
+	evictionAPIURL, ok := GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKey, pod, store)
+	if !ok {
+		// TODO: this can be removed once the deprecated annotation is no longer used
+		evictionAPIURL, ok = GetAnnotationFromPodOrController(EvictionAPIURLAnnotationKeyDeprecated, pod, store)
+	}
+	return evictionAPIURL, ok
+}
+
 // GetControllerForPod for the moment it handles only statefulSets and deployments controller
 func GetControllerForPod(pod *core.Pod, store RuntimeObjectStore) (ctrl metav1.Object, found bool) {
 	for _, r := range pod.OwnerReferences {

@@ -18,12 +18,16 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	core "k8s.io/api/core/v1"
@@ -584,6 +588,97 @@ func TestMarkDrain(t *testing.T) {
 						}
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestCallOperatorAPI(t *testing.T) {
+	okServer := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		res.WriteHeader(http.StatusOK)
+		res.Write([]byte("body"))
+	}))
+	defer okServer.Close()
+
+	dryRunOkServer := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		var evictionPayload policy.Eviction
+		err := json.NewDecoder(req.Body).Decode(&evictionPayload)
+		if err != nil {
+			res.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if evictionPayload.DeleteOptions != nil && len(evictionPayload.DeleteOptions.DryRun) == 1 && evictionPayload.DeleteOptions.DryRun[0] == "All" {
+			res.WriteHeader(http.StatusOK)
+		} else {
+			res.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		res.Write([]byte("body"))
+	}))
+	defer dryRunOkServer.Close()
+
+	internalErrorServer := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		res.WriteHeader(http.StatusInternalServerError)
+		res.Write([]byte("body"))
+	}))
+	defer internalErrorServer.Close()
+
+	tests := []struct {
+		Name               string
+		EvictionURL        string
+		dryRun             bool
+		maxRetryOn500      int
+		expectedStatusCode int
+		expectedErr        string
+	}{
+		{
+			Name:               "Should return ok with no error",
+			EvictionURL:        okServer.URL,
+			maxRetryOn500:      5,
+			expectedStatusCode: http.StatusOK,
+		},
+		{
+			Name:               "Should return ok with no error if dryRun",
+			EvictionURL:        dryRunOkServer.URL,
+			maxRetryOn500:      5,
+			dryRun:             true,
+			expectedStatusCode: http.StatusOK,
+		},
+		{
+			Name:               "Should return 400 if not dryRun",
+			EvictionURL:        dryRunOkServer.URL,
+			maxRetryOn500:      5,
+			dryRun:             false,
+			expectedStatusCode: http.StatusBadRequest,
+			expectedErr:        "eviction endpoint error",
+		},
+		{
+			Name:               "Should return too many requests error if maxRetryOn500",
+			EvictionURL:        internalErrorServer.URL,
+			maxRetryOn500:      0,
+			dryRun:             false,
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedErr:        "eviction endpoint error: code=500 after several retries",
+		},
+		{
+			Name:               "Should return too many requests if maxRetryOn500",
+			EvictionURL:        internalErrorServer.URL,
+			maxRetryOn500:      5,
+			dryRun:             false,
+			expectedStatusCode: http.StatusInternalServerError,
+			expectedErr:        "retry later following endpoint error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			logger := logr.Discard()
+			resp, err := CallOperatorAPI(context.Background(), logger, tt.EvictionURL, &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "pod"}}, []string{}, tt.dryRun, tt.maxRetryOn500)
+
+			assert.Equal(t, tt.expectedStatusCode, resp.StatusCode)
+			if tt.expectedErr != "" {
+				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
 		})
 	}
