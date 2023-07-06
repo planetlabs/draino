@@ -263,8 +263,10 @@ func (sim *drainSimulatorImpl) simulateAPIEviction(ctx context.Context, pod *cor
 // once all teams are opted-in and dry-run is required, this can be removed
 func (sim *drainSimulatorImpl) operatorAPIDryRunEnabled(pod *corev1.Pod) bool {
 	if sim.usesOperatorAPI(pod) {
-		_, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIDryRunSupportedAnnotationKey, pod, sim.runtimeObjectStore)
-		return ok
+		value, ok := kubernetes.GetAnnotationFromPodOrController(kubernetes.EvictionAPIDryRunSupportedAnnotationKey, pod, sim.runtimeObjectStore)
+		if !ok || strings.ToLower(value) != kubernetes.EvictionAPIDryRunSupportedAnnotationTrue {
+			return false
+		}
 	}
 	return true
 }

@@ -135,7 +135,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
-				createEvictionPPPod(createPodOpts{Name: "foo-pod", Labels: testLabels, NodeName: "foo-node"}, false),
+				createEvictionPPPod(createPodOpts{Name: "foo-pod", Labels: testLabels, NodeName: "foo-node"}, "false"),
 				createPDB(createPDBOpts{Name: "foo-pdb", Labels: testLabels, Des: 2, Healthy: 1}),
 			},
 		},
@@ -146,7 +146,7 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
-				createEvictionPPPod(createPodOpts{Name: "foo-pod", Labels: testLabels, NodeName: "foo-node"}, true),
+				createEvictionPPPod(createPodOpts{Name: "foo-pod", Labels: testLabels, NodeName: "foo-node"}, "true"),
 				createPDB(createPDBOpts{Name: "foo-pdb", Labels: testLabels, Des: 2, Healthy: 1}),
 			},
 		},
@@ -182,13 +182,13 @@ type createPodOpts struct {
 	IsNotReady bool
 }
 
-func createEvictionPPPod(opts createPodOpts, evictionPPDryRun bool) *corev1.Pod {
+func createEvictionPPPod(opts createPodOpts, evictionPPDryRunValue string) *corev1.Pod {
 	pod := createPod(opts)
 	pod.ObjectMeta.Annotations = map[string]string{
 		kubernetes.EvictionAPIURLAnnotationKey: "test-api",
 	}
-	if evictionPPDryRun {
-		pod.ObjectMeta.Annotations[kubernetes.EvictionAPIDryRunSupportedAnnotationKey] = "true"
+	if evictionPPDryRunValue != "" {
+		pod.ObjectMeta.Annotations[kubernetes.EvictionAPIDryRunSupportedAnnotationKey] = evictionPPDryRunValue
 	}
 	return pod
 }

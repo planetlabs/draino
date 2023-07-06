@@ -99,6 +99,7 @@ const (
 	EvictionAPIURLAnnotationKeyDeprecated   = "draino/eviction-api-url"
 	EvictionAPIURLAnnotationKey             = "node-lifecycle.datadoghq.com/eviction-api-url"
 	EvictionAPIDryRunSupportedAnnotationKey = "node-lifecycle.datadoghq.com/eviction-api-dry-run-supported"
+	EvictionAPIDryRunSupportedAnnotationTrue = "true"
 )
 
 type nodeMutatorFn func(*core.Node)
