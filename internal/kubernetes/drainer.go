@@ -99,6 +99,7 @@ const (
 	EvictionAPIURLAnnotationKeyDeprecated   = "draino/eviction-api-url"
 	EvictionAPIURLAnnotationKey             = "node-lifecycle.datadoghq.com/eviction-api-url"
 	EvictionAPIDryRunSupportedAnnotationKey = "node-lifecycle.datadoghq.com/eviction-api-dry-run-supported"
+	EvictionAPIDryRunSupportedAnnotationTrue = "true"
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -762,7 +763,7 @@ func (d *APIDrainer) evictWithOperatorAPI(ctx context.Context, url string, node 
 			logger := d.l.With(zap.String("node", node.Name)).With(zap.String("pod", pod.Namespace+"/"+pod.Name))
 			resp, err := CallOperatorAPI(ctx, zapr.NewLogger(logger), url, pod, conditions, false, maxRetryOn500)
 			if err != nil {
-				if resp.StatusCode == http.StatusInternalServerError {
+				if resp != nil && resp.StatusCode == http.StatusInternalServerError {
 					maxRetryOn500--
 				}
 				return err
