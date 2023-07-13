@@ -10,6 +10,7 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 
 	"github.com/DataDog/compute-go/logs"
+	"github.com/DataDog/disruption-budget-manager/pkg/pdbmetadata"
 	"github.com/go-logr/logr"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	corev1 "k8s.io/api/core/v1"
@@ -242,6 +243,11 @@ func (sim *drainSimulatorImpl) checkPDBs(ctx context.Context, pod *corev1.Pod) (
 		pdb := pdbs[podKey][0]
 		if analyser.IsPDBBlockedByPod(ctx, pod, pdb) {
 			reason = fmt.Sprintf("PDB '%s' does not allow any disruptions", pdb.GetName())
+			if pdb.Annotations != nil {
+				if budgetCutReason, ok := pdb.Annotations[pdbmetadata.BudgetCutReasonAnnotationKey]; ok {
+					reason = fmt.Sprintf("%s, reason: %s", reason, budgetCutReason)
+				}
+			}
 			sim.writePodCache(pod, false, reason, nil)
 			sim.eventRecorder.PodEventf(ctx, pod, corev1.EventTypeWarning, eventEvictionSimulationFailed, reason)
 			return false, reason, nil
