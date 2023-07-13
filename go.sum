@@ -63,8 +63,8 @@ github.com/DataDog/datadog-go v4.8.3+incompatible h1:fNGaYSuObuQb5nzeTQqowRAd9bp
 github.com/DataDog/datadog-go v4.8.3+incompatible/go.mod h1:LButxg5PwREeZtORoXG3tL4fMGNddJ+vMq1mwgfaqoQ=
 github.com/DataDog/datadog-go/v5 v5.3.0 h1:2q2qjFOb3RwAZNU+ez27ZVDwErJv5/VpbBPprz7Z+s8=
 github.com/DataDog/datadog-go/v5 v5.3.0/go.mod h1:XRDJk1pTc00gm+ZDiBKsjh7oOOtJfYfglVCmFb8C2+Q=
-github.com/DataDog/disruption-budget-manager v1.13.0 h1:FO1hUyT9L+g/HK5P8kNwa+a7Mx3Vq3ubkp4CNoEmux8=
-github.com/DataDog/disruption-budget-manager v1.13.0/go.mod h1:AXRSaNBcq07XAbTa8o1mRsZNUD0zpzEWdL12JXJQOdc=
+github.com/DataDog/disruption-budget-manager v1.14.0 h1:3TmsaXluUvdRSmskjforgd8Wg0vhVbFeKSgJRsIpkd8=
+github.com/DataDog/disruption-budget-manager v1.14.0/go.mod h1:GiuMkVqydo0HfheUpoCM8Ac7csqB3nOhlLYI07bjrOw=
 github.com/DataDog/go-service-authn v1.3.0 h1:RquI91Lno8XyPeVpJ149EgYlyVKjjvAUq2AVIq6pp6c=
 github.com/DataDog/go-service-authn v1.3.0/go.mod h1:FS0lTpaqAyrmnGNXNhWcTFhWtm/tqAiOcpJAbuJjJF4=
 github.com/DataDog/gostackparse v0.5.0/go.mod h1:lTfqcJKqS9KnXQGnyQMCugq3u1FP6UZMfWR0aitKFMM=
