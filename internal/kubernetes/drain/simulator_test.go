@@ -5,6 +5,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/DataDog/disruption-budget-manager/pkg/pdbmetadata"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -85,13 +86,13 @@ func TestSimulator_SimulateDrain(t *testing.T) {
 		{
 			Name:        "Should not drain if PDB is blocked (lockness)",
 			IsDrainable: false,
-			Reason:      []string{"Cannot drain pod 'default/foo-pod1', because: PDB 'foo-pdb' does not allow any disruptions", "Cannot drain pod 'default/foo-pod2', because: PDB 'foo-pdb' does not allow any disruptions"},
+			Reason:      []string{"Cannot drain pod 'default/foo-pod1', because: PDB 'foo-pdb' does not allow any disruptions, reason: lockness[test]", "Cannot drain pod 'default/foo-pod2', because: PDB 'foo-pdb' does not allow any disruptions, reason: lockness[test]"},
 			PodFilter:   noopPodFilter,
 			Node:        corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "foo-node"}},
 			Objects: []runtime.Object{
 				createPod(createPodOpts{Name: "foo-pod1", Labels: testLabels, NodeName: "foo-node"}),
 				createPod(createPodOpts{Name: "foo-pod2", Labels: testLabels, NodeName: "foo-node"}),
-				createPDB(createPDBOpts{Name: "foo-pdb", Labels: testLabels, Des: 2, Healthy: 2}),
+				createPDB(createPDBOpts{Name: "foo-pdb", Labels: testLabels, Annotations: map[string]string{pdbmetadata.BudgetCutReasonAnnotationKey: "lockness[test]"}, Des: 2, Healthy: 2}),
 			},
 		},
 		{
@@ -232,17 +233,19 @@ func createPod(opts createPodOpts) *corev1.Pod {
 }
 
 type createPDBOpts struct {
-	Name    string
-	Labels  map[string]string
-	Des     int32
-	Healthy int32
+	Name        string
+	Labels      map[string]string
+	Annotations map[string]string
+	Des         int32
+	Healthy     int32
 }
 
 func createPDB(opts createPDBOpts) *policyv1.PodDisruptionBudget {
 	return &policyv1.PodDisruptionBudget{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      opts.Name,
-			Namespace: "default",
+			Name:        opts.Name,
+			Namespace:   "default",
+			Annotations: opts.Annotations,
 		},
 		Spec: policyv1.PodDisruptionBudgetSpec{
 			Selector: &metav1.LabelSelector{
