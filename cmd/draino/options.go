@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/pflag"
 
+	circuitbreaker "github.com/planetlabs/draino/internal/circuit_breaker"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
 )
@@ -89,6 +91,11 @@ type Options struct {
 	excludedPodsPerNodeEstimation int
 	logEvents                     bool
 
+	//circuit breaker
+	monitorCircuitBreakerCheckPeriod time.Duration
+	monitorCircuitBreakerMonitorTags map[string]string
+	circuitBreakerRateLimitQPS       float32
+
 	configName          string
 	resetScopeLabel     bool
 	scopeAnalysisPeriod time.Duration
@@ -135,6 +142,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.DurationVar(&opt.eventAggregationPeriod, "event-aggregation-period", 15*time.Minute, "Period for event generation on kubernetes object.")
 	fs.DurationVar(&opt.waitBeforeDraining, "wait-before-draining", 30*time.Second, "Time to wait between moving a node in candidate status and starting the actual drain.")
 	fs.DurationVar(&opt.preActivityDefaultTimeout, "pre-activity-default-timeout", 10*time.Minute, "Default duration to wait, for a pre activity to finish, before aborting the drain. This can be overridden by an annotation.")
+	fs.DurationVar(&opt.monitorCircuitBreakerCheckPeriod, "monitor-check-circuit-breaker-period", 1*time.Minute, "Period for checking the monitors associated with circuit breakers.")
 
 	fs.StringSliceVar(&opt.nodeLabels, "node-label", []string{}, "(Deprecated) Nodes with this label will be eligible for tainting and draining. May be specified multiple times")
 	fs.StringSliceVar(&opt.doNotEvictPodControlledBy, "do-not-evict-pod-controlled-by", []string{"", kubernetes.KindStatefulSet, kubernetes.KindDaemonSet},
@@ -155,6 +163,8 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.StringVar(&opt.drainGroupLabelKey, "drain-group-labels", "", "Comma separated list of label keys to be used to form draining groups. KEY1,KEY2,...")
 	fs.StringVar(&opt.configName, "config-name", "", "Name of the draino configuration")
 
+	fs.StringToStringVar(&opt.monitorCircuitBreakerMonitorTags, "circuit-breaker-monitor-tags", map[string]string{"cluster-autoscaler": "draino-circuit-breaker,cluster-autoscaler"}, "tags on monitors used for circuit breakers based on monitors. The keys are circuit breaker names, and the values are comma-separated lists of tags. Repeat the flag for multiple key-value pairs, i.e., multiple circuit breakers.")
+
 	// We are using some values with json content, so don't use StringSlice: https://github.com/spf13/pflag/issues/370
 	fs.StringArrayVar(&opt.conditions, "node-conditions", nil, "Nodes for which any of these conditions are true will be tainted and drained.")
 
@@ -166,6 +176,7 @@ func optionsFromFlags() (*Options, *pflag.FlagSet) {
 	fs.Float32Var(&opt.drainRateLimitQPS, "drain-rate-limit-qps", kubernetes.DefaultDrainRateLimitQPS, "Maximum number of node drains per seconds per condition")
 	fs.IntVar(&opt.drainRateLimitBurst, "drain-rate-limit-burst", kubernetes.DefaultDrainRateLimitBurst, "Maximum number of parallel drains within a timeframe")
 	fs.Float32Var(&opt.simulationRateLimitingRatio, "drain-sim-rate-limit-ratio", 0.7, "Which ratio of the overall kube client rate limiting should be used by the drain simulation. 1.0 means that it will use the same.")
+	fs.Float32Var(&opt.circuitBreakerRateLimitQPS, "circuit-breaker-rate-limit-qps", circuitbreaker.DefaultRateLimitQPS, "Maximum number of drain attempts when circuit breaker is half-open")
 
 	return &opt, &fs
 }
@@ -225,5 +236,21 @@ func (o *Options) Validate() error {
 		return fmt.Errorf("pod warmup delay extension should be at least 1s")
 	}
 
+	if o.monitorCircuitBreakerCheckPeriod < 30*time.Second {
+		return fmt.Errorf("monitor polling for circuit breaker seems to be too aggressive")
+	}
+	for k, tags := range o.monitorCircuitBreakerMonitorTags {
+		if k == "" {
+			return fmt.Errorf("circuit breaker cannot have an empty name")
+		}
+		if len(tags) == 0 {
+			return fmt.Errorf("circuit breaker (%s) cannot have an empty tag list", k)
+		}
+		for _, t := range strings.Split(tags, ",") {
+			if t == "" {
+				return fmt.Errorf("circuit breaker (%s) cannot have an empty tag", k)
+			}
+		}
+	}
 	return nil
 }

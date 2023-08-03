@@ -273,7 +273,7 @@ func (h *CLICommands) cmdGroupList() error {
 	}
 
 	table := table.NewTable([]string{
-		"Group", "Nodes", "CandidateSlots", "DrainedSlots", "Filtered", "Simulation failed", "Cond. Rate Limited", "Warn", "Last Run Aborted", "Last Candidate Run", "Candidate Duration", "Last Candidate(s)", "Last Candidate(s) At", "Last Candidates Sort", "Drain Duration", "Drain Buffer",
+		"Group", "Nodes", "CandidateSlots", "DrainedSlots", "Filtered", "Simulation failed", "Cond. Rate Limited", "Warn", "Last Run Aborted", "Last Candidate Run", "Candidate Duration", "Last Candidate(s)", "Last Candidate(s) At", "Last Candidates Sort", "Drain Duration", "Drain Buffer", "CircuitBreakers",
 	},
 		func(obj interface{}) []string {
 			item := obj.(groups.RunnerInfo)
@@ -319,6 +319,7 @@ func (h *CLICommands) cmdGroupList() error {
 				h.outputDurationOrTimestamp(candidateDataInfo.LastNodeIteratorTime),
 				fmt.Sprintf("%v", drainDataInfo.ProcessingDuration.String()),
 				h.outputDurationOrTimestamp(drainDataInfo.DrainBufferTill),
+				strconv.FormatBool(candidateDataInfo.CircuitBreakersOk),
 			}
 		})
 

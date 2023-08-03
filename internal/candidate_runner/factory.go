@@ -46,6 +46,7 @@ func (factory *CandidateRunnerFactory) build() *candidateRunner {
 		filter:                    factory.conf.filter,
 		retryWall:                 factory.conf.retryWall,
 		suppliedConditions:        factory.conf.suppliedCondition,
+		circuitBreakers:           factory.conf.circuitBreakers,
 		rateLimiter:               factory.conf.rateLimiter,
 	}
 }

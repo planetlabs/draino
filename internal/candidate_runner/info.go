@@ -7,8 +7,9 @@ import (
 
 	"github.com/planetlabs/draino/internal/groups"
 
-	"github.com/planetlabs/draino/internal/scheduler"
 	v1 "k8s.io/api/core/v1"
+
+	"github.com/planetlabs/draino/internal/scheduler"
 )
 
 const (
@@ -32,6 +33,7 @@ type DataInfo struct {
 	LastRunRateLimited               bool          // Indicates if the last run was stopped because of client side rate limiting
 	CurrentCandidates                []string      // Nodes that are currently in candidate state always: len(CurrentCandidates) <= CandidateSlots
 	CurrentDrained                   []string      // Nodes that are currently in drained state always: len(CurrentDrained) <= DrainedSlots
+	CircuitBreakersOk                bool          // Indecates if circuit breakers are ok
 
 	// private filed that should not go through the serialization
 	lastNodeIterator scheduler.ItemProvider[*v1.Node] // Pointer to the last SortingTreeRepresentation as it was left by the last run.

@@ -24,6 +24,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataDog/compute-go/ddclient"
+	"github.com/DataDog/compute-go/ddclient/monitor"
+	"k8s.io/client-go/util/flowcontrol"
+
+	circuitbreaker "github.com/planetlabs/draino/internal/circuit_breaker"
 	"github.com/planetlabs/draino/internal/diagnostics"
 	"github.com/planetlabs/draino/internal/metrics"
 
@@ -117,7 +122,7 @@ func main() {
 		}
 
 		validationOptions := infraparameters.GetValidateAll()
-		validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject, validationOptions.KubeClusterName = false, false, false, false
+		validationOptions.Datacenter, validationOptions.CloudProvider, validationOptions.CloudProviderProject, validationOptions.KubeClusterName = false, false, false, true
 		if err := cfg.InfraParam.Validate(validationOptions); err != nil {
 			return fmt.Errorf("infra param validation error: %v\n", err)
 		}
@@ -135,6 +140,11 @@ func main() {
 		cs, err2 := GetKubernetesClientSet(&cfg.KubeClientConfig)
 		if err2 != nil {
 			return err2
+		}
+
+		circuitBreakerBasedOnMonitors, errCb := setupCircuitBreakers(ctx, mgr, options, cfg.InfraParam.KubeClusterName)
+		if errCb != nil {
+			return errCb
 		}
 
 		pods := kubernetes.NewPodWatch(ctx, cs)
@@ -294,6 +304,7 @@ func main() {
 			candidate_runner.WithRetryWall(retryWall),
 			candidate_runner.WithRateLimiter(limit.NewTypedRateLimiter(&clock.RealClock{}, kubernetes.GetRateLimitConfiguration(globalConfig.SuppliedConditions), options.drainRateLimitQPS, options.drainRateLimitBurst)),
 			candidate_runner.WithGlobalConfig(globalConfig),
+			candidate_runner.WithCircuitBreaker(circuitBreakerBasedOnMonitors...),
 		)
 		if err != nil {
 			logger.Error(err, "failed to configure the candidate_runner")
@@ -323,6 +334,7 @@ func main() {
 			diagnostics.WithGlobalConfig(globalConfig),
 			diagnostics.WithKeyGetter(keyGetter),
 			diagnostics.WithStabilityPeriodChecker(stabilityPeriodChecker),
+			diagnostics.WithCircuitBreakers(circuitBreakerBasedOnMonitors...),
 		)
 		if err != nil {
 			logger.Error(err, "failed to configure the diagnostics")
@@ -357,6 +369,12 @@ func main() {
 		mgr.Add(&RunOnce{fn: func(ctx context.Context) error {
 			return kubernetes.Await(ctx, nodes, pods, statefulSets, deployments, persistentVolumes, persistentVolumeClaims)
 		}})
+		for _, cb := range circuitBreakerBasedOnMonitors {
+			if err := mgr.Add(cb); err != nil {
+				logger.Error(err, "failed to setup circuit breaker with controller runtime")
+				return err
+			}
+		}
 
 		if err := mgr.Add(globalBlocker); err != nil {
 			logger.Error(err, "failed to setup global blocker with controller runtime")
@@ -385,6 +403,42 @@ func main() {
 	if err != nil {
 		zap.L().Fatal("Program exit on error", zap.Error(err))
 	}
+}
+
+func setupCircuitBreakers(ctx context.Context, mgr manager.Manager, options *Options, kubeClusterName string) (circuitBreakerBasedOnMonitors []circuitbreaker.NamedCircuitBreaker, err error) {
+	ddclient, err := ddclient.NewDefaultClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for cbName, tags := range options.monitorCircuitBreakerMonitorTags {
+		scopeExpression := fmt.Sprintf("kubernetes_cluster:%s OR kube_cluster_name:%s", kubeClusterName, kubeClusterName)
+
+		monitorForCircuitBreaker := monitor.NewGroupsSearch(
+			mgr.GetLogger(),
+			*ddclient,
+			monitor.GroupsSearchOptions{}.
+				WithName(cbName).
+				WithMonitorTags(strings.Split(tags, ",")...).
+				WithRawGroupExpression(scopeExpression).
+				WithSkipMuted(true),
+		)
+
+		cb, errCb := circuitbreaker.NewMonitorBasedCircuitBreaker(
+			cbName,
+			mgr.GetLogger(),
+			options.monitorCircuitBreakerCheckPeriod,
+			monitorForCircuitBreaker,
+			flowcontrol.NewTokenBucketRateLimiter(options.circuitBreakerRateLimitQPS, circuitbreaker.DefaultRateLimitBurst),
+			circuitbreaker.Closed,
+		)
+
+		if errCb != nil {
+			return nil, errCb
+		}
+		circuitBreakerBasedOnMonitors = append(circuitBreakerBasedOnMonitors, cb)
+	}
+	return circuitBreakerBasedOnMonitors, nil
 }
 
 // launchTracerAndProfiler will initialize and run the tracer and the endpoint for the profiler

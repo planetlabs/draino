@@ -34,6 +34,7 @@ func (factory *Factory) build() *Diagnostics {
 		keyGetter:           factory.conf.keyGetter,
 		drainBuffer:         factory.conf.drainBuffer,
 		stabilityPeriod:     factory.conf.stabilityPeriodChecker,
+		circuitBreakers:     factory.conf.circuitBreakers,
 	}
 }
 func (factory *Factory) BuildDiagnostician() Diagnostician {

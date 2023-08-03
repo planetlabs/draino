@@ -10,18 +10,20 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	circuitbreaker "github.com/planetlabs/draino/internal/circuit_breaker"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
 	"github.com/planetlabs/draino/internal/limit"
 	"github.com/planetlabs/draino/internal/scheduler"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -52,6 +54,7 @@ type candidateRunner struct {
 	filter              filters.Filter
 	rateLimiter         limit.TypedRateLimiter
 	suppliedConditions  []kubernetes.SuppliedCondition
+	circuitBreakers     []circuitbreaker.NamedCircuitBreaker
 
 	maxSimultaneousCandidates int
 	maxSimultaneousDrained    int
@@ -140,6 +143,12 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 		nodes = runner.filter.Filter(ctx, nodes)
 		dataInfo.FilteredOutCount = evaluatedCount - len(nodes)
 
+		// The circuit breaker should be call once for the group: in case of half-open it will consume a token
+		// and we do want this token to apply for the entire group and not for each node.
+		// (CA is able to batch scale up/down for a given NG, which is usually mapped to a Group)
+		cbOk := runner.areCircuitBreakersOk()
+		dataInfo.CircuitBreakersOk = cbOk
+
 		// TODO think about adding tracing to the tree iterator/expander
 		var candidatesName []string
 		nodeProvider := runner.GetNodeIterator(nodes)
@@ -175,18 +184,20 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 			candidatesName = append(candidatesName, node.Name)
 
-			if !runner.dryRun {
-				logForNode.Info("Adding drain candidate taint")
-				if _, errTaint := k8sclient.AddNLATaint(ctx, runner.client, node, runner.clock.Now(), k8sclient.TaintDrainCandidate); errTaint != nil {
-					logForNode.Error(errTaint, "Failed to taint node")
-					continue // let's try next node, maybe this one has a problem
+			if cbOk {
+				if !runner.dryRun {
+					logForNode.Info("Adding drain candidate taint")
+					if _, errTaint := k8sclient.AddNLATaint(ctx, runner.client, node, runner.clock.Now(), k8sclient.TaintDrainCandidate); errTaint != nil {
+						logForNode.Error(errTaint, "Failed to taint node")
+						continue // let's try next node, maybe this one has a problem
+					}
+				} else {
+					logForNode.Info("Dry-Run: skip adding drain candidate taint")
 				}
-			} else {
-				logForNode.Info("Dry-Run: skip adding drain candidate taint")
-			}
-			remainCandidateSlot--
-			if remainCandidateSlot <= 0 {
-				break
+				remainCandidateSlot--
+				if remainCandidateSlot <= 0 {
+					break
+				}
 			}
 		}
 		if len(candidatesName) > 0 {
@@ -200,6 +211,20 @@ func (runner *candidateRunner) Run(info *groups.RunnerInfo) error {
 
 	}, runner.runEvery)
 	return nil
+}
+
+func (runner *candidateRunner) areCircuitBreakersOk() bool {
+	for _, cb := range runner.circuitBreakers {
+		switch cb.State() {
+		case circuitbreaker.Open:
+			return false
+		case circuitbreaker.HalfOpen:
+			if !cb.HalfOpenTry() {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // hasConditionRateLimitingCapacity will iterate over all the node's conditions and try to get a token from each rate limiter.

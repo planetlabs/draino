@@ -5,17 +5,20 @@ import (
 	"time"
 
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	circuitbreaker "github.com/planetlabs/draino/internal/circuit_breaker"
 	"github.com/planetlabs/draino/internal/limit"
 
-	"github.com/planetlabs/draino/internal/scheduler"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/planetlabs/draino/internal/scheduler"
+
 	"github.com/go-logr/logr"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/planetlabs/draino/internal/kubernetes"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/index"
-	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // WithOption is used to pass an option to the factory
@@ -34,6 +37,7 @@ type Config struct {
 	filter              filters.Filter
 	rateLimiter         limit.TypedRateLimiter
 	suppliedCondition   []kubernetes.SuppliedCondition
+	circuitBreakers     []circuitbreaker.NamedCircuitBreaker
 
 	// With defaults
 	clock                     clock.Clock
@@ -187,5 +191,11 @@ func WithRateLimiter(limiter limit.TypedRateLimiter) WithOption {
 func WithGlobalConfig(globalConfig kubernetes.GlobalConfig) WithOption {
 	return func(conf *Config) {
 		conf.suppliedCondition = globalConfig.SuppliedConditions
+	}
+}
+
+func WithCircuitBreaker(circuitBreaker ...circuitbreaker.NamedCircuitBreaker) WithOption {
+	return func(conf *Config) {
+		conf.circuitBreakers = append(conf.circuitBreakers, circuitBreaker...)
 	}
 }

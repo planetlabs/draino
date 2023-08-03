@@ -7,6 +7,7 @@ import (
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	circuitbreaker "github.com/planetlabs/draino/internal/circuit_breaker"
 	"github.com/planetlabs/draino/internal/drain_runner"
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/metrics"
@@ -86,4 +87,5 @@ func DrainoLegacyMetrics(ctx context.Context, options *Options, logger logr.Logg
 
 func DrainoMetrics(promExporter prom.Registerer) {
 	drain_runner.RegisterMetrics(promExporter)
+	circuitbreaker.RegisterMetrics(promExporter)
 }

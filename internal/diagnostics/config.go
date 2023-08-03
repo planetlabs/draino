@@ -2,19 +2,23 @@ package diagnostics
 
 import (
 	"errors"
+
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/planetlabs/draino/internal/candidate_runner"
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	circuitbreaker "github.com/planetlabs/draino/internal/circuit_breaker"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes/analyser"
 	"github.com/planetlabs/draino/internal/scheduler"
-	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-logr/logr"
-	"github.com/planetlabs/draino/internal/kubernetes"
-	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/planetlabs/draino/internal/kubernetes/drain"
 )
 
 // WithOption is used to pass an option to the factory
@@ -33,6 +37,7 @@ type Config struct {
 	drainBuffer            drainbuffer.DrainBuffer
 	suppliedCondition      []kubernetes.SuppliedCondition
 	stabilityPeriodChecker analyser.StabilityPeriodChecker
+	circuitBreakers        []circuitbreaker.NamedCircuitBreaker
 
 	// With defaults
 	clock               clock.Clock
@@ -154,5 +159,11 @@ func WithDrainBuffer(drainBuffer drainbuffer.DrainBuffer) WithOption {
 func WithStabilityPeriodChecker(checker analyser.StabilityPeriodChecker) WithOption {
 	return func(conf *Config) {
 		conf.stabilityPeriodChecker = checker
+	}
+}
+
+func WithCircuitBreakers(cb ...circuitbreaker.NamedCircuitBreaker) WithOption {
+	return func(conf *Config) {
+		conf.circuitBreakers = append(conf.circuitBreakers, cb...)
 	}
 }

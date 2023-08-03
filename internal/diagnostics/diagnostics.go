@@ -2,9 +2,17 @@ package diagnostics
 
 import (
 	"context"
+	"time"
+
 	"github.com/go-logr/logr"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/planetlabs/draino/internal/candidate_runner"
 	"github.com/planetlabs/draino/internal/candidate_runner/filters"
+	circuitbreaker "github.com/planetlabs/draino/internal/circuit_breaker"
 	drainbuffer "github.com/planetlabs/draino/internal/drain_buffer"
 	"github.com/planetlabs/draino/internal/groups"
 	"github.com/planetlabs/draino/internal/kubernetes"
@@ -12,11 +20,6 @@ import (
 	"github.com/planetlabs/draino/internal/kubernetes/drain"
 	"github.com/planetlabs/draino/internal/kubernetes/k8sclient"
 	"github.com/planetlabs/draino/internal/kubernetes/utils"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/clock"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
 )
 
 type Diagnostics struct {
@@ -31,6 +34,7 @@ type Diagnostics struct {
 	nodeSorters         candidate_runner.NodeSorters
 	nodeIteratorFactory candidate_runner.NodeIteratorFactory
 	drainSimulator      drain.DrainSimulator
+	circuitBreakers     []circuitbreaker.NamedCircuitBreaker
 
 	keyGetter groups.GroupKeyGetter
 }
@@ -82,6 +86,7 @@ func (diag *Diagnostics) GetNodeDiagnostic(ctx context.Context, nodeName string)
 		DrainSimulation:   dsr,
 		Conditions:        kubernetes.GetNodeOffendingConditions(&node, diag.suppliedConditions),
 		StabilityPeriodOk: diag.stabilityPeriod.StabilityPeriodAcceptsDrain(ctx, &node, diag.clock.Now()),
+		CircuitBreaker:    diag.BuildCircuitBreakerResult(),
 	}
 }
 
@@ -104,6 +109,21 @@ func (diag *Diagnostics) getRetryDiagnostics(node *v1.Node) *RetryDiagnostics {
 	}
 }
 
+func (diag *Diagnostics) BuildCircuitBreakerResult() (result []CircuitBreakerResult) {
+	for _, cb := range diag.circuitBreakers {
+		state := cb.State()
+		if state == circuitbreaker.Closed {
+			continue
+		}
+		r := CircuitBreakerResult{CircuitBreakerState: string(state)}
+		if namedCB, ok := cb.(circuitbreaker.NamedCircuitBreaker); ok {
+			r.Name = namedCB.Name()
+		}
+		result = append(result, r)
+	}
+	return result
+}
+
 type DrainSimulationResult struct {
 	CanDrain bool
 	Reasons  []string      `json:",omitempty"`
@@ -113,6 +133,10 @@ type DrainBufferDiagnostics struct {
 	NextAttemptAfter time.Time `json:",omitempty"`
 	RetryCount       int       `json:",omitempty"`
 	Warning          bool      `json:",omitempty"`
+}
+type CircuitBreakerResult struct {
+	CircuitBreakerState string `json:",omitempty"`
+	Name                string `json:",omitempty"`
 }
 
 type NodeDiagnostics struct {
@@ -130,4 +154,5 @@ type NodeDiagnostics struct {
 	Conditions        []kubernetes.SuppliedCondition            `json:"conditions,omitempty"`
 	DrainSimulation   DrainSimulationResult                     `json:"drainSimulation,omitempty"`
 	StabilityPeriodOk bool                                      `json:"stabilityPeriodOk"`
+	CircuitBreaker    []CircuitBreakerResult                    `json:"circuitBreakers,omitempty"`
 }
