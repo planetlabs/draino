@@ -1,9 +1,13 @@
 package scheduler
 
 import (
+	"context"
 	url2 "net/url"
 	"sort"
 	"strings"
+	"time"
+
+	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
 // ItemProvider is in charge of delivering items
@@ -29,6 +33,7 @@ type SortingTree[T any] interface {
 	// AsDotGraph export the Tree as a digraph in dot format
 	// if url is set the output is a clickable URL to dreampuf.github.io/GraphvizOnline/
 	AsDotGraph(url bool, renderer ItemRenderer[T]) string
+	AsTrace(renderer ItemRenderer[T])
 }
 
 // bucketSlice helps to isolate items in buckets according to the sorting function.
@@ -117,6 +122,47 @@ func (s *sortingTreeImpl[T]) AsDotGraph(url bool, renderer ItemRenderer[T]) stri
 	}
 	t := &url2.URL{Path: g.String(renderer)}
 	return "https://dreampuf.github.io/GraphvizOnline/#" + strings.TrimLeft(t.String(), "./")
+}
+
+func (s *sortingTreeImpl[T]) AsTrace(renderer ItemRenderer[T]) {
+	// TODO: add group name
+	span, ctx := tracer.StartSpanFromContext(context.Background(), "daniel-test")
+	defer span.Finish()
+
+	ch := make(chan struct{})
+	go buildTrace(ctx, s.root, renderer, ch)
+	<-ch
+	// fmt.Println("trace done")
+}
+
+func buildTrace[T any](ctx context.Context, node *node[T], renderer ItemRenderer[T], ch chan struct{}) {
+	// num := rand.Int()
+	defer func() { ch <- struct{}{} }()
+
+	if node.isLeaf() {
+		// fmt.Printf("[%d] leaf: %s\n", num, renderer(node.rawCollection[0]))
+		span, _ := tracer.StartSpanFromContext(ctx, renderer(node.rawCollection[0]))
+		defer span.Finish()
+		time.Sleep(10 * time.Millisecond)
+		return
+	}
+
+	// fmt.Printf("[%d] sorter\n", num)
+	span, _ := tracer.StartSpanFromContext(ctx, "Sorter")
+	defer span.Finish()
+	childChan := make(chan struct{})
+	for _, child := range node.children {
+		// fmt.Printf("[%d] start new\n", num)
+		go buildTrace(ctx, child, renderer, childChan)
+	}
+
+	for range node.children {
+		// fmt.Printf("[%d] wait\n", num)
+		<-childChan
+		// fmt.Printf("[%d] finish\n", num)
+	}
+
+	// fmt.Printf("[%d] sorter done\n", num)
 }
 
 // node of the sortingTreeImpl

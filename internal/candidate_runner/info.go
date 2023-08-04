@@ -77,6 +77,7 @@ func (d *DataInfo) GetLastNodeIteratorGraph(url bool) string {
 		return "no last graph"
 	}
 	g := d.lastNodeIterator.(scheduler.SortingTree[*v1.Node])
+	g.AsTrace(func(n *v1.Node) string { return n.GetName() })
 	return g.AsDotGraph(url, func(n *v1.Node) string { return n.GetName() })
 }
 
