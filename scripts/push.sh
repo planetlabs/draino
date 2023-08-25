@@ -1,6 +1,5 @@
-#!/usr/bin/env bash
-
-set -e
+#!/bin/bash
+set -euo pipefail
 
 VERSION=$(git rev-parse --short HEAD)
 docker push "planetlabs/draino:${VERSION}"

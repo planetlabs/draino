@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
+#!/bin/bash
+set -euo pipefail
 
-set -e
 echo "" >coverage.txt
 
 for d in $(go list ./... | grep -v "vendor/"); do

@@ -15,3 +15,6 @@ draino
 
 # Go vendor directory
 vendor/
+
+# Coverage
+coverage.txt

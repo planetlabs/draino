@@ -17,6 +17,7 @@ and limitations under the License.
 package kubernetes
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -27,20 +28,20 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 )
 
 // Default pod eviction settings.
 const (
-	DefaultMaxGracePeriod   time.Duration = 8 * time.Minute
-	DefaultEvictionOverhead time.Duration = 30 * time.Second
+	DefaultMaxGracePeriod   time.Duration = 1 * time.Minute
+	DefaultEvictionOverhead time.Duration = 10 * time.Minute
 
 	kindDaemonSet   = "DaemonSet"
 	kindStatefulSet = "StatefulSet"
 
 	ConditionDrainedScheduled = "DrainScheduled"
 	DefaultSkipDrain          = false
+	DefaultAllowForceDelete   = false
 )
 
 type nodeMutatorFn func(*core.Node)
@@ -111,6 +112,7 @@ type APICordonDrainer struct {
 	maxGracePeriod   time.Duration
 	evictionHeadroom time.Duration
 	skipDrain        bool
+	allowForceDelete bool
 }
 
 // SuppliedCondition defines the condition will be watched.
@@ -163,6 +165,14 @@ func WithAPICordonDrainerLogger(l *zap.Logger) APICordonDrainerOption {
 	}
 }
 
+// WithAllowForceDelete configures a APICordonDrainer to force delete the pods that are
+// not evicted within the grace period.
+func WithAllowForceDelete(b bool) APICordonDrainerOption {
+	return func(d *APICordonDrainer) {
+		d.allowForceDelete = b
+	}
+}
+
 // NewAPICordonDrainer returns a CordonDrainer that cordons and drains nodes via
 // the Kubernetes API.
 func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *APICordonDrainer {
@@ -173,6 +183,7 @@ func NewAPICordonDrainer(c kubernetes.Interface, ao ...APICordonDrainerOption) *
 		maxGracePeriod:   DefaultMaxGracePeriod,
 		evictionHeadroom: DefaultEvictionOverhead,
 		skipDrain:        DefaultSkipDrain,
+		allowForceDelete: DefaultAllowForceDelete,
 	}
 	for _, o := range ao {
 		o(d)
@@ -186,7 +197,7 @@ func (d *APICordonDrainer) deleteTimeout() time.Duration {
 
 // Cordon the supplied node. Marks it unschedulable for new pods.
 func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error {
-	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
+	fresh, err := d.c.CoreV1().Nodes().Get(context.TODO(), n.GetName(), meta.GetOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "cannot get node %s", n.GetName())
 	}
@@ -197,7 +208,7 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 	for _, m := range mutators {
 		m(fresh)
 	}
-	if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
+	if _, err := d.c.CoreV1().Nodes().Update(context.TODO(), fresh, meta.UpdateOptions{}); err != nil {
 		return errors.Wrapf(err, "cannot cordon node %s", fresh.GetName())
 	}
 	return nil
@@ -205,7 +216,7 @@ func (d *APICordonDrainer) Cordon(n *core.Node, mutators ...nodeMutatorFn) error
 
 // Uncordon the supplied node. Marks it schedulable for new pods.
 func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) error {
-	fresh, err := d.c.CoreV1().Nodes().Get(n.GetName(), meta.GetOptions{})
+	fresh, err := d.c.CoreV1().Nodes().Get(context.TODO(), n.GetName(), meta.GetOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "cannot get node %s", n.GetName())
 	}
@@ -216,7 +227,7 @@ func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) err
 	for _, m := range mutators {
 		m(fresh)
 	}
-	if _, err := d.c.CoreV1().Nodes().Update(fresh); err != nil {
+	if _, err := d.c.CoreV1().Nodes().Update(context.TODO(), fresh, meta.UpdateOptions{}); err != nil {
 		return errors.Wrapf(err, "cannot uncordon node %s", fresh.GetName())
 	}
 	return nil
@@ -226,7 +237,7 @@ func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) err
 func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool) error {
 	nodeName := n.Name
 	// Refresh the node object
-	freshNode, err := d.c.CoreV1().Nodes().Get(nodeName, meta.GetOptions{})
+	freshNode, err := d.c.CoreV1().Nodes().Get(context.TODO(), nodeName, meta.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return err
@@ -269,7 +280,7 @@ func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, faile
 			},
 		)
 	}
-	if _, err := d.c.CoreV1().Nodes().UpdateStatus(freshNode); err != nil {
+	if _, err := d.c.CoreV1().Nodes().UpdateStatus(context.TODO(), freshNode, meta.UpdateOptions{}); err != nil {
 		return err
 	}
 	return nil
@@ -286,7 +297,7 @@ func IsMarkedForDrain(n *core.Node) bool {
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 func (d *APICordonDrainer) Drain(n *core.Node) error {
-
+	d.l.Info("Draining node", zap.String("node", n.GetName()))
 	// Do nothing if draining is not enabled.
 	if d.skipDrain {
 		d.l.Debug("Skipping drain because draining is disabled")
@@ -319,11 +330,12 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 			return errors.Wrap(errTimeout{}, "timed out waiting for evictions to complete")
 		}
 	}
+	d.l.Info("Node drained", zap.String("node", n.GetName()))
 	return nil
 }
 
 func (d *APICordonDrainer) getPods(node string) ([]core.Pod, error) {
-	l, err := d.c.CoreV1().Pods(meta.NamespaceAll).List(meta.ListOptions{
+	l, err := d.c.CoreV1().Pods(meta.NamespaceAll).List(context.TODO(), meta.ListOptions{
 		FieldSelector: fields.SelectorFromSet(fields.Set{"spec.nodeName": node}).String(),
 	})
 	if err != nil {
@@ -332,11 +344,13 @@ func (d *APICordonDrainer) getPods(node string) ([]core.Pod, error) {
 
 	include := make([]core.Pod, 0, len(l.Items))
 	for _, p := range l.Items {
+		d.l.Debug("Considering pod", zap.String("pod", p.GetName()))
 		passes, err := d.filter(p)
 		if err != nil {
 			return nil, errors.Wrap(err, "cannot filter pods")
 		}
 		if passes {
+			d.l.Debug("Considered pod", zap.String("pod", p.GetName()))
 			include = append(include, p)
 		}
 	}
@@ -348,48 +362,111 @@ func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- err
 	if p.Spec.TerminationGracePeriodSeconds != nil && *p.Spec.TerminationGracePeriodSeconds < gracePeriod {
 		gracePeriod = *p.Spec.TerminationGracePeriodSeconds
 	}
+
+	logFields := []zap.Field{
+		zap.String("pod", p.GetName()),
+		zap.String("namespace", p.GetNamespace()),
+	}
+
 	for {
+		ctx, cancel := context.WithTimeout(context.Background(), d.maxGracePeriod)
+
 		select {
 		case <-abort:
+			cancel()
 			e <- errors.New("pod eviction aborted")
 			return
 		default:
-			err := d.c.CoreV1().Pods(p.GetNamespace()).Evict(&policy.Eviction{
+			d.l.Info("Attempting to evict pod", logFields...)
+			err := d.c.CoreV1().Pods(p.GetNamespace()).Evict(ctx, &policy.Eviction{
 				ObjectMeta:    meta.ObjectMeta{Namespace: p.GetNamespace(), Name: p.GetName()},
 				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
 			})
+			cancel()
 			switch {
-			// The eviction API returns 429 Too Many Requests if a pod
-			// cannot currently be evicted, for example due to a pod
-			// disruption budget.
 			case apierrors.IsTooManyRequests(err):
+				d.l.Info("Too many requests, retrying in 5 seconds", logFields...)
 				time.Sleep(5 * time.Second)
 			case apierrors.IsNotFound(err):
+				d.l.Info("Pod not found, assuming it was deleted", logFields...)
 				e <- nil
 				return
 			case err != nil:
+				d.l.Error("Eviction failed", append(logFields, zap.Error(err))...)
+				if d.allowForceDelete {
+					e <- d.forceDeletePod(p)
+					return
+				}
 				e <- errors.Wrapf(err, "cannot evict pod %s/%s", p.GetNamespace(), p.GetName())
 				return
 			default:
-				e <- errors.Wrapf(d.awaitDeletion(p, d.deleteTimeout()), "cannot confirm pod %s/%s was deleted", p.GetNamespace(), p.GetName())
+				// Await deletion
+				d.l.Info("Eviction succeeded, awaiting pod deletion", logFields...)
+				err := d.awaitDeletion(p, 3*d.maxGracePeriod) // 3x grace period to allow for API latency
+				if err != nil {
+					d.l.Error("Pod deletion failed", append(logFields, zap.Error(err))...)
+					if d.allowForceDelete {
+						e <- d.forceDeletePod(p)
+						return
+					}
+					e <- errors.Wrapf(err, "cannot delete pod %s/%s", p.GetNamespace(), p.GetName())
+				}
+				e <- nil
+				d.l.Info("Pod deleted", logFields...)
 				return
 			}
 		}
 	}
 }
 
-func (d *APICordonDrainer) awaitDeletion(p core.Pod, timeout time.Duration) error {
-	return wait.PollImmediate(1*time.Second, timeout, func() (bool, error) {
-		got, err := d.c.CoreV1().Pods(p.GetNamespace()).Get(p.GetName(), meta.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
-		if err != nil {
-			return false, errors.Wrapf(err, "cannot get pod %s/%s", p.GetNamespace(), p.GetName())
-		}
-		if got.GetUID() != p.GetUID() {
-			return true, nil
-		}
-		return false, nil
+func (d *APICordonDrainer) forceDeletePod(p core.Pod) error {
+	// Set grace period to 0 for immediate deletion
+	gracePeriodForceDelete := int64(0)
+	d.l.Info("Force deleting pod", zap.String("pod", p.GetName()))
+	err := d.c.CoreV1().Pods(p.GetNamespace()).Delete(context.TODO(), p.GetName(), meta.DeleteOptions{
+		GracePeriodSeconds: &gracePeriodForceDelete,
 	})
+
+	switch {
+	case err == nil:
+		// Pod was successfully force deleted
+		d.l.Info("Pod force deleted", zap.String("pod", p.GetName()))
+		return nil
+	case apierrors.IsNotFound(err):
+		// Pod was already deleted by the time we tried to force delete it
+		d.l.Info("Pod not found, assuming it was deleted", zap.String("pod", p.GetName()))
+		return nil
+	default:
+		// Failed to force delete the pod
+		return errors.Wrapf(err, "cannot force delete pod %s/%s", p.GetNamespace(), p.GetName())
+	}
+}
+
+func (d *APICordonDrainer) awaitDeletion(p core.Pod, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return errors.Wrap(errTimeout{}, "timed out waiting for pod to be deleted")
+		case <-ticker.C:
+			got, err := d.c.CoreV1().Pods(p.GetNamespace()).Get(ctx, p.GetName(), meta.GetOptions{}) // Use the ctx here instead of a new context
+			// Check for not found error first
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			// Check for other errors
+			if err != nil {
+				return errors.Wrapf(err, "cannot get pod %s/%s", p.GetNamespace(), p.GetName())
+			}
+			// Check for UID mismatch indicating original pod was deleted and potentially a new one created
+			if got.GetUID() != p.GetUID() {
+				return nil
+			}
+		}
+	}
 }

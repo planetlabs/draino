@@ -72,8 +72,10 @@ func main() {
 		evictStatefulSetPods  = app.Flag("evict-statefulset-pods", "Evict pods that were created by an extant StatefulSet.").Bool()
 		evictLocalStoragePods = app.Flag("evict-emptydir-pods", "Evict pods with local storage, i.e. with emptyDir volumes.").Bool()
 		evictUnreplicatedPods = app.Flag("evict-unreplicated-pods", "Evict pods that were not created by a replication controller.").Bool()
+		allowForceDelete      = app.Flag("allow-force-delete", "Allow force to delete the pods if they do not terminate within the grace period.").Bool()
 
-		protectedPodAnnotations = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		protectedPodAnnotations      = app.Flag("protected-pod-annotation", "Protect pods with this annotation from eviction. May be specified multiple times.").PlaceHolder("KEY[=VALUE]").Strings()
+		ingoreSafeToEvictAnnotations = app.Flag("ignore-safe-to-evict-annotation", "Ignore the cluster-autoscaler.kubernetes.io/safe-to-evict=false annotation.").Bool()
 
 		conditions = app.Arg("node-conditions", "Nodes for which any of these conditions are true will be cordoned and drained.").Required().Strings()
 	)
@@ -154,8 +156,9 @@ func main() {
 	if !*evictStatefulSetPods {
 		pf = append(pf, kubernetes.NewStatefulSetPodFilter(cs))
 	}
-	systemKnownAnnotations := []string{
-		"cluster-autoscaler.kubernetes.io/safe-to-evict=false", // https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-types-of-pods-can-prevent-ca-from-removing-a-node
+	systemKnownAnnotations := []string{}
+	if !*ingoreSafeToEvictAnnotations {
+		systemKnownAnnotations = append(systemKnownAnnotations, "cluster-autoscaler.kubernetes.io/safe-to-evict=false")
 	}
 	pf = append(pf, kubernetes.UnprotectedPodFilter(append(systemKnownAnnotations, *protectedPodAnnotations...)...))
 	var h cache.ResourceEventHandler = kubernetes.NewDrainingResourceEventHandler(
@@ -165,6 +168,7 @@ func main() {
 			kubernetes.WithSkipDrain(*skipDrain),
 			kubernetes.WithPodFilter(kubernetes.NewPodFilters(pf...)),
 			kubernetes.WithAPICordonDrainerLogger(log),
+			kubernetes.WithAllowForceDelete(*allowForceDelete),
 		),
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
@@ -214,7 +218,7 @@ func main() {
 	defer cancel()
 
 	lock, err := resourcelock.New(
-		resourcelock.EndpointsResourceLock,
+		"leases",
 		*namespace,
 		*leaderElectionTokenName,
 		cs.CoreV1(),

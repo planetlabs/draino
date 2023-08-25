@@ -124,7 +124,7 @@ func NewDrainingResourceEventHandler(d CordonDrainer, e record.EventRecorder, ho
 }
 
 // OnAdd cordons and drains the added node.
-func (h *DrainingResourceEventHandler) OnAdd(obj interface{}) {
+func (h *DrainingResourceEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
 	n, ok := obj.(*core.Node)
 	if !ok {
 		return
@@ -134,7 +134,7 @@ func (h *DrainingResourceEventHandler) OnAdd(obj interface{}) {
 
 // OnUpdate cordons and drains the updated node.
 func (h *DrainingResourceEventHandler) OnUpdate(_, newObj interface{}) {
-	h.OnAdd(newObj)
+	h.OnAdd(newObj, false)
 }
 
 // OnDelete does nothing. There's no point cordoning or draining deleted nodes.

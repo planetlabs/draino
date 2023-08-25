@@ -33,8 +33,8 @@ Flags:
       --kubeconfig=KUBECONFIG    Path to kubeconfig file. Leave unset to use in-cluster config.
       --master=MASTER            Address of Kubernetes API server. Leave unset to use in-cluster config.
       --dry-run                  Emit an event without cordoning or draining matching nodes.
-      --max-grace-period=8m0s    Maximum time evicted pods will be given to terminate gracefully.
-      --eviction-headroom=30s    Additional time to wait after a pod's termination grace period for it to have been deleted.
+      --max-grace-period=1m      Maximum time evicted pods will be given to terminate gracefully.
+      --eviction-headroom=10m    Additional time to wait after a pod's termination grace period for it to have been deleted.
       --drain-buffer=10m0s       Minimum time between starting each drain. Nodes are always cordoned immediately.
       --node-label="foo=bar"     (DEPRECATED) Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
       --node-label-expr="metadata.labels.foo == 'bar'"
@@ -48,10 +48,14 @@ Flags:
                                  Leader election retry period.
       --skip-drain               Whether to skip draining nodes after cordoning.
       --evict-daemonset-pods     Evict pods that were created by an extant DaemonSet.
+      --evict-statefulset-pods   Evict pods that were created by an extant StatefulSet.
       --evict-emptydir-pods      Evict pods with local storage, i.e. with emptyDir volumes.
       --evict-unreplicated-pods  Evict pods that were not created by a replication controller.
+      --allow-force-delete       Allow force to delete the pods if they do not terminate within 3x grace period.
       --protected-pod-annotation=KEY[=VALUE] ...
                                  Protect pods with this annotation from eviction. May be specified multiple times.
+      --ignore-safe-to-evict-annotation
+                                 Ignore the "cluster-autoscaler.kubernetes.io/safe-to-evict=false" annotation.
 
 Args:
   <node-conditions>  Nodes for which any of these conditions are true will be cordoned and drained.

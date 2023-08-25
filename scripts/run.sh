@@ -1,2 +1,4 @@
 #!/bin/bash
-./draino --kubeconfig ~/.kube/config  --node-label-expr="metadata['labels']['node-role'] in ['default', 'default', 'default-compute', 'default-memory']" --evict-unreplicated-pods --evict-emptydir-pods --evict-daemonset-pods AMIProblem KernelDeadlock ReadonlyFilesystem OutOfDisk 
+set -euo pipefail
+
+./draino --kubeconfig ~/.kube/config --allow-force-delete --debug --evict-emptydir-pods --evict-statefulset-pods --evict-unreplicated-pods --eviction-headroom=10m --ignore-safe-to-evict-annotation --max-grace-period=1m ContainerRuntimeUnhealthy KernelDeadlock FrequentKubeletRestart
