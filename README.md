@@ -1,4 +1,7 @@
-# draino [![Docker Pulls](https://img.shields.io/docker/pulls/planetlabs/draino.svg)](https://hub.docker.com/r/planetlabs/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/planetlabs/draino) [![Travis](https://img.shields.io/travis/com/planetlabs/draino.svg?maxAge=300)](https://travis-ci.com/planetlabs/draino/) [![Codecov](https://img.shields.io/codecov/c/github/planetlabs/draino.svg?maxAge=3600)](https://codecov.io/gh/planetlabs/draino/)
+# draino [![Docker Pulls](https://img.shields.io/docker/pulls/jessicaxiejw/draino.svg)](https://hub.docker.com/r/jessicaxiejw/draino/) [![Godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/jessicaxiejw/draino) [![Travis](https://img.shields.io/travis/com/jessicaxiejw/draino.svg?maxAge=300)](https://travis-ci.com/jessicaxiejw/draino/) [![Codecov](https://img.shields.io/codecov/c/github/jessicaxiejw/draino.svg?maxAge=3600)](https://codecov.io/gh/jessicaxiejw/draino/)
+
+The original project [planetlabs/draino](https://github.com/planetlabs/draino) is no longer maintained. I am forking it to fix some issues.
+
 Draino automatically drains Kubernetes nodes based on labels and node
 conditions. Nodes that match _all_ of the supplied labels and _any_ of the
 supplied node conditions will be cordoned immediately and drained after a
@@ -21,7 +24,7 @@ Adding Draino to the mix enables autoremediation:
 
 ## Usage
 ```
-$ docker run planetlabs/draino /draino --help
+$ docker run jessicaxiejw/draino /draino --help
 usage: draino [<flags>] <node-conditions>...
 
 Automatically cordons and drains nodes that match the supplied conditions.
@@ -39,7 +42,7 @@ Flags:
       --node-label="foo=bar"     (DEPRECATED) Only nodes with this label will be eligible for cordoning and draining. May be specified multiple times.
       --node-label-expr="metadata.labels.foo == 'bar'"
                                  This is an expr string https://github.com/antonmedv/expr that must return true or false. See `nodefilters_test.go` for examples
-      --namespace="kube-system"  Namespace used to create leader election lock object.	
+      --namespace="kube-system"  Namespace used to create leader election lock object.
       --leader-election-lease-duration=15s
                                  Lease duration for leader election.
       --leader-election-renew-deadline=10s
@@ -88,10 +91,10 @@ Keep the following in mind before deploying Draino:
 
 ## Deployment
 
-Draino is automatically built from master and pushed to the [Docker Hub](https://hub.docker.com/r/planetlabs/draino/).
-Builds are tagged `planetlabs/draino:$(git rev-parse --short HEAD)`.
+Draino is automatically built from master and pushed to the [Docker Hub](https://hub.docker.com/r/jessicaxiejw/draino/).
+Builds are tagged `jessicaxiejw/draino:$(git rev-parse --short HEAD)`.
 
-**Note:** As of September, 2020 we no longer publish `planetlabs/draino:latest`
+**Note:** As of September, 2020 we no longer publish `jessicaxiejw/draino:latest`
 in order to encourage explicit and pinned releases.
 
 An [example Kubernetes deployment manifest](manifest.yml) is provided.
@@ -172,7 +175,7 @@ If the drain had failed the condition line would look like:
 
 ## Retrying drain
 
-In some cases the drain activity may failed because of restrictive Pod Disruption Budget or any other reason external to Draino. The node remains `cordon` and the drain condition 
+In some cases the drain activity may failed because of restrictive Pod Disruption Budget or any other reason external to Draino. The node remains `cordon` and the drain condition
 is marked as `Failed`. If you want to reschedule a drain tentative on that node, add the annotation: `draino/drain-retry: true`. A new drain schedule will be created. Note that the annotation is not modified and will trigger retries in loop in case the drain fails again.
 
 ```
