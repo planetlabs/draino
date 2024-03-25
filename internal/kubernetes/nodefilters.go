@@ -26,7 +26,7 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/antonmedv/expr"
+	"github.com/expr-lang/expr"
 )
 
 // NewNodeLabelFilter returns a filter that returns true if the supplied node satisfies the boolean expression
