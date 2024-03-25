@@ -20,17 +20,3 @@ jobs:
           for d in $(go list ./... | grep -v "vendor/"); do
             go test -race -coverprofile=c $d
           done
-  helm:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Kubeconform
-        run: |
-          mkdir -p "${HOME}/.local/bin"
-          echo "${HOME}/.local/bin" >>"${GITHUB_PATH}"
-          gh --repo=yannh/kubeconform release download "${KUBECONFORM_VERSION}" \
-            --output=- --pattern='kubeconform-linux-amd64.tar.gz' \
-            | tar -zxvf - -C "${HOME}/.local/bin" kubeconform
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
