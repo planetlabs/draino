@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -196,6 +197,7 @@ func main() {
 	var nodeLabelFilter cache.ResourceEventHandler
 	log.Debug("label expression", zap.Any("expr", nodeLabelsExpr))
 
+	fmt.Println("*nodeLabelsExpr: ", *nodeLabelsExpr)
 	nodeLabelFilterFunc, err := kubernetes.NewNodeLabelFilter(nodeLabelsExpr, log)
 	if err != nil {
 		log.Sugar().Fatalf("Failed to parse node label expression: %v", err)

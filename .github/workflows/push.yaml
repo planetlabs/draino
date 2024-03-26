@@ -2,8 +2,8 @@ name: push
 
 on:
   push:
-    branches:
-      - main
+    # branches:
+    #   - main
 
 jobs:
   docker:
@@ -29,4 +29,4 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags: jessicaxiejw/draino:${{ steps.tag.outputs.value }}
+          tags: jessicaxiejw/draino:debug

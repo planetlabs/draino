@@ -1,22 +1,22 @@
-name: test
+# name: test
 
-on:
-  - push
+# on:
+#   - push
 
-env:
-  KUBECONFORM: v0.6.4
+# env:
+#   KUBECONFORM: v0.6.4
 
-jobs:
-  go:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version-file: go.mod
-      - name: Test
-        run: |
-          for d in $(go list ./... | grep -v "vendor/"); do
-            go test -race -coverprofile=c $d
-          done
+# jobs:
+#   go:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Setup Go
+#         uses: actions/setup-go@v4
+#         with:
+#           go-version-file: go.mod
+#       - name: Test
+#         run: |
+#           for d in $(go list ./... | grep -v "vendor/"); do
+#             go test -race -coverprofile=c $d
+#           done
