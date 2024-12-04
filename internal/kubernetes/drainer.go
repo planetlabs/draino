@@ -224,6 +224,12 @@ func (d *APICordonDrainer) Uncordon(n *core.Node, mutators ...nodeMutatorFn) err
 
 // MarkDrain set a condition on the node to mark that that drain is scheduled.
 func (d *APICordonDrainer) MarkDrain(n *core.Node, when, finish time.Time, failed bool) error {
+	// Do nothing if draining is not enabled.
+	if d.skipDrain {
+		d.l.Debug("Skipping drain because draining is disabled")
+		return nil
+	}
+
 	nodeName := n.Name
 	// Refresh the node object
 	freshNode, err := d.c.CoreV1().Nodes().Get(nodeName, meta.GetOptions{})

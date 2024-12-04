@@ -169,7 +169,8 @@ func main() {
 		kubernetes.NewEventRecorder(cs),
 		kubernetes.WithLogger(log),
 		kubernetes.WithDrainBuffer(*drainBuffer),
-		kubernetes.WithConditionsFilter(*conditions))
+		kubernetes.WithConditionsFilter(*conditions),
+		kubernetes.WithSkipDrainEvent(*skipDrain))
 
 	if *dryRun {
 		h = cache.FilteringResourceEventHandler{
@@ -179,7 +180,8 @@ func main() {
 				kubernetes.NewEventRecorder(cs),
 				kubernetes.WithLogger(log),
 				kubernetes.WithDrainBuffer(*drainBuffer),
-				kubernetes.WithConditionsFilter(*conditions)),
+				kubernetes.WithConditionsFilter(*conditions),
+				kubernetes.WithSkipDrainEvent(*skipDrain)),
 		}
 	}
 

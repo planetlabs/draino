@@ -80,10 +80,18 @@ type DrainingResourceEventHandler struct {
 	buffer                time.Duration
 
 	conditions []SuppliedCondition
+	skipDrain  bool
 }
 
 // DrainingResourceEventHandlerOption configures an DrainingResourceEventHandler.
 type DrainingResourceEventHandlerOption func(d *DrainingResourceEventHandler)
+
+// WithSkipDrainEvent configures if should skip drain in handler
+func WithSkipDrainEvent(skipDrain bool) DrainingResourceEventHandlerOption {
+	return func(h *DrainingResourceEventHandler) {
+		h.skipDrain = skipDrain
+	}
+}
 
 // WithLogger configures a DrainingResourceEventHandler to use the supplied
 // logger.
@@ -165,6 +173,10 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	// First cordon the node if it is not yet cordonned
 	if !n.Spec.Unschedulable {
 		h.cordon(n, badConditions)
+	}
+
+	if h.skipDrain {
+		return
 	}
 
 	// Let's ensure that a drain is scheduled
