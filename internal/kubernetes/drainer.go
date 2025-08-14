@@ -41,6 +41,9 @@ const (
 
 	ConditionDrainedScheduled = "DrainScheduled"
 	DefaultSkipDrain          = false
+
+	DefaultQPS   float32 = 5
+	DefaultBurst int     = 10
 )
 
 type nodeMutatorFn func(*core.Node)
