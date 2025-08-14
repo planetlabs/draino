@@ -36,7 +36,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog"
 
-	"github.com/planetlabs/draino/internal/kubernetes"
+	"github.com/suresh-mahawar/draino/internal/kubernetes"
 )
 
 // Default leader election settings.
@@ -55,6 +55,8 @@ func main() {
 		kubecfg          = app.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
 		apiserver        = app.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
 		dryRun           = app.Flag("dry-run", "Emit an event without cordoning or draining matching nodes.").Bool()
+		qps              = app.Flag("qps", "Queries per second for the Kubernetes API.").Default(kubernetes.DefaultQPS.String()).Float32()
+		burst            = app.Flag("burst", "Maximum burst size for the Kubernetes API.").Default(kubernetes.DefaultBurst.String()).Int()
 		maxGracePeriod   = app.Flag("max-grace-period", "Maximum time evicted pods will be given to terminate gracefully.").Default(kubernetes.DefaultMaxGracePeriod.String()).Duration()
 		evictionHeadroom = app.Flag("eviction-headroom", "Additional time to wait after a pod's termination grace period for it to have been deleted.").Default(kubernetes.DefaultEvictionOverhead.String()).Duration()
 		drainBuffer      = app.Flag("drain-buffer", "Minimum time between starting each drain. Nodes are always cordoned immediately.").Default(kubernetes.DefaultDrainBuffer.String()).Duration()
@@ -137,7 +139,8 @@ func main() {
 
 	c, err := kubernetes.BuildConfigFromFlags(*apiserver, *kubecfg)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client configuration")
-
+	c.QPS = qps
+	c.Burst = burst
 	cs, err := client.NewForConfig(c)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")
 
