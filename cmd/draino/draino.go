@@ -140,8 +140,8 @@ func main() {
 	c, err := kubernetes.BuildConfigFromFlags(*apiserver, *kubecfg)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client configuration")
 
-	c.QPS = qps
-	c.Burst = burst
+	c.QPS = *qps
+	c.Burst = *burst
 
 	cs, err := client.NewForConfig(c)
 	kingpin.FatalIfError(err, "cannot create Kubernetes client")

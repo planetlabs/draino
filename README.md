@@ -19,7 +19,7 @@ Adding Draino to the mix enables autoremediation:
    underutilised. It will be eligible for scale down (i.e. termination) by the
    Autoscaler after a configurable period of time.
 
-## Usage 
+## Usage
 ```
 $ docker run planetlabs/draino /draino --help
 usage: draino [<flags>] <node-conditions>...
