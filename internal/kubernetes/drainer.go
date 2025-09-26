@@ -286,6 +286,12 @@ func IsMarkedForDrain(n *core.Node) bool {
 
 // Drain the supplied node. Evicts the node of all but mirror and DaemonSet pods.
 func (d *APICordonDrainer) Drain(n *core.Node) error {
+	IsBloomfilterNode, enabled := IsBloomfilterNode(n, d.l)
+	if IsBloomfilterNode && !enabled && !n.Spec.Unschedulable {
+		if err := d.Cordon(n, nil); err != nil {
+			return fmt.Errorf("cannot cordon node %s before drain: %w", n.GetName(), err)
+		}
+	}
 
 	// Do nothing if draining is not enabled.
 	if d.skipDrain {
@@ -301,7 +307,7 @@ func (d *APICordonDrainer) Drain(n *core.Node) error {
 	abort := make(chan struct{})
 	errs := make(chan error, 1)
 	for _, pod := range pods {
-		go d.evict(pod, abort, errs)
+		go d.evict(pod, abort, errs, IsBloomfilterNode && !enabled)
 	}
 	// This will _eventually_ abort evictions. Evictions may spend up to
 	// d.deleteTimeout() in d.awaitDeletion(), or 5 seconds in backoff before
@@ -343,7 +349,7 @@ func (d *APICordonDrainer) getPods(node string) ([]core.Pod, error) {
 	return include, nil
 }
 
-func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- error) {
+func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- error, isBloomfilterNode bool) {
 	gracePeriod := int64(d.maxGracePeriod.Seconds())
 	if p.Spec.TerminationGracePeriodSeconds != nil && *p.Spec.TerminationGracePeriodSeconds < gracePeriod {
 		gracePeriod = *p.Spec.TerminationGracePeriodSeconds
@@ -354,10 +360,15 @@ func (d *APICordonDrainer) evict(p core.Pod, abort <-chan struct{}, e chan<- err
 			e <- errors.New("pod eviction aborted")
 			return
 		default:
-			err := d.c.CoreV1().Pods(p.GetNamespace()).Evict(&policy.Eviction{
-				ObjectMeta:    meta.ObjectMeta{Namespace: p.GetNamespace(), Name: p.GetName()},
-				DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
-			})
+			var err error
+			if isBloomfilterNode {
+				err = d.c.CoreV1().Pods(p.GetNamespace()).Delete(p.Name, &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod})
+			} else {
+				err = d.c.CoreV1().Pods(p.GetNamespace()).Evict(&policy.Eviction{
+					ObjectMeta:    meta.ObjectMeta{Namespace: p.GetNamespace(), Name: p.GetName()},
+					DeleteOptions: &meta.DeleteOptions{GracePeriodSeconds: &gracePeriod},
+				})
+			}
 			switch {
 			// The eviction API returns 429 Too Many Requests if a pod
 			// cannot currently be evicted, for example due to a pod
