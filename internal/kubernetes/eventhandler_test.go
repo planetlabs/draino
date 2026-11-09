@@ -96,6 +96,7 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 		name       string
 		obj        interface{}
 		conditions []string
+		skipDrain  bool
 		expected   []mockCall
 	}{
 		{
@@ -211,12 +212,66 @@ func TestDrainingResourceEventHandler(t *testing.T) {
 				{name: "Schedule", node: nodeName},
 			},
 		},
+		{
+			name:       "WithBadConditionsSkipDrain",
+			conditions: []string{"KernelPanic"},
+			skipDrain:  true,
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{{
+						Type:   "KernelPanic",
+						Status: core.ConditionTrue,
+					}},
+				},
+			},
+			expected: []mockCall{
+				{name: "Cordon", node: nodeName},
+			},
+		},
+		{
+			name:       "WithBadConditionsAlreadyCordonedSkipDrain",
+			conditions: []string{"KernelPanic"},
+			skipDrain:  true,
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec:       core.NodeSpec{Unschedulable: true},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{{
+						Type:   "KernelPanic",
+						Status: core.ConditionTrue,
+					}},
+				},
+			},
+		},
+		{
+			name:       "NoBadConditionsAlreadyCordonedByDrainoSkipDrain",
+			conditions: []string{"KernelPanic"},
+			skipDrain:  true,
+			obj: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{drainoConditionsAnnotationKey: "KernelPanic=True,0s"},
+				},
+				Spec: core.NodeSpec{Unschedulable: true},
+				Status: core.NodeStatus{
+					Conditions: []core.NodeCondition{{
+						Type:   "KernelPanic",
+						Status: core.ConditionFalse,
+					}},
+				},
+			},
+			expected: []mockCall{
+				{name: "DeleteSchedule", node: nodeName},
+				{name: "Uncordon", node: nodeName},
+			},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cordonDrainer := &mockCordonDrainer{}
-			h := NewDrainingResourceEventHandler(cordonDrainer, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions))
+			h := NewDrainingResourceEventHandler(cordonDrainer, &record.FakeRecorder{}, WithDrainBuffer(0*time.Second), WithConditionsFilter(tc.conditions), WithCordonOnly(tc.skipDrain))
 			h.drainScheduler = cordonDrainer
 			h.OnUpdate(nil, tc.obj)
 

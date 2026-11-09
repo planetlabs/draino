@@ -80,6 +80,9 @@ type DrainingResourceEventHandler struct {
 	buffer                time.Duration
 
 	conditions []SuppliedCondition
+
+	// skipDrain makes the handler cordon nodes without ever scheduling a drain.
+	skipDrain bool
 }
 
 // DrainingResourceEventHandlerOption configures an DrainingResourceEventHandler.
@@ -104,6 +107,14 @@ func WithDrainBuffer(d time.Duration) DrainingResourceEventHandlerOption {
 func WithConditionsFilter(conditions []string) DrainingResourceEventHandlerOption {
 	return func(h *DrainingResourceEventHandler) {
 		h.conditions = ParseConditions(conditions)
+	}
+}
+
+// WithCordonOnly configures the handler to cordon nodes with bad conditions
+// without scheduling (or performing) a drain.
+func WithCordonOnly(skipDrain bool) DrainingResourceEventHandlerOption {
+	return func(h *DrainingResourceEventHandler) {
+		h.skipDrain = skipDrain
 	}
 }
 
@@ -165,6 +176,11 @@ func (h *DrainingResourceEventHandler) HandleNode(n *core.Node) {
 	// First cordon the node if it is not yet cordonned
 	if !n.Spec.Unschedulable {
 		h.cordon(n, badConditions)
+	}
+
+	// Draining is disabled: cordoning is all we do.
+	if h.skipDrain {
+		return
 	}
 
 	// Let's ensure that a drain is scheduled
@@ -269,7 +285,11 @@ func (h *DrainingResourceEventHandler) cordon(n *core.Node, badConditions []Supp
 		h.eventRecorder.Eventf(nr, core.EventTypeWarning, eventReasonCordonFailed, "Cordoning failed: %v", err)
 		return
 	}
-	log.Info("Cordoned")
+	if h.skipDrain {
+		log.Info("Cordoned (drain skipped)")
+	} else {
+		log.Info("Cordoned")
+	}
 	tags, _ = tag.New(tags, tag.Upsert(TagResult, tagResultSucceeded)) // nolint:gosec
 	stats.Record(tags, MeasureNodesCordoned.M(1))
 	h.eventRecorder.Event(nr, core.EventTypeWarning, eventReasonCordonSucceeded, "Cordoned node")
